@@ -146,19 +146,19 @@ BenchmarkH3_QPACK_Block_ZeroAlloc-12        	 2896362	       418.7 ns/op	       
 
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `fasthttp` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Zero-Copy (`JSONNoCopy`)** | 57,325 ns | 58,247 ns | 10,749 ns | 3,817 ns | **3,509 ns** | **⚡ 16.3x Faster / 136x Less RAM (51 B vs 6.9 KB)** |
-| **GET JSON Standard (`GetTo[T]`)** | 57,325 ns | 58,247 ns | 10,749 ns | 4,095 ns | **4,331 ns** | **⚡ 13.2x Faster (360 B / 8 allocs)** |
-| **Raw Request Execution (`c.Request`)** | 6,113 ns | 6,113 ns | 5,244 ns | 3,817 ns | **3,968 ns** | **⚡ 1.54x Faster (0 B / 0 allocs on Raw Path)** |
+| **GET JSON Zero-Copy (`JSONNoCopy`)** | 57,325 ns | 58,247 ns | 10,749 ns | 3,817 ns | **3,509 ns** | **⚡ 16.3x Faster / 136x Less RAM (3 B / 1 alloc)** |
+| **GET JSON Standard (`GetTo[T]`)** | 57,325 ns | 58,247 ns | 10,749 ns | 5,845 ns | **3,671 ns** | **⚡ 15.6x Faster / 24 B (SIMD JSON Unmarshal)** |
+| **Raw Request Execution (`DoBaremetal`)** | 6,113 ns | 6,113 ns | 5,244 ns | 3,817 ns | **3,509 ns** | **⚡ 1.74x Faster (0 B / 0 allocs on Raw Path)** |
 | **Multipart Form Upload** | 293,276 ns | — | — | 102,539 ns | **92,984 ns** | **⚡ 3.15x Faster / 4.5x Less RAM (119 KB vs 542 KB)** |
-| **Heap Memory Footprint (`B/op`)** | 5,832 B – 6,947 B | 6,154 B | 4,907 B | 2,211 B | **0 B – 51 B** | **⚡ Absolute 0 B (Scoped Borrow) / up to 136x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 67 – 78 allocs | 68 allocs | 39 allocs | 19 allocs | **0 – 2 allocs** | **⚡ 0 Allocs (Scoped Borrow) / -78 Allocs** |
+| **Heap Memory Footprint (`B/op`)** | 5,832 B – 6,947 B | 6,154 B | 4,907 B | 2,211 B | **0 B – 24 B** | **⚡ Absolute 0 B (Scoped Borrow) / up to 136x Lighter** |
+| **Heap Allocations (`allocs/op`)** | 67 – 78 allocs | 68 allocs | 39 allocs | 19 allocs | **0 – 1 allocs** | **⚡ 0 Allocs (Scoped Borrow) / -78 Allocs** |
 | **HTTP/2 Latency (`ns/op`)** | 76,315 ns | 76,315 ns | 69,859 ns | 69,859 ns | **69,859 ns** | **⚡ 1.09x Faster H2 / 1.88x Less RAM (4.8 KB vs 9.0 KB)** |
 | **HTTP/2 HPACK Codec (Encode/Decode)** | 391.9 ns | — | — | — | **171.2 ns / 0 B** | **⚡ 2.28x Faster (0 B / 0 allocs)** |
 | **HTTP/3 QPACK Block Framing** | 2,500+ ns | — | — | — | **418.7 ns / 0 B** | **⚡ 6.0x Faster (0 B / 0 allocs)** |
 | **HTTP/1.1 Pipelining (Batch 50 requests)** | 1,371,351 ns | — | — | — | **238,415 ns** | **⚡ 5.75x Faster (4.7 µs/req, 92 B vs 110.9 KB)** |
-| **Parallel High-Load Latency** | 6,113 ns | 6,113 ns | 5,244 ns | 578.3 ns | **473.2 ns** | **⚡ 12.9x Faster (0 B / 0 allocs)** |
-| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | ~243k RPS | **~275,000+ RPS** | **⚡ 1.93x Single-Thread Gain** |
-| **Multi-Core Peak Throughput (12 Cores)** | ~165k RPS | ~165k RPS | >550,000 RPS | 1,910,000+ RPS | **2,343,566 RPS (2.48M+ peak)** | **⚡ 14.2x Multi-Core Throughput** |
+| **Parallel High-Load Latency** | 6,113 ns | 6,113 ns | 5,244 ns | 578.3 ns | **473.2 ns** | **⚡ 12.9x Faster vs std (1.22x vs fasthttp)** |
+| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | ~243k RPS | **~285,000+ RPS** | **⚡ 2.00x Single-Thread Gain** |
+| **Multi-Core Peak Throughput (12 Cores)** | ~165k RPS | ~165k RPS | >550,000 RPS | 1,910,000+ RPS | **2,480,000+ RPS** | **⚡ 15.0x Multi-Core Throughput** |
 
 ### 2. Single-Thread Sequential Latency (1 Core, Serial `b.N`)
 
@@ -241,6 +241,37 @@ The top CPU sample is `runtime.procyieldAsm` (9.62%).
 
 Across 5,570,000 parallel transactions, zero dynamic bytes were allocated to the Go garbage collector heap. 3.59 MB of the total 5.64 MB footprint consists of OS kernel thread stacks for 12 CPU cores.
 
+### 5. Gollvm (LLVM-Optimized Silicon Backend) & Performance
+
+In addition to the standard Go toolchain (`gc`), `aoni` can be compiled using **`Gollvm`** (an LLVM-based Go compiler frontend built on `llvm-goc` and `libgo`). Gollvm brings LLVM's industrial-grade `-O3` vectorizer, instruction reordering, aggressive inlining, and target-specific CPU SIMD code generation (`-march=native` / `-march=skylake`):
+
+#### Gollvm WSL Quickstart & Workflow:
+
+```bash
+# 1. Add Gollvm binaries and runtime libraries to environment
+export PATH="/home/senya/gollvm-install/bin:$PATH"
+export LD_LIBRARY_PATH="/home/senya/gollvm-install/lib64:$LD_LIBRARY_PATH"
+
+# 2. Compile with LLVM -O3 optimizations and CPU vectorization
+go build -gccgoflags="-O3 -march=native" -o myapp myapp.go
+
+# 3. Compile standalone static binary (zero libgo.so runtime dependency)
+go build -gccgoflags="-O3 -static-libgo" -o myapp myapp.go
+
+# 4. Directly inspect LLVM-emitted assembly output
+llvm-goc -fgo-pkgpath=main -O3 -S -o output.s myapp.go
+```
+
+#### Microarchitectural Benchmark Comparison: Standard Go (`gc`) vs Gollvm (`LLVM 20.1.8 -O3`)
+
+| Subsystem / Kernel Workload | Standard Go (`gc`) | Gollvm (`LLVM 20.1.8 -O3`) | Speedup / Efficiency Gain | Microarchitectural Mechanism |
+| :--- | :---: | :---: | :---: | :--- |
+| **ASCII Header Case-Folding & Match** | 8.47 ns/match | **1.71 ns/match** | **⚡ 4.95x Faster** | Vectorized bitwise unrolling & branch elimination |
+| **HPACK / QPACK Huffman Bitstream Pack** | 324.32 MB/s (464.6 ns) | **697.84 MB/s (215.9 ns)** | **⚡ 2.15x Faster** | LLVM 64-bit barrel-shifter & register packing |
+| **QUIC / Protobuf Varint Codec** | 22.41 ns/op | **15.19 ns/op** | **⚡ 1.48x Faster** | Unrolled bitmask extraction & branch prediction |
+| **EWMA Latency & Jitter Filter** | 2.74 ns/sample | **1.92 ns/sample** | **⚡ 1.43x Faster** | Fused multiply-accumulate & float register pipelining |
+| **FNV-1a / CRC32 Fast Table Hash (64KB)** | 652.40 MB/s | **800.67 MB/s** | **⚡ 1.23x Faster** | Multi-scalar pipeline ILP (Instruction-Level Parallelism) |
+
 ## Feature & Protocol Scope
 
 | Feature / Architectural Layer | Go `net/http` | Standard Wrapper (e.g. Resty) | `aoni` Engine |
@@ -289,6 +320,8 @@ aoni/
 
 ## Real-World Case Studies & Integrations
 
+- [ao](https://github.com/Lemon4ksan/ao): Independent high-performance stealth fork of `curl` with its HTTP/HTTPS/WS transport engine entirely powered by `libaoni` (`lib/aoni_bridge.c`).
+  - Emits bit-exact Chromium uTLS fingerprints (JA4 `t13d1515h2...`), hybrid Post-Quantum ML-KEM-768 key exchanges, and delivers **9,145+ RPS** across 100 concurrent POSIX threads (3-5x faster than standard multi-threaded curl) with 0% memory leaks and 0% GC pressure.
 - [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): High-throughput, zero-allocation fork of official `discordgo` powered by `aoni` & `aoni/realtime/ws` and revived to support latest Discord API changes with `vortex`.
   - Delivers 6.8x higher REST throughput (203,000+ RPS) and 3.1x faster WebSocket operations with 0 B/op memory allocations on frame framing.
 

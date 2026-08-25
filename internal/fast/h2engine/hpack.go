@@ -387,6 +387,29 @@ func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 	return n, false
 }
 
+// DecodeAll decodes all header fields from b into dst slice.
+func (hp *HPACK) DecodeAll(dst []*HeaderField, b []byte) ([]*HeaderField, error) {
+	for len(b) > 0 {
+		hf := AcquireHeaderField()
+
+		rem, err := hp.Next(hf, b)
+		if err != nil {
+			ReleaseHeaderField(hf)
+			return dst, err
+		}
+
+		if hf.Empty() {
+			ReleaseHeaderField(hf)
+		} else {
+			dst = append(dst, hf)
+		}
+
+		b = rem
+	}
+
+	return dst, nil
+}
+
 // Next parses the next HPACK-encoded header field from byte stream b (RFC 7541 §3.2 & §6).
 func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
 	for len(b) > 0 {
@@ -585,6 +608,14 @@ var byteStorage = pool.NewPerPStorage(func() *[]byte {
 
 // readInt decodes an unsigned variable-length integer with an N-bit prefix (RFC 7541 §5.1).
 func readInt(n int, b []byte) ([]byte, uint64) {
+	if hasVectorInt {
+		return vectorReadInt(n, b)
+	}
+
+	return readIntFallback(n, b)
+}
+
+func readIntFallback(n int, b []byte) ([]byte, uint64) {
 	if len(b) == 0 {
 		return b, 0
 	}
@@ -616,8 +647,22 @@ func readInt(n int, b []byte) ([]byte, uint64) {
 	return b[i:], nn + uint64(b0)
 }
 
+// AppendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
+func AppendInt(dst []byte, bits uint8, index uint64) []byte {
+	return appendInt(dst, bits, index)
+}
+
+// ReadInt decodes an unsigned variable-length integer from b using an N-bit prefix (RFC 7541 §5.1).
+func ReadInt(n int, b []byte) ([]byte, uint64) {
+	return readInt(n, b)
+}
+
 // appendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
 func appendInt(dst []byte, bits uint8, index uint64) []byte {
+	if hasVectorInt {
+		return vectorAppendInt(dst, bits, index)
+	}
+
 	if len(dst) == 0 {
 		dst = append(dst, 0)
 	}

@@ -13,6 +13,7 @@ profile.cov
 *.dll
 *.so
 *.dylib
+client_example
 
 # Test binary, built with `go test -c`
 *.test

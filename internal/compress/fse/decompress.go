@@ -324,16 +324,20 @@ func (s *Scratch) decompress() error {
 
 	if !s.zeroBits {
 		for br.off >= 8 {
-			br.fillFast()
+			if hasVectorFSE {
+				br.fillFast()
+				br.fillFast()
+				off = vectorDecodeQuad(&s1, &s2, s.decTable, tmp, off)
+			} else {
+				br.fillFast()
+				tmp[off+0] = s1.nextFast()
+				tmp[off+1] = s2.nextFast()
 
-			tmp[off+0] = s1.nextFast()
-			tmp[off+1] = s2.nextFast()
-
-			br.fillFast()
-
-			tmp[off+2] = s1.nextFast()
-			tmp[off+3] = s2.nextFast()
-			off += 4
+				br.fillFast()
+				tmp[off+2] = s1.nextFast()
+				tmp[off+3] = s2.nextFast()
+				off += 4
+			}
 			// When off is 0, we have overflowed and should write.
 			if off == 0 {
 				s.Out = append(s.Out, tmp...)

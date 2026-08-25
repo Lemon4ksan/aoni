@@ -18,7 +18,6 @@ import (
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
-	"github.com/lemon4ksan/foundation/silicon/pool"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -27,12 +26,16 @@ import (
 )
 
 var (
-	responseAdapterStorage = pool.NewPerPStorage(func() *Response {
-		return &Response{}
-	})
-	pooledResponseStorage = pool.NewPerPStorage(func() *PooledResponse {
-		return &PooledResponse{}
-	})
+	responseAdapterPool = sync.Pool{
+		New: func() any {
+			return &Response{}
+		},
+	}
+	pooledResponsePool = sync.Pool{
+		New: func() any {
+			return &PooledResponse{}
+		},
+	}
 )
 
 type fastBodyReadCloser struct {
@@ -103,7 +106,11 @@ func NewResponse(resp *h1engine.Response) *Response {
 		resp = h1engine.AcquireResponse()
 	}
 
-	r := responseAdapterStorage.Get()
+	r, ok := responseAdapterPool.Get().(*Response)
+	if !ok || r == nil {
+		r = &Response{}
+	}
+
 	r.resp = resp
 	r.trailers = nil
 	r.uncompressed = false
@@ -167,6 +174,15 @@ func (f *Response) Headers() map[string][]string {
 	}
 
 	return m
+}
+
+// RawHeaders returns serialized raw HTTP response headers without heap allocations.
+func (f *Response) RawHeaders() []byte {
+	if f == nil || f.resp == nil {
+		return nil
+	}
+
+	return f.resp.Header.Header()
 }
 
 // SetTrailers registers HTTP trailers captured during frame execution.
@@ -441,7 +457,7 @@ func (f *Response) Release() {
 	f.resp = nil
 	f.trailers = nil
 	f.uncompressed = false
-	responseAdapterStorage.Put(f)
+	responseAdapterPool.Put(f)
 }
 
 const maxBodySlurpBytes int64 = 2048
@@ -483,7 +499,11 @@ type PooledResponse struct {
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
 func NewPooledResponse(fastReq *h1engine.Request, fastResp *h1engine.Response) *PooledResponse {
-	pr := pooledResponseStorage.Get()
+	pr, ok := pooledResponsePool.Get().(*PooledResponse)
+	if !ok || pr == nil {
+		pr = &PooledResponse{}
+	}
+
 	pr.resp = fastResp
 	pr.trailers = nil
 	pr.uncompressed = false
@@ -532,7 +552,7 @@ func (r *PooledResponse) Close() error {
 		r.resp = nil
 		r.trailers = nil
 		r.uncompressed = false
-		pooledResponseStorage.Put(r)
+		pooledResponsePool.Put(r)
 	}
 
 	return nil

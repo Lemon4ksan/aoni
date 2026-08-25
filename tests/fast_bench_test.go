@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,13 @@ type fastBenchUser struct {
 	Email string `json:"email"`
 }
 
+var serverBenchBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 4096)
+		return &b
+	},
+}
+
 func setupFastBenchServer() *h1engine.InmemoryListener {
 	ln := h1engine.NewInmemoryListener()
 	respBytes := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 58\r\nConnection: keep-alive\r\n\r\n{\"id\":42,\"name\":\"Benchmark User\",\"email\":\"bench@aoni.dev\"}")
@@ -42,7 +50,10 @@ func setupFastBenchServer() *h1engine.InmemoryListener {
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
-				buf := make([]byte, 1024)
+				bPtr := serverBenchBufPool.Get().(*[]byte)
+				buf := *bPtr
+				defer serverBenchBufPool.Put(bPtr)
+
 				for {
 					n, err := conn.Read(buf)
 					if err != nil || n == 0 {
@@ -454,6 +465,35 @@ func BenchmarkGET_FastClient_Parallel(b *testing.B) {
 			}
 			_ = resp.Close()
 		}
+	})
+}
+
+func BenchmarkGET_RawEngine_Parallel(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	client := &h1engine.Client{
+		Dial: func(_ string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		req := h1engine.AcquireRequest()
+		resp := h1engine.AcquireResponse()
+		req.SetRequestURI("http://inmemory/user")
+
+		for pb.Next() {
+			if err := client.Do(req, resp); err != nil {
+				b.Fatalf("raw engine request failed: %v", err)
+			}
+		}
+
+		h1engine.ReleaseRequest(req)
+		h1engine.ReleaseResponse(resp)
 	})
 }
 
