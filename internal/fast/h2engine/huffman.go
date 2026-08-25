@@ -7,6 +7,14 @@ package h2engine
 // HuffmanEncode compresses src bytes using the canonical static HPACK Huffman code table (RFC 7541 §5.2 & Appendix B)
 // with BCE (Bounds Check Elimination) compiler optimizations.
 func HuffmanEncode(dst, src []byte) []byte {
+	if hasVectorHuffman {
+		return vectorHuffmanEncode(dst, src)
+	}
+
+	return huffmanEncodeFallback(dst, src)
+}
+
+func huffmanEncodeFallback(dst, src []byte) []byte {
 	nSrc := len(src)
 	if nSrc == 0 {
 		return dst
@@ -48,6 +56,10 @@ func HuffmanEncode(dst, src []byte) []byte {
 
 // HuffmanEncodeLength calculates the exact byte length of src when Huffman encoded without allocating.
 func HuffmanEncodeLength(src []byte) int {
+	if hasVectorHuffman {
+		return vectorHuffmanEncodeLength(src)
+	}
+
 	var bits uint64
 	for _, b := range src {
 		bits += uint64(huffmanCodeLen[b])
@@ -58,6 +70,14 @@ func HuffmanEncodeLength(src []byte) int {
 
 // HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst using flat table-driven decoding (RFC 7541 §5.2 & Appendix B).
 func HuffmanDecode(dst, src []byte) []byte {
+	if hasVectorHuffman {
+		return vectorHuffmanDecode(dst, src)
+	}
+
+	return huffmanDecodeFallback(dst, src)
+}
+
+func huffmanDecodeFallback(dst, src []byte) []byte {
 	nSrc := len(src)
 	if nSrc == 0 {
 		return dst
