@@ -624,6 +624,16 @@ func readIntFallback(n int, b []byte) ([]byte, uint64) {
 	return b[i:], nn + uint64(b0)
 }
 
+// AppendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
+func AppendInt(dst []byte, bits uint8, index uint64) []byte {
+	return appendInt(dst, bits, index)
+}
+
+// ReadInt decodes an unsigned variable-length integer from b using an N-bit prefix (RFC 7541 §5.1).
+func ReadInt(n int, b []byte) ([]byte, uint64) {
+	return readInt(n, b)
+}
+
 // appendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
 func appendInt(dst []byte, bits uint8, index uint64) []byte {
 	if hasVectorInt {

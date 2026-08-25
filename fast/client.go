@@ -258,10 +258,12 @@ func (c *Client) Request(
 			return nil, err
 		}
 
-		for i := range c.prepared.PrecomputedDefaultHeaders {
-			h := &c.prepared.PrecomputedDefaultHeaders[i]
-			if len(fastReq.Header.PeekBytes(h.KeyBytes)) == 0 {
-				fastReq.Header.SetBytesKV(h.KeyBytes, h.ValBytes)
+		if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
+			for i := range c.prepared.PrecomputedDefaultHeaders {
+				h := &c.prepared.PrecomputedDefaultHeaders[i]
+				if len(fastReq.Header.PeekBytes(h.KeyBytes)) == 0 {
+					fastReq.Header.SetBytesKV(h.KeyBytes, h.ValBytes)
+				}
 			}
 		}
 

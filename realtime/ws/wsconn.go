@@ -688,6 +688,11 @@ func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, compress 
 	}
 }
 
+// ApplyMask masks payload in-place using the 4-octet masking key (RFC 6455 §5.3).
+func ApplyMask(payload []byte, mask [4]byte) {
+	applyFastMask(payload, mask)
+}
+
 func applyFastMask(payload []byte, mask [4]byte) {
 	if len(payload) == 0 {
 		return

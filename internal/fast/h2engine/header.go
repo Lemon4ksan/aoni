@@ -106,6 +106,32 @@ func (f *FrameHeader) parseValues(header []byte) {
 	f.stream = bytesToUint32(header[5:]) & (1<<31 - 1)
 }
 
+// PackFrameHeader serializes frame header into dst (at least 9 bytes).
+func PackFrameHeader(dst []byte, length int, kind FrameType, flags FrameFlags, stream uint32) {
+	if hasVectorFrame && len(dst) >= defaultFrameSize {
+		vectorPackFrameHeader(dst, length, kind, flags, stream)
+		return
+	}
+
+	uint24ToBytes(dst[:3], uint32(length))
+	dst[3] = byte(kind)
+	dst[4] = byte(flags)
+	uint32ToBytes(dst[5:], stream)
+}
+
+// UnpackFrameHeader deserializes 9-byte frame header from src.
+func UnpackFrameHeader(src []byte) (length int, kind FrameType, flags FrameFlags, stream uint32) {
+	if hasVectorFrame && len(src) >= defaultFrameSize {
+		return vectorUnpackFrameHeader(src)
+	}
+
+	length = int(bytesToUint24(src[:3]))
+	kind = FrameType(src[3])
+	flags = FrameFlags(src[4])
+	stream = bytesToUint32(src[5:]) & (1<<31 - 1)
+	return length, kind, flags, stream
+}
+
 func (f *FrameHeader) parseHeader(header []byte) {
 	if hasVectorFrame && len(header) >= defaultFrameSize {
 		vectorPackFrameHeader(header, f.length, f.kind, f.flags, f.stream)

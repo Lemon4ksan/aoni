@@ -14,12 +14,12 @@ import (
 )
 
 func decompressFastResponse(resp *h1engine.Response) bool {
-	enforceContentLengthTruncation(resp)
-
 	encodingBytes := resp.Header.ContentEncoding()
 	if len(encodingBytes) == 0 {
 		return false
 	}
+
+	enforceContentLengthTruncation(resp)
 
 	body := resp.Body()
 	if len(body) == 0 {

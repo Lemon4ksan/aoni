@@ -9,9 +9,9 @@ package h1engine
 const hasVectorChunk = false
 
 func vectorParseHexUint(src []byte) (int, int, error) {
-	return 0, 0, errEmptyHexNum
+	return parseHexUintFallback(src)
 }
 
 func vectorFormatHexUint(buf *[16]byte, val int) int {
-	return 0
+	return formatHexUintFallback(buf, val)
 }
