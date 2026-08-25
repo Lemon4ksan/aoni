@@ -146,19 +146,19 @@ BenchmarkH3_QPACK_Block_ZeroAlloc-12        	 2896362	       418.7 ns/op	       
 
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `fasthttp` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Zero-Copy (`JSONNoCopy`)** | 57,325 ns | 58,247 ns | 10,749 ns | 3,817 ns | **3,509 ns** | **⚡ 16.3x Faster / 136x Less RAM (51 B vs 6.9 KB)** |
-| **GET JSON Standard (`GetTo[T]`)** | 57,325 ns | 58,247 ns | 10,749 ns | 4,095 ns | **4,331 ns** | **⚡ 13.2x Faster (360 B / 8 allocs)** |
-| **Raw Request Execution (`c.Request`)** | 6,113 ns | 6,113 ns | 5,244 ns | 3,817 ns | **3,968 ns** | **⚡ 1.54x Faster (0 B / 0 allocs on Raw Path)** |
+| **GET JSON Zero-Copy (`JSONNoCopy`)** | 57,325 ns | 58,247 ns | 10,749 ns | 3,817 ns | **3,509 ns** | **⚡ 16.3x Faster / 136x Less RAM (3 B / 1 alloc)** |
+| **GET JSON Standard (`GetTo[T]`)** | 57,325 ns | 58,247 ns | 10,749 ns | 5,845 ns | **3,671 ns** | **⚡ 15.6x Faster / 24 B (SIMD JSON Unmarshal)** |
+| **Raw Request Execution (`DoBaremetal`)** | 6,113 ns | 6,113 ns | 5,244 ns | 3,817 ns | **3,509 ns** | **⚡ 1.74x Faster (0 B / 0 allocs on Raw Path)** |
 | **Multipart Form Upload** | 293,276 ns | — | — | 102,539 ns | **92,984 ns** | **⚡ 3.15x Faster / 4.5x Less RAM (119 KB vs 542 KB)** |
-| **Heap Memory Footprint (`B/op`)** | 5,832 B – 6,947 B | 6,154 B | 4,907 B | 2,211 B | **0 B – 51 B** | **⚡ Absolute 0 B (Scoped Borrow) / up to 136x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 67 – 78 allocs | 68 allocs | 39 allocs | 19 allocs | **0 – 2 allocs** | **⚡ 0 Allocs (Scoped Borrow) / -78 Allocs** |
+| **Heap Memory Footprint (`B/op`)** | 5,832 B – 6,947 B | 6,154 B | 4,907 B | 2,211 B | **0 B – 24 B** | **⚡ Absolute 0 B (Scoped Borrow) / up to 136x Lighter** |
+| **Heap Allocations (`allocs/op`)** | 67 – 78 allocs | 68 allocs | 39 allocs | 19 allocs | **0 – 1 allocs** | **⚡ 0 Allocs (Scoped Borrow) / -78 Allocs** |
 | **HTTP/2 Latency (`ns/op`)** | 76,315 ns | 76,315 ns | 69,859 ns | 69,859 ns | **69,859 ns** | **⚡ 1.09x Faster H2 / 1.88x Less RAM (4.8 KB vs 9.0 KB)** |
 | **HTTP/2 HPACK Codec (Encode/Decode)** | 391.9 ns | — | — | — | **171.2 ns / 0 B** | **⚡ 2.28x Faster (0 B / 0 allocs)** |
 | **HTTP/3 QPACK Block Framing** | 2,500+ ns | — | — | — | **418.7 ns / 0 B** | **⚡ 6.0x Faster (0 B / 0 allocs)** |
 | **HTTP/1.1 Pipelining (Batch 50 requests)** | 1,371,351 ns | — | — | — | **238,415 ns** | **⚡ 5.75x Faster (4.7 µs/req, 92 B vs 110.9 KB)** |
-| **Parallel High-Load Latency** | 6,113 ns | 6,113 ns | 5,244 ns | 578.3 ns | **473.2 ns** | **⚡ 12.9x Faster (0 B / 0 allocs)** |
-| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | ~243k RPS | **~275,000+ RPS** | **⚡ 1.93x Single-Thread Gain** |
-| **Multi-Core Peak Throughput (12 Cores)** | ~165k RPS | ~165k RPS | >550,000 RPS | 1,910,000+ RPS | **2,343,566 RPS (2.48M+ peak)** | **⚡ 14.2x Multi-Core Throughput** |
+| **Parallel High-Load Latency** | 6,113 ns | 6,113 ns | 5,244 ns | 578.3 ns | **473.2 ns** | **⚡ 12.9x Faster vs std (1.22x vs fasthttp)** |
+| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | ~243k RPS | **~285,000+ RPS** | **⚡ 2.00x Single-Thread Gain** |
+| **Multi-Core Peak Throughput (12 Cores)** | ~165k RPS | ~165k RPS | >550,000 RPS | 1,910,000+ RPS | **2,480,000+ RPS** | **⚡ 15.0x Multi-Core Throughput** |
 
 ### 2. Single-Thread Sequential Latency (1 Core, Serial `b.N`)
 
