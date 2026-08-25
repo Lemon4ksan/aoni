@@ -95,6 +95,11 @@ func (f *FrameHeader) Len() int                  { return f.length }
 func (f *FrameHeader) MaxLen() uint32            { return f.maxLen }
 
 func (f *FrameHeader) parseValues(header []byte) {
+	if hasVectorFrame && len(header) >= defaultFrameSize {
+		f.length, f.kind, f.flags, f.stream = vectorUnpackFrameHeader(header)
+		return
+	}
+
 	f.length = int(bytesToUint24(header[:3]))
 	f.kind = FrameType(header[3])   //nolint:gosec
 	f.flags = FrameFlags(header[4]) //nolint:gosec
@@ -102,6 +107,11 @@ func (f *FrameHeader) parseValues(header []byte) {
 }
 
 func (f *FrameHeader) parseHeader(header []byte) {
+	if hasVectorFrame && len(header) >= defaultFrameSize {
+		vectorPackFrameHeader(header, f.length, f.kind, f.flags, f.stream)
+		return
+	}
+
 	uint24ToBytes(header[:3], uint32(f.length)) //nolint:gosec
 	header[3] = byte(f.kind)                    //nolint:gosec
 	header[4] = byte(f.flags)                   //nolint:gosec
