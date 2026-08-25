@@ -10,6 +10,7 @@ import (
 
 func BenchmarkQPACK_AppendInt(b *testing.B) {
 	dst := make([]byte, 1, 16)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -17,11 +18,13 @@ func BenchmarkQPACK_AppendInt(b *testing.B) {
 		dst[0] = 0x80
 		dst = appendInt(dst[:1], 6, 12345678)
 	}
+
 	_ = dst
 }
 
 func BenchmarkQPACK_ReadInt(b *testing.B) {
 	data := []byte{0xbf, 0x9e, 0xa4, 0x05}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -30,5 +33,6 @@ func BenchmarkQPACK_ReadInt(b *testing.B) {
 		val, _, _ := readInt(6, data)
 		total += val
 	}
+
 	_ = total
 }

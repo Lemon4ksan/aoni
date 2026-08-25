@@ -20,6 +20,7 @@ func vectorParse(b []byte) (uint64, int, bool) {
 	}
 
 	var val, consumed uint64
+
 	ret := int64(quic_varint_parse(
 		uint64(uintptr(unsafe.Pointer(&b[0]))),
 		uint64(len(b)),

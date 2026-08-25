@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
@@ -32,6 +33,7 @@ func TestAutobahn_Framing_PayloadBoundaries(t *testing.T) {
 		_, _ = rand.Read(payload)
 
 		var maskKey [4]byte
+
 		_, _ = rand.Read(maskKey[:])
 
 		maskedPayload := make([]byte, length)
@@ -72,6 +74,7 @@ func TestAutobahn_ControlFrames_RFC6455(t *testing.T) {
 			ws.ApplyMask(unmasked, mask)
 
 			assert.Equal(t, string(payload), string(unmasked))
+
 			_ = op
 		}
 	}

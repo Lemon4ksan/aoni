@@ -35,6 +35,7 @@ func BenchmarkFastClient_Get(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+
 			_ = resp.Close()
 		}
 	})
@@ -60,6 +61,7 @@ func BenchmarkFastClient_DoBaremetal(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+
 			_ = resp.Close()
 		}
 	})
@@ -90,6 +92,7 @@ func BenchmarkStdHTTPClient_Parallel(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}

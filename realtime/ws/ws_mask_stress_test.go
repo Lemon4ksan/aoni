@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
@@ -31,6 +32,7 @@ func TestWS_MaskPayload_StressAndDifferential(t *testing.T) {
 		copy(expected, payload)
 
 		var key [4]byte
+
 		_, _ = rand.Read(key[:])
 
 		scalarMask(expected, key)
@@ -47,13 +49,15 @@ func TestWS_MaskPayload_StressAndDifferential(t *testing.T) {
 	}
 
 	// 2. Large sizes (64KB, 1MB, 4MB) with unaligned offsets
-	largeSizes := []int{64 * 1024, 1024 * 1024 + 7, 4 * 1024 * 1024 + 13}
+	largeSizes := []int{64 * 1024, 1024*1024 + 7, 4*1024*1024 + 13}
 	for _, size := range largeSizes {
 		payload := make([]byte, size)
 		_, _ = rand.Read(payload)
 
 		expected := bytes.Clone(payload)
+
 		var key [4]byte
+
 		_, _ = rand.Read(key[:])
 
 		scalarMask(expected, key)
@@ -72,7 +76,9 @@ func TestWS_MaskPayload_StressAndDifferential(t *testing.T) {
 		sub := buffer[start:end]
 
 		orig := bytes.Clone(sub)
+
 		var key [4]byte
+
 		_, _ = rand.Read(key[:])
 
 		ws.ApplyMask(sub, key)

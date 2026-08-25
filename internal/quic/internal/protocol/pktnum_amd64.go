@@ -13,4 +13,3 @@ func quic_decode_packet_number(arg0 uint64, arg1 uint64, arg2 uint64, arg3 uint6
 
 //go:noescape
 func quic_packet_number_len_for_header(arg0 uint64, arg1 uint64, arg2 uint64, arg3 uint64, arg4 uint64, arg5 uint64) uint64
-

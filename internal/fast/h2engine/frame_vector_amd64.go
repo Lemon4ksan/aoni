@@ -26,6 +26,7 @@ func vectorPackFrameHeader(dst []byte, length int, kind FrameType, flags FrameFl
 
 func vectorUnpackFrameHeader(src []byte) (length int, kind FrameType, flags FrameFlags, stream uint32) {
 	_ = src[8]
+
 	var outLen, outKind, outFlags, outStream uint64
 
 	h2_frame_header_unpack(

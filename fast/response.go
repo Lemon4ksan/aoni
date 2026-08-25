@@ -110,6 +110,7 @@ func NewResponse(resp *h1engine.Response) *Response {
 	if !ok || r == nil {
 		r = &Response{}
 	}
+
 	r.resp = resp
 	r.trailers = nil
 	r.uncompressed = false
@@ -502,6 +503,7 @@ func NewPooledResponse(fastReq *h1engine.Request, fastResp *h1engine.Response) *
 	if !ok || pr == nil {
 		pr = &PooledResponse{}
 	}
+
 	pr.resp = fastResp
 	pr.trailers = nil
 	pr.uncompressed = false

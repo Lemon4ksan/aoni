@@ -30,6 +30,7 @@ func vectorHuffmanEncode(dst, src []byte) []byte {
 	))
 
 	start := len(dst)
+
 	total := start + needed
 	if cap(dst) < total {
 		newDst := make([]byte, total)
@@ -74,8 +75,11 @@ func vectorHuffmanDecode(dst, src []byte) []byte {
 
 	// Maximum possible decoded expansion is ~2x src length (shortest Huffman code is 5 bits for 8-bit symbol)
 	maxCap := len(dst) + nSrc*2 + 32
-	var stackBuf [512]byte
-	var workBuf []byte
+
+	var (
+		stackBuf [512]byte
+		workBuf  []byte
+	)
 
 	if maxCap <= len(stackBuf) {
 		workBuf = stackBuf[:]

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 func TestH1_ParseHexUint_Adversarial(t *testing.T) {

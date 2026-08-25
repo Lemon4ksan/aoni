@@ -120,6 +120,7 @@ func Parse(b []byte) (uint64 /* value */, int /* bytes consumed */, error) {
 		if val, consumed, ok := vectorParse(b); ok {
 			return val, consumed, nil
 		}
+
 		if len(b) < 1<<((b[0]&0xc0)>>6) {
 			return 0, 0, io.ErrUnexpectedEOF
 		}

@@ -30,11 +30,12 @@ func vectorApplyFastMask(payload []byte, mask [4]byte) {
 	)
 }
 
-func vectorBuildFrameHeader(dst []byte, opcode byte, length int, compress bool, isClient bool) int {
+func vectorBuildFrameHeader(dst []byte, opcode byte, length int, compress, isClient bool) int {
 	var compVal, clientVal uint64
 	if compress {
 		compVal = 1
 	}
+
 	if isClient {
 		clientVal = 1
 	}

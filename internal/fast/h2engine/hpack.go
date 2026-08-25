@@ -391,16 +391,19 @@ func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 func (hp *HPACK) DecodeAll(dst []*HeaderField, b []byte) ([]*HeaderField, error) {
 	for len(b) > 0 {
 		hf := AcquireHeaderField()
+
 		rem, err := hp.Next(hf, b)
 		if err != nil {
 			ReleaseHeaderField(hf)
 			return dst, err
 		}
+
 		if hf.Empty() {
 			ReleaseHeaderField(hf)
 		} else {
 			dst = append(dst, hf)
 		}
+
 		b = rem
 	}
 

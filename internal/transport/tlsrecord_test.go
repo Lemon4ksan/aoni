@@ -146,7 +146,9 @@ func BenchmarkTLS13_StandardCopyDecryption(b *testing.B) {
 
 func BenchmarkComputeNonceXOR(b *testing.B) {
 	iv := make([]byte, 12)
+
 	var nonce [12]byte
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -154,4 +156,3 @@ func BenchmarkComputeNonceXOR(b *testing.B) {
 		transport.ComputeNonceXOR(iv, uint64(i), &nonce)
 	}
 }
-

@@ -129,6 +129,7 @@ func UnpackFrameHeader(src []byte) (length int, kind FrameType, flags FrameFlags
 	kind = FrameType(src[3])
 	flags = FrameFlags(src[4])
 	stream = bytesToUint32(src[5:]) & (1<<31 - 1)
+
 	return length, kind, flags, stream
 }
 

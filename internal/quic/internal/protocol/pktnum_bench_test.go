@@ -19,6 +19,7 @@ func BenchmarkDecodePacketNumber(b *testing.B) {
 		pn := protocol.DecodePacketNumber(protocol.PacketNumberLen2, 0xa82f30ea, 0x9b32)
 		total += pn
 	}
+
 	_ = total
 }
 
@@ -31,5 +32,6 @@ func BenchmarkPacketNumberLengthForHeader(b *testing.B) {
 		l := protocol.PacketNumberLengthForHeader(0xace8fe, 0xabe8b3)
 		total += l
 	}
+
 	_ = total
 }

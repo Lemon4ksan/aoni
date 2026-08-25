@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
@@ -39,6 +40,7 @@ func TestBase64EncodeURL(t *testing.T) {
 func BenchmarkBase64EncodeURL_SHA256(b *testing.B) {
 	sum := sha256.Sum256([]byte("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"))
 	dst := make([]byte, 64)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 

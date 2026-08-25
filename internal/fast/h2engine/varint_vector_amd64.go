@@ -18,7 +18,9 @@ func vectorAppendInt(dst []byte, bits uint8, index uint64) []byte {
 	}
 
 	idx := len(dst) - 1
+
 	var stackBuf [16]byte
+
 	stackBuf[0] = dst[idx]
 
 	written := prefix_int_encode(
@@ -43,8 +45,10 @@ func vectorReadInt(n int, b []byte) ([]byte, uint64) {
 		return b, 0
 	}
 
-	var outVal uint64
-	var outConsumed uint64
+	var (
+		outVal      uint64
+		outConsumed uint64
+	)
 
 	res := int64(prefix_int_decode(
 		uint64(uintptr(unsafe.Pointer(&b[0]))),

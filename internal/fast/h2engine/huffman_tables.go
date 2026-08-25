@@ -4141,6 +4141,7 @@ func init() {
 			code:  code,
 		}
 	}
+
 	huffmanSymTable[256] = huffmanSym{
 		nbits: 30,
 		code:  0x3fffffff << 2,

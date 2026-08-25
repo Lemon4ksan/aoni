@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 )
 
@@ -35,7 +36,12 @@ func TestQUIC_DecodePacketNumber_RFC9000AppendixA(t *testing.T) {
 		{protocol.PacketNumberLen1, 0, 0, 0},
 		{protocol.PacketNumberLen1, 0, 1, 1},
 		// Boundary near (1<<62) - 1
-		{protocol.PacketNumberLen4, protocol.PacketNumber((1 << 62) - 100), protocol.PacketNumber(((1 << 62) - 1) & 0xffffffff), protocol.PacketNumber((1 << 62) - 1)},
+		{
+			protocol.PacketNumberLen4,
+			protocol.PacketNumber((1 << 62) - 100),
+			protocol.PacketNumber(((1 << 62) - 1) & 0xffffffff),
+			protocol.PacketNumber((1 << 62) - 1),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -49,8 +55,10 @@ func TestQUIC_DecodePacketNumber_RFC9000AppendixA(t *testing.T) {
 			if int64(largest)+int64(delta) < 0 {
 				continue
 			}
+
 			pn := protocol.PacketNumber(int64(largest) + int64(delta))
 			len := protocol.PacketNumberLengthForHeader(pn, largest)
+
 			var mask protocol.PacketNumber
 			switch len {
 			case protocol.PacketNumberLen1:
@@ -62,6 +70,7 @@ func TestQUIC_DecodePacketNumber_RFC9000AppendixA(t *testing.T) {
 			case protocol.PacketNumberLen4:
 				mask = math.MaxUint32
 			}
+
 			wirePN := pn & mask
 			decoded := protocol.DecodePacketNumber(len, largest, wirePN)
 			assert.Equal(t, pn, decoded)

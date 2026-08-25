@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 )
 
@@ -19,6 +20,7 @@ func hexToBytes(s string) []byte {
 	if err != nil {
 		panic(err)
 	}
+
 	return b
 }
 
@@ -29,6 +31,7 @@ func TestHPACK_W3C_RFC7541_AppendixC(t *testing.T) {
 	// Name: custom-key, Value: custom-header
 	t.Run("C.2.1_Literal_With_Indexing", func(t *testing.T) {
 		encoded := hexToBytes("400a637573746f6d2d6b65790d637573746f6d2d686561646572")
+
 		hp := h2engine.AcquireHPACK()
 		defer h2engine.ReleaseHPACK(hp)
 
@@ -43,6 +46,7 @@ func TestHPACK_W3C_RFC7541_AppendixC(t *testing.T) {
 	// Name: :path, Value: /my-example/index.html (Indexed Name index 4)
 	t.Run("C.2.2_Literal_Without_Indexing", func(t *testing.T) {
 		encoded := hexToBytes("04162f6d792d6578616d706c652f696e6465782e68746d6c")
+
 		hp := h2engine.AcquireHPACK()
 		defer h2engine.ReleaseHPACK(hp)
 
@@ -57,6 +61,7 @@ func TestHPACK_W3C_RFC7541_AppendixC(t *testing.T) {
 	// Index 2: :method: GET
 	t.Run("C.2.4_Indexed_Header_Field", func(t *testing.T) {
 		encoded := hexToBytes("82")
+
 		hp := h2engine.AcquireHPACK()
 		defer h2engine.ReleaseHPACK(hp)
 
@@ -127,7 +132,9 @@ func TestHPACK_W3C_RFC7541_AppendixC(t *testing.T) {
 		// cache-control: private
 		// date: Mon, 21 Oct 2013 20:13:21 GMT
 		// location: https://www.example.com
-		resp1Bytes := hexToBytes("488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3")
+		resp1Bytes := hexToBytes(
+			"488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3",
+		)
 		fields, err := hp.DecodeAll(nil, resp1Bytes)
 		assert.NoError(t, err)
 		assert.Equal(t, 4, len(fields))

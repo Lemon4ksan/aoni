@@ -9,8 +9,8 @@ import (
 	"hash/crc32"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 func TestCRC32_DifferentialAgainstStdlib(t *testing.T) {
@@ -28,7 +28,7 @@ func TestCRC32_DifferentialAgainstStdlib(t *testing.T) {
 	}
 
 	// 2. Large chunks (64KB, 1MB, 4MB) with unaligned offsets
-	largeSizes := []int{64 * 1024, 1024 * 1024 + 3, 4 * 1024 * 1024 + 7}
+	largeSizes := []int{64 * 1024, 1024*1024 + 3, 4*1024*1024 + 7}
 	for _, size := range largeSizes {
 		data := make([]byte, size)
 		_, _ = rand.Read(data)

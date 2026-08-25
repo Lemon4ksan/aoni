@@ -21,6 +21,7 @@ func BenchmarkFrameHeader_ReadFrame(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		br.Reset(bytes.NewReader(raw))
+
 		fr, err := h2engine.ReadFrameFrom(br)
 		if err == nil {
 			h2engine.ReleaseFrameHeader(fr)

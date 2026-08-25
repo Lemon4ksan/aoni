@@ -27,5 +27,6 @@ func Base64EncodeURL(src, dst []byte) int {
 
 	enc := base64.RawURLEncoding
 	enc.Encode(dst, src)
+
 	return reqLen
 }

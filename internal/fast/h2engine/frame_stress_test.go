@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 )
 
@@ -81,6 +82,7 @@ func TestH2_Varint_Adversarial(t *testing.T) {
 	// Truncated buffer test (must not panic)
 	for _, n := range prefixes {
 		var b [1]byte
+
 		b[0] = (1 << n) - 1
 		rem, decoded := h2engine.ReadInt(int(n), b[:])
 		assert.Equal(t, 0, len(rem))

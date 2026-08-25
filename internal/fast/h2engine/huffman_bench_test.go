@@ -13,54 +13,69 @@ import (
 func BenchmarkHuffman_Encode_Short(b *testing.B) {
 	src := []byte("www.example.com")
 	dst := make([]byte, 0, 64)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		dst = h2engine.HuffmanEncode(dst[:0], src)
 	}
+
 	_ = dst
 }
 
 func BenchmarkHuffman_Encode_Long(b *testing.B) {
-	src := []byte("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	src := []byte(
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	)
 	dst := make([]byte, 0, 256)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		dst = h2engine.HuffmanEncode(dst[:0], src)
 	}
+
 	_ = dst
 }
 
 func BenchmarkHuffman_Decode_Short(b *testing.B) {
 	src := h2engine.HuffmanEncode(nil, []byte("www.example.com"))
 	dst := make([]byte, 0, 64)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		dst = h2engine.HuffmanDecode(dst[:0], src)
 	}
+
 	_ = dst
 }
 
 func BenchmarkHuffman_Decode_Long(b *testing.B) {
-	raw := []byte("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	raw := []byte(
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	)
 	src := h2engine.HuffmanEncode(nil, raw)
 	dst := make([]byte, 0, 256)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		dst = h2engine.HuffmanDecode(dst[:0], src)
 	}
+
 	_ = dst
 }
 
 func BenchmarkHuffman_EncodeLength(b *testing.B) {
-	src := []byte("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	src := []byte(
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	)
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -68,5 +83,6 @@ func BenchmarkHuffman_EncodeLength(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		total += h2engine.HuffmanEncodeLength(src)
 	}
+
 	_ = total
 }

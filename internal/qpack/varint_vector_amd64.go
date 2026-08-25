@@ -20,7 +20,9 @@ func vectorAppendInt(dst []byte, prefixLen uint8, val uint64) []byte {
 
 	// Ensure destination has enough room for prefix integer (up to 10 bytes)
 	idx := len(dst) - 1
+
 	var stackBuf [16]byte
+
 	stackBuf[0] = dst[idx]
 
 	written := prefix_int_encode(
@@ -49,8 +51,10 @@ func vectorReadInt(prefixLen uint8, data []byte) (uint64, int, error) {
 		return 0, 0, errInvalidInteger
 	}
 
-	var outVal uint64
-	var outConsumed uint64
+	var (
+		outVal      uint64
+		outConsumed uint64
+	)
 
 	res := int64(prefix_int_decode(
 		uint64(uintptr(unsafe.Pointer(&data[0]))),

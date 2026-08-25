@@ -10,8 +10,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 // Official test cases adapted from nodejs/http-parser and nodejs/llhttp

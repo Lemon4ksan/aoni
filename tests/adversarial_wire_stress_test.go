@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 // In-memory broken server simulator
