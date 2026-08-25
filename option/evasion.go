@@ -24,8 +24,10 @@ import (
 	"github.com/lemon4ksan/aoni/internal/profile"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
+	"github.com/lemon4ksan/aoni/netutil/privacypass"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/netutil/spki"
+	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
 // WithChrome applies a production-grade, zero-configuration Chrome profile (DX)
@@ -319,5 +321,18 @@ func WithPersona(name string) aoni.ClientOption {
 		return WithChromeMobile()
 	default:
 		return WithChrome()
+	}
+}
+
+// WithPrivacyPass enables automated RFC 9576 / RFC 9577 Privacy Pass & W3C Private State Tokens challenge solving.
+func WithPrivacyPass(provider privacypass.TokenProvider) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if provider == nil {
+			return
+		}
+
+		cfg.Defaults.Pipeline.Challenge = true
+		cfg.Defaults.ChallengeDetector = challenge.DetectPrivateTokenChallenge
+		cfg.Defaults.ChallengeSolver = challenge.NewPrivateTokenSolver(provider, nil)
 	}
 }

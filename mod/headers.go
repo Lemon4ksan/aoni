@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
+	"github.com/lemon4ksan/aoni/netutil/privacypass"
 )
 
 // WithGRPCWebTimeout constructs an [aoni.RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -310,4 +311,18 @@ func WithHeadersIf(condition bool, headers map[string]string) aoni.RequestModifi
 	}
 
 	return WithHeaders(headers)
+}
+
+// WithPrivateToken constructs an [aoni.RequestModifier] injecting an RFC 9577 Privacy Pass redemption header ("Authorization: PrivateToken token=...").
+func WithPrivateToken(token string) aoni.RequestModifier {
+	if !strings.HasPrefix(token, privacypass.SchemePrivateToken) {
+		token = privacypass.SchemePrivateToken + " token=\"" + token + "\""
+	}
+
+	return WithHeader(privacypass.HeaderAuthorization, token)
+}
+
+// WithPrivateStateToken constructs an [aoni.RequestModifier] injecting a W3C Private State Token ("Sec-Private-State-Token").
+func WithPrivateStateToken(token string) aoni.RequestModifier {
+	return WithHeader(privacypass.HeaderSecPrivateStateToken, token)
 }

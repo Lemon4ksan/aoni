@@ -541,3 +541,19 @@ func TestMod_SPKIPin(t *testing.T) {
 	require.NotNil(t, reqCfg)
 	assert.Contains(t, reqCfg.CertificatePins["example.com"], "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 }
+
+func TestMod_PrivateToken(t *testing.T) {
+	t.Parallel()
+
+	req1 := newDummyRequest()
+	mod.WithPrivateToken("sample-b64-token").Apply(req1)
+	assert.Equal(t, `PrivateToken token="sample-b64-token"`, req1.Header("Authorization"))
+
+	req2 := newDummyRequest()
+	mod.WithPrivateToken(`PrivateToken token="sample-b64-token"`).Apply(req2)
+	assert.Equal(t, `PrivateToken token="sample-b64-token"`, req2.Header("Authorization"))
+
+	req3 := newDummyRequest()
+	mod.WithPrivateStateToken("pst-sample-payload").Apply(req3)
+	assert.Equal(t, "pst-sample-payload", req3.Header("Sec-Private-State-Token"))
+}

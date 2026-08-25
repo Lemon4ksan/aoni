@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/dpop"
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
+	"github.com/lemon4ksan/aoni/netutil/privacypass"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -341,4 +342,16 @@ func TestOption_WithDPoPToken(t *testing.T) {
 	option.WithDPoPToken("access-token-123", priv, dpop.ProofOptions{Nonce: "nonce-1"})(cfg)
 
 	assert.Equal(t, 1, len(cfg.Defaults.DefaultMods))
+}
+
+func TestOption_WithPrivacyPass(t *testing.T) {
+	t.Parallel()
+
+	staticProv := privacypass.NewStaticProvider()
+	cfg := &aoni.Config{}
+
+	option.WithPrivacyPass(staticProv)(cfg)
+	assert.True(t, cfg.Defaults.Pipeline.Challenge)
+	assert.NotNil(t, cfg.Defaults.ChallengeDetector)
+	assert.NotNil(t, cfg.Defaults.ChallengeSolver)
 }
