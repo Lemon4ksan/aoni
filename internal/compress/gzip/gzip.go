@@ -79,10 +79,10 @@ func NewWriterLevel(w io.Writer, level int) (*Writer, error) {
 }
 
 // MinCustomWindowSize is the minimum window size that can be sent to NewWriterWindow.
-const MinCustomWindowSize = flate.MinCustomWindowSize
+const MinCustomWindowSize = 32
 
 // MaxCustomWindowSize is the maximum custom window that can be sent to NewWriterWindow.
-const MaxCustomWindowSize = flate.MaxCustomWindowSize
+const MaxCustomWindowSize = 32768
 
 // NewWriterWindow returns a new Writer compressing data with a custom window size.
 // windowSize must be from MinCustomWindowSize to MaxCustomWindowSize.
@@ -96,25 +96,29 @@ func NewWriterWindow(w io.Writer, windowSize int) (*Writer, error) {
 	}
 
 	z := new(Writer)
-	z.init(w, -windowSize)
+	z.init(w, flate.BestSpeed)
 
 	return z, nil
 }
 
 func (z *Writer) init(w io.Writer, level int) {
+	flateLevel := level
+	if flateLevel < flate.HuffmanOnly || flateLevel > flate.BestCompression {
+		flateLevel = flate.BestSpeed
+	}
+
 	compressor := z.compressor
-	if level != StatelessCompression {
-		if compressor != nil {
-			compressor.Reset(w)
-		}
+	if compressor != nil {
+		compressor.Reset(w)
 	}
 
 	*z = Writer{
 		Header: Header{
-			OS: 255, // unknown
+			OS: 255,
 		},
 		w:          w,
-		level:      level,
+		level:      flateLevel,
+		digest:     crc32.ChecksumIEEE(nil),
 		compressor: compressor,
 	}
 }
@@ -249,7 +253,7 @@ func (z *Writer) Write(p []byte) (int, error) {
 			}
 		}
 
-		if z.compressor == nil && z.level != StatelessCompression {
+		if z.compressor == nil {
 			z.compressor, _ = flate.NewWriter(z.w, z.level)
 		}
 	}
@@ -257,9 +261,6 @@ func (z *Writer) Write(p []byte) (int, error) {
 	z.size += uint32(len(p))
 
 	z.digest = crc32.Update(z.digest, crc32.IEEETable, p)
-	if z.level == StatelessCompression {
-		return len(p), flate.StatelessDeflate(z.w, p, false, nil)
-	}
 
 	n, z.err = z.compressor.Write(p)
 
@@ -279,7 +280,7 @@ func (z *Writer) Flush() error {
 		return z.err
 	}
 
-	if z.closed || z.level == StatelessCompression {
+	if z.closed {
 		return nil
 	}
 
@@ -316,11 +317,7 @@ func (z *Writer) Close() error {
 		}
 	}
 
-	if z.level == StatelessCompression {
-		z.err = flate.StatelessDeflate(z.w, nil, true, nil)
-	} else {
-		z.err = z.compressor.Close()
-	}
+	z.err = z.compressor.Close()
 
 	if z.err != nil {
 		return z.err

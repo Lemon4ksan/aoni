@@ -46,6 +46,7 @@ func TestRecordFramer_EndToEnd(t *testing.T) {
 	payload := []byte("GET /stream HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
 	var buf bytes.Buffer
+
 	err := framer.WriteRecordScoped(&buf, aead, iv, 0, transport.RecordTypeApplicationData, payload, scope)
 	require.NoError(t, err)
 
@@ -65,6 +66,7 @@ func BenchmarkTLS13_InPlaceDecryption(b *testing.B) {
 	aead, _ := cipher.NewGCM(block)
 
 	framer := transport.NewRecordFramer()
+
 	scope := borrow.NewScope()
 	defer scope.Release()
 
@@ -72,6 +74,7 @@ func BenchmarkTLS13_InPlaceDecryption(b *testing.B) {
 	_, _ = rand.Read(payload)
 
 	var recordBuf bytes.Buffer
+
 	_ = framer.WriteRecordScoped(&recordBuf, aead, iv, 0, transport.RecordTypeApplicationData, payload, scope)
 	wireBytes := recordBuf.Bytes()
 
@@ -83,6 +86,7 @@ func BenchmarkTLS13_InPlaceDecryption(b *testing.B) {
 
 	for b.Loop() {
 		reader.Reset(wireBytes)
+
 		s := borrow.AcquireScope()
 		_, _, _ = framer.ReadRecordScoped(reader, aead, iv, 0, s)
 		s.Release()
@@ -99,6 +103,7 @@ func BenchmarkTLS13_StandardCopyDecryption(b *testing.B) {
 	aead, _ := cipher.NewGCM(block)
 
 	framer := transport.NewRecordFramer()
+
 	scope := borrow.NewScope()
 	defer scope.Release()
 
@@ -106,6 +111,7 @@ func BenchmarkTLS13_StandardCopyDecryption(b *testing.B) {
 	_, _ = rand.Read(payload)
 
 	var recordBuf bytes.Buffer
+
 	_ = framer.WriteRecordScoped(&recordBuf, aead, iv, 0, transport.RecordTypeApplicationData, payload, scope)
 	wireBytes := recordBuf.Bytes()
 
@@ -120,6 +126,7 @@ func BenchmarkTLS13_StandardCopyDecryption(b *testing.B) {
 
 		// 1. Read header
 		var hdr [5]byte
+
 		_, _ = io.ReadFull(reader, hdr[:])
 
 		// 2. Allocate heap buffer for ciphertext

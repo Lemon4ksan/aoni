@@ -125,6 +125,7 @@ func (f *RecordFramer) WriteRecordScoped(
 	scope *borrow.Scope,
 ) error {
 	payloadLen := len(plaintext) + 1 + aead.Overhead()
+
 	totalLen := RecordHeaderSize + payloadLen
 	if totalLen > MaxTLSRecordPayload+RecordHeaderSize {
 		return ErrInvalidRecordLength
@@ -146,5 +147,6 @@ func (f *RecordFramer) WriteRecordScoped(
 	_ = aead.Seal(innerPlain[:0], f.nonceBuf[:], innerPlain, buf[:RecordHeaderSize])
 
 	_, err := w.Write(buf)
+
 	return err
 }

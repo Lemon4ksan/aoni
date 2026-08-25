@@ -57,6 +57,7 @@ func TestCheckCDN(t *testing.T) {
 
 func BenchmarkCheckCDNAddr(b *testing.B) {
 	addr, _ := netip.ParseAddr("104.16.1.1")
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -67,6 +68,7 @@ func BenchmarkCheckCDNAddr(b *testing.B) {
 
 func BenchmarkCheckCDN_LegacyIP(b *testing.B) {
 	ip := net.ParseIP("104.16.1.1")
+
 	b.ReportAllocs()
 	b.ResetTimer()
 

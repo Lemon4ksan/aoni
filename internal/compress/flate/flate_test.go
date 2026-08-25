@@ -36,20 +36,35 @@ func TestFlateWriterAndReader(t *testing.T) {
 	require.NoError(t, r.Close())
 }
 
-func TestFlateStateless(t *testing.T) {
+func TestFlateLevels(t *testing.T) {
 	t.Parallel()
 
-	data := []byte("Stateless flate compression test.")
-	var buf bytes.Buffer
+	levels := []int{
+		flate.NoCompression,
+		flate.BestSpeed,
+		2,
+		flate.DefaultCompression,
+		flate.BestCompression,
+		flate.HuffmanOnly,
+	}
 
-	err := flate.StatelessDeflate(&buf, data, true, nil)
-	require.NoError(t, err)
+	data := []byte(strings.Repeat("Flate multi-level compression verification string. ", 15))
 
-	r := flate.NewReader(&buf)
-	decompressed, err := io.ReadAll(r)
-	require.NoError(t, err)
-	assert.Equal(t, data, decompressed)
-	require.NoError(t, r.Close())
+	for _, lvl := range levels {
+		var buf bytes.Buffer
+		w, err := flate.NewWriter(&buf, lvl)
+		require.NoError(t, err)
+
+		_, err = w.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		r := flate.NewReader(&buf)
+		decompressed, err := io.ReadAll(r)
+		require.NoError(t, err)
+		assert.Equal(t, data, decompressed)
+		require.NoError(t, r.Close())
+	}
 }
 
 func TestMatchLen_Comprehensive(t *testing.T) {
