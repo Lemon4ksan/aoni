@@ -100,6 +100,10 @@ func TestBridgeSingleRequest(t *testing.T) {
 		t.Fatalf("expected body %q, got %q", expectedBody, gotBody)
 	}
 
+	if task.TotalTimeNS == 0 {
+		t.Fatal("expected non-zero TotalTimeNS")
+	}
+
 	gotHdrs := string(respHdrs[:task.RespHeadersLen])
 	if !strings.Contains(gotHdrs, "X-Custom-Resp: awesome-fast-header") {
 		t.Fatalf("expected response headers to contain X-Custom-Resp, got %q", gotHdrs)

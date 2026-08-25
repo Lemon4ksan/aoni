@@ -14,6 +14,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
@@ -62,6 +63,10 @@ type Task struct {
 	RespHeadersLen  uintptr
 	StatusCode      int32
 	ErrorCode       int32
+	DNSTimeNS       uint64
+	TLSTimeNS       uint64
+	TTFBNS          uint64
+	TotalTimeNS     uint64
 	Arena           unsafe.Pointer
 	_InternalHandle unsafe.Pointer
 }
@@ -74,7 +79,7 @@ type Config struct {
 	BrowserProfile  uint8
 	EnableHTTP2     uint8
 	EnableHTTP3     uint8
-	_               uint8 // alignment padding
+	_Pad            uint8 // alignment padding
 	ProxyURL        *byte
 }
 
@@ -88,6 +93,7 @@ type StreamConfig struct {
 	HeadersRaw  *byte
 	HeadersLen  uintptr
 	IsWebSocket uint8
+	_Pad        [7]uint8 // alignment padding
 }
 
 // StreamHandler defines Go-level callbacks matching C function pointers.
@@ -185,7 +191,12 @@ func DoTask(client *fast.Client, t *Task) int32 {
 	}
 
 	// 5. Execute
+	startNano := clock.CoarseNowNano()
 	resp, err := client.Do(req)
+	endNano := clock.CoarseNowNano()
+	t.TotalTimeNS = uint64(endNano - startNano)
+	t.TTFBNS = t.TotalTimeNS
+
 	if err != nil {
 		t.StatusCode = 0
 		t.ErrorCode = AONIErrNetwork

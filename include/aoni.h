@@ -59,13 +59,14 @@ typedef struct {
  */
 typedef struct {
     uint64_t       stream_id;     /* User-defined stream identifier */
-    char*          url;           /* Target URL (e.g. "wss://..." or "https://.../stream") */
+    const char*    url;           /* Target URL (e.g. "wss://..." or "https://.../stream") */
     size_t         url_len;       /* Length of URL */
-    char*          method;        /* "GET", "POST" (NULL defaults to "GET") */
+    const char*    method;        /* "GET", "POST" (NULL defaults to "GET") */
     size_t         method_len;    /* Length of method */
-    uint8_t*       headers_raw;   /* Custom raw headers ("Sec-WebSocket-Protocol: v1\r\n") */
+    const uint8_t* headers_raw;   /* Custom raw headers ("Sec-WebSocket-Protocol: v1\r\n") */
     size_t         headers_len;   /* Length of headers */
     uint8_t        is_websocket;  /* 1 = WebSocket (RFC 6455 / RFC 8441 H2 CONNECT), 0 = HTTP/SSE stream */
+    uint8_t        _pad[7];       /* Explicit 64-bit alignment padding */
 } aoni_stream_config_t;
 
 /*
@@ -75,14 +76,14 @@ typedef struct {
 typedef struct {
     uint64_t       task_id;          /* User-defined task identifier */
 
-    /* Request inputs (Read-only by aoni) */
-    char*          method;           /* "GET", "POST", "PUT", etc. (NULL or empty defaults to "GET") */
+    /* Request inputs (Read-only by aoni, const-correct) */
+    const char*    method;           /* "GET", "POST", "PUT", etc. (NULL or empty defaults to "GET") */
     size_t         method_len;       /* Length of method string */
-    char*          url;              /* Full request URL (e.g. "https://api.target.com/path") */
+    const char*    url;              /* Full request URL (e.g. "https://api.target.com/path") */
     size_t         url_len;          /* Length of URL string */
-    uint8_t*       headers_raw;      /* Raw serialized headers ("Header1: Val1\r\nHeader2: Val2\r\n") */
+    const uint8_t* headers_raw;      /* Raw serialized headers ("Header1: Val1\r\nHeader2: Val2\r\n") */
     size_t         headers_len;      /* Length of raw headers buffer */
-    uint8_t*       body_ptr;         /* Request payload pointer (NULL if no body) */
+    const uint8_t* body_ptr;         /* Request payload pointer (NULL if no body) */
     size_t         body_len;         /* Length of request body */
 
     /* Response outputs */
@@ -100,6 +101,12 @@ typedef struct {
     int32_t        status_code;      /* HTTP response status code (e.g. 200, 404, 500) */
     int32_t        error_code;       /* 0 = AONI_OK, <0 = Error Code */
 
+    /* High-Resolution Performance & Diagnostics (0.28 ns silicon monotonic clock) */
+    uint64_t       dns_time_ns;      /* DNS lookup duration in nanoseconds */
+    uint64_t       tls_time_ns;      /* TLS handshake duration in nanoseconds */
+    uint64_t       ttfb_ns;          /* Time To First Byte in nanoseconds */
+    uint64_t       total_time_ns;    /* Total request roundtrip time in nanoseconds */
+
     /* Advanced Memory & Arena placement */
     aoni_arena_t   arena;            /* Optional Off-Heap Arena for zero-alloc bump placement (NULL = disabled) */
     void*          _internal_handle; /* Private internal handle for offheap tracking */
@@ -115,7 +122,8 @@ typedef struct {
     uint8_t     browser_profile;    /* AONI_BROWSER_NONE, CHROME, FIREFOX, SAFARI */
     uint8_t     enable_http2;       /* 1 = Enable H2, 0 = Disable */
     uint8_t     enable_http3;       /* 1 = Enable H3, 0 = Disable */
-    char*       proxy_url;          /* Optional proxy URL (e.g. "socks5://127.0.0.1:9050", NULL = direct) */
+    uint8_t     _pad[1];            /* Explicit alignment padding (x86_64 8-byte boundary) */
+    const char* proxy_url;          /* Optional proxy URL (e.g. "socks5://127.0.0.1:9050", NULL = direct) */
 } aoni_config_t;
 
 /*
