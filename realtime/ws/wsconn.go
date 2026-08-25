@@ -654,6 +654,10 @@ func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
 }
 
 func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, compress bool, hdr []byte) int {
+	if hasVectorWS && len(hdr) >= 10 {
+		return vectorBuildFrameHeader(hdr, opcode, length, compress, c.isClient)
+	}
+
 	hdr[0] = 0x80 | opcode
 	if compress {
 		hdr[0] |= 0x40 // Set RSV1 bit for permessage-deflate
@@ -686,6 +690,11 @@ func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, compress 
 
 func applyFastMask(payload []byte, mask [4]byte) {
 	if len(payload) == 0 {
+		return
+	}
+
+	if hasVectorWS {
+		vectorApplyFastMask(payload, mask)
 		return
 	}
 
