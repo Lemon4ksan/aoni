@@ -96,7 +96,9 @@ func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
 				return nil
 			}
 
-			return grpcWebReadHeaderErr(generic.Ternary(errors.Is(err, transport.ErrTruncatedPayload), "read_payload", "read_header"))
+			return grpcWebReadHeaderErr(
+				generic.Ternary(errors.Is(err, transport.ErrTruncatedPayload), "read_payload", "read_header"),
+			)
 		}
 
 		done, err := processGRPCWebFrame(flags, payload, msg)

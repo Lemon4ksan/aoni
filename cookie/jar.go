@@ -231,10 +231,6 @@ func isExpiredCookie(expires time.Time, maxAge int, now time.Time) bool {
 	return (!expires.IsZero() && expires.Before(now)) || maxAge < 0
 }
 
-func normalizeDomain(domain string) string {
-	return strings.ToLower(strings.TrimPrefix(domain, "."))
-}
-
 func deleteMatchingCookie(m map[cookieKey]Cookie, name, domain string) bool {
 	normDomain := strings.TrimPrefix(domain, ".")
 	deleted := false
