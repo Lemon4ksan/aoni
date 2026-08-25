@@ -7,8 +7,6 @@ package otel
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -386,9 +384,12 @@ func buildOTLPJSON(batch []*SpanSnapshot) []byte {
 	return res
 }
 
+type stringer interface {
+	String() string
+}
+
 func writeJSONString(buf *bytes.Buffer, s string) {
-	b, _ := json.Marshal(s)
-	buf.Write(b)
+	buf.WriteString(strconv.Quote(s))
 }
 
 func writeOTLPAttribute(buf *bytes.Buffer, key string, val any) {
@@ -403,25 +404,50 @@ func writeOTLPAttribute(buf *bytes.Buffer, key string, val any) {
 		buf.WriteString(`"intValue":"`)
 		buf.WriteString(strconv.Itoa(v))
 		buf.WriteString(`"`)
+	case int32:
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.FormatInt(int64(v), 10))
+		buf.WriteString(`"`)
 	case int64:
 		buf.WriteString(`"intValue":"`)
 		buf.WriteString(strconv.FormatInt(v, 10))
 		buf.WriteString(`"`)
+	case uint:
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.FormatUint(uint64(v), 10))
+		buf.WriteString(`"`)
+	case uint32:
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.FormatUint(uint64(v), 10))
+		buf.WriteString(`"`)
+	case uint64:
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.FormatUint(v, 10))
+		buf.WriteString(`"`)
 	case float64:
 		buf.WriteString(`"doubleValue":`)
 		buf.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+	case float32:
+		buf.WriteString(`"doubleValue":`)
+		buf.WriteString(strconv.FormatFloat(float64(v), 'f', -1, 32))
 	case bool:
 		if v {
 			buf.WriteString(`"boolValue":true`)
 		} else {
 			buf.WriteString(`"boolValue":false`)
 		}
-	case fmt.Stringer:
+	case error:
+		buf.WriteString(`"stringValue":`)
+		writeJSONString(buf, v.Error())
+	case []byte:
+		buf.WriteString(`"stringValue":`)
+		writeJSONString(buf, string(v))
+	case stringer:
 		buf.WriteString(`"stringValue":`)
 		writeJSONString(buf, v.String())
 	default:
 		buf.WriteString(`"stringValue":`)
-		writeJSONString(buf, fmt.Sprintf("%v", v))
+		writeJSONString(buf, "<value>")
 	}
 	buf.WriteString(`}}`)
 }

@@ -5,8 +5,8 @@
 package otel
 
 import (
-	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/foundation/generic"
@@ -34,15 +34,22 @@ func DefaultConfig() Config {
 			if req == nil {
 				return "HTTP"
 			}
+			path := req.Path()
+			if path == "" {
+				if u, err := url.Parse(req.URL()); err == nil && u != nil {
+					path = u.Path
+				}
+			}
+			if IsGRPCRequest(req) && path != "" {
+				return strings.TrimPrefix(path, "/")
+			}
+
 			method := req.Method()
 			if method == "" {
 				method = "GET"
 			}
-			rawURL := req.URL()
-			if u, err := url.Parse(rawURL); err == nil && u != nil {
-				if u.Path != "" {
-					return fmt.Sprintf("%s %s", method, u.Path)
-				}
+			if path != "" {
+				return method + " " + path
 			}
 			return method
 		},

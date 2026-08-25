@@ -40,10 +40,15 @@ func NewMiddleware(opts ...Option) aoni.Middleware {
 			}
 
 			// Start Client Span
+			startAttrs := HTTPClientRequestAttributes(req)
+			if IsGRPCRequest(req) {
+				startAttrs = append(startAttrs, GRPCClientRequestAttributes(req)...)
+			}
+
 			ctx, span := cfg.Tracer.Start(reqCtx, spanName,
 				WithSpanKind(SpanKindClient),
 				WithStartTime(time.Now()),
-				WithAttributes(HTTPClientRequestAttributes(req)...),
+				WithAttributes(startAttrs...),
 			)
 			defer span.End()
 
@@ -80,13 +85,19 @@ func NewMiddleware(opts ...Option) aoni.Middleware {
 
 			if resp != nil {
 				span.SetAttributes(HTTPClientResponseAttributes(resp)...)
+				if IsGRPCRequest(req) {
+					span.SetAttributes(GRPCClientResponseAttributes(resp)...)
+				}
 
 				if respBody := resp.BodyBytes(); len(respBody) > 0 {
 					span.SetAttribute(KeyHTTPResponseBodySize, len(respBody))
 				}
 
 				statusCode := resp.StatusCode()
-				if statusCode >= 400 {
+				grpcStatus := resp.Header("grpc-status")
+				if grpcStatus != "" && grpcStatus != "0" {
+					span.SetStatus(StatusError, "gRPC status: "+grpcStatus)
+				} else if statusCode >= 400 {
 					span.SetStatus(StatusError, resp.Status())
 				} else {
 					span.SetStatus(StatusOk, "")

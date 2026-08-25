@@ -282,3 +282,53 @@ func TestMiddleware_ConcurrentSafety(t *testing.T) {
 		t.Errorf("expected %d spans, got %d", expectedTotal, len(spans))
 	}
 }
+
+func TestMiddleware_GRPC_SemanticConventions(t *testing.T) {
+	memExp := NewMemoryExporter()
+	tracer := NewTracer("grpc-test-service", WithExporter(memExp))
+	mw := NewMiddleware(WithTracer(tracer))
+
+	doer := mw(aoni.DoerFunc(func(r aoni.Request) (aoni.Response, error) {
+		resp := &mockResponse{
+			statusCode: 200,
+			statusText: "200 OK",
+		}
+		return resp, nil
+	}))
+
+	req := newMockRequest("POST", "https://grpc.example.com/helloworld.Greeter/SayHello")
+	req.SetHeader("Content-Type", "application/grpc")
+
+	resp, err := doer.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Fatalf("unexpected status code: %d", resp.StatusCode())
+	}
+
+	spans := memExp.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	s := spans[0]
+	if s.Name != "helloworld.Greeter/SayHello" {
+		t.Errorf("expected span name 'helloworld.Greeter/SayHello', got %q", s.Name)
+	}
+
+	attrMap := make(map[string]any)
+	for _, a := range s.Attributes {
+		attrMap[a.Key] = a.Value
+	}
+
+	if attrMap[KeyRPCSystem] != "grpc" {
+		t.Errorf("expected rpc.system='grpc', got %v", attrMap[KeyRPCSystem])
+	}
+	if attrMap[KeyRPCService] != "helloworld.Greeter" {
+		t.Errorf("expected rpc.service='helloworld.Greeter', got %v", attrMap[KeyRPCService])
+	}
+	if attrMap[KeyRPCMethod] != "SayHello" {
+		t.Errorf("expected rpc.method='SayHello', got %v", attrMap[KeyRPCMethod])
+	}
+}

@@ -5,8 +5,8 @@
 package otel
 
 import (
-	"fmt"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -46,6 +46,12 @@ const (
 	KeyExceptionMessage    = "exception.message"
 	KeyExceptionStacktrace = "exception.stacktrace"
 	KeyErrorType           = "error.type"
+
+	// RPC Semantic Conventions (gRPC / gRPC-Web)
+	KeyRPCSystem         = "rpc.system"
+	KeyRPCService        = "rpc.service"
+	KeyRPCMethod         = "rpc.method"
+	KeyRPCGRPCStatusCode = "rpc.grpc.status_code"
 
 	// Service & Resource Attributes
 	KeyServiceName          = "service.name"
@@ -172,7 +178,73 @@ func ExceptionAttributes(err error) []Attribute {
 	}
 
 	return []Attribute{
-		StringAttr(KeyExceptionType, fmt.Sprintf("%T", err)),
+		StringAttr(KeyExceptionType, reflect.TypeOf(err).String()),
 		StringAttr(KeyExceptionMessage, err.Error()),
 	}
+}
+
+// IsGRPCRequest checks whether the given request is a native gRPC or gRPC-Web invocation.
+func IsGRPCRequest(req aoni.Request) bool {
+	if req == nil {
+		return false
+	}
+	ct := req.Header("Content-Type")
+	if ct == "" {
+		ct = req.Header("content-type")
+	}
+	return strings.HasPrefix(ct, "application/grpc")
+}
+
+// GRPCClientRequestAttributes extracts OpenTelemetry RPC semantic conventions from a gRPC [aoni.Request].
+func GRPCClientRequestAttributes(req aoni.Request) []Attribute {
+	if req == nil {
+		return nil
+	}
+
+	attrs := make([]Attribute, 0, 4)
+	attrs = append(attrs, StringAttr(KeyRPCSystem, "grpc"))
+
+	path := req.Path()
+	if path == "" {
+		if u, err := url.Parse(req.URL()); err == nil && u != nil {
+			path = u.Path
+		}
+	}
+
+	path = strings.TrimPrefix(path, "/")
+	if idx := strings.IndexByte(path, '/'); idx > 0 {
+		service := path[:idx]
+		method := path[idx+1:]
+		attrs = append(attrs,
+			StringAttr(KeyRPCService, service),
+			StringAttr(KeyRPCMethod, method),
+		)
+	}
+
+	return attrs
+}
+
+// GRPCClientResponseAttributes extracts gRPC status code attributes from [aoni.Response].
+func GRPCClientResponseAttributes(resp aoni.Response) []Attribute {
+	if resp == nil {
+		return nil
+	}
+
+	attrs := make([]Attribute, 0, 2)
+	statusStr := resp.Header("grpc-status")
+	if statusStr == "" {
+		if trailers := resp.Trailers(); len(trailers) > 0 {
+			if vals, ok := trailers["grpc-status"]; ok && len(vals) > 0 {
+				statusStr = vals[0]
+			}
+		}
+	}
+
+	if statusStr != "" {
+		if code, err := strconv.Atoi(statusStr); err == nil {
+			attrs = append(attrs, IntAttr(KeyRPCGRPCStatusCode, code))
+		}
+	}
+
+	return attrs
 }
