@@ -409,6 +409,13 @@ func writeHexInt(w *bufio.Writer, n int) error {
 		panic("BUG: int must be positive")
 	}
 
+	if hasVectorChunk {
+		var buf [16]byte
+		written := vectorFormatHexUint(&buf, n)
+		_, err := w.Write(buf[:written])
+		return err
+	}
+
 	v := hexIntBufPool.Get()
 	if v == nil {
 		v = make([]byte, maxHexIntChars+1)
