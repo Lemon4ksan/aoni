@@ -20,6 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -105,20 +106,23 @@ type RequestConfig struct {
 	HappyEyeballsDelay time.Duration
 	TCPDelay           netutil.TCPDelayRange
 
-	DisableAltSvc             bool
-	Disable0RTT               bool
-	MultiReadDisableDisk      bool
-	AllowNonReadOnlyHedging   bool
-	HasExplicitAcceptEncoding bool
-	Debug                     bool
-	InsecureSkipVerify        bool
-	SSRFGuard                 bool
-	ProxyDNS                  bool
-	Coalesce                  bool
-	ETagAutomaton             bool
-	AutoDecode                bool
-	DisableBaseResponse       bool
-	BaseResponseOverride      func() core.BaseResponse
+	AvailableDictionary          *dict.Dictionary
+	DictionaryStore              *dict.Store
+	DisableDictionaryCompression bool
+	DisableAltSvc                bool
+	Disable0RTT                  bool
+	MultiReadDisableDisk         bool
+	AllowNonReadOnlyHedging      bool
+	HasExplicitAcceptEncoding    bool
+	Debug                        bool
+	InsecureSkipVerify           bool
+	SSRFGuard                    bool
+	ProxyDNS                     bool
+	Coalesce                     bool
+	ETagAutomaton                bool
+	AutoDecode                   bool
+	DisableBaseResponse          bool
+	BaseResponseOverride         func() core.BaseResponse
 }
 
 // GetPipeline retrieves the request-specific PipelineConfig from context.

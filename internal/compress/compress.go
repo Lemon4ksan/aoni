@@ -132,6 +132,53 @@ func Decompress(encoding string, src, dst []byte) ([]byte, error) {
 	}
 }
 
+// DecompressWithDict decodes compressed src into dst using the specified Content-Encoding algorithm and dictionary.
+// Supports "dcz" (RFC 9842 §5) and "dcb" (RFC 9842 §4) alongside standard encodings.
+func DecompressWithDict(encoding string, src, dst, dictBytes []byte) ([]byte, error) {
+	if len(src) == 0 {
+		return nil, nil
+	}
+
+	switch encoding {
+	case "dcz":
+		return UnzstdDCZ(src, dst, dictBytes)
+	case "dcb":
+		return UnbrotliDCB(src, dst, dictBytes)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "dcz":
+		return UnzstdDCZ(src, dst, dictBytes)
+	case "dcb":
+		return UnbrotliDCB(src, dst, dictBytes)
+	default:
+		return Decompress(encoding, src, dst)
+	}
+}
+
+// DecompressScopedWithDict decodes compressed src directly into a zero-allocation scoped buffer with dictionary support.
+func DecompressScopedWithDict(s *borrow.Scope, encoding string, src, dictBytes []byte) (borrow.Bytes, error) {
+	if len(src) == 0 {
+		return borrow.Bytes{}, nil
+	}
+
+	switch encoding {
+	case "dcz":
+		return UnzstdDCZScoped(s, src, dictBytes)
+	case "dcb":
+		return UnbrotliDCBScoped(s, src, dictBytes)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "dcz":
+		return UnzstdDCZScoped(s, src, dictBytes)
+	case "dcb":
+		return UnbrotliDCBScoped(s, src, dictBytes)
+	default:
+		return DecompressScoped(s, encoding, src)
+	}
+}
+
 // DecompressScoped decodes compressed src directly into a zero-allocation scoped buffer
 // bound to the lifetime of s.
 func DecompressScoped(s *borrow.Scope, encoding string, src []byte) (borrow.Bytes, error) {
@@ -489,6 +536,25 @@ func AcquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
 // ReleaseBrotliReader returns br back to the pool.
 func ReleaseBrotliReader(br *brotli.Reader) {
 	brotli.ReleaseReader(br)
+}
+
+// NewDictionaryReader returns an [io.ReadCloser] that decompresses data from r
+// using the specified Content-Encoding algorithm ("dcz", "dcb", "gzip", "br", "zstd", "deflate")
+// with the provided dictionary payload (RFC 9842).
+func NewDictionaryReader(encoding string, r io.Reader, dictBytes []byte) (io.ReadCloser, error) {
+	if r == nil {
+		return nil, errors.New("compress: nil reader")
+	}
+
+	enc := strings.ToLower(strings.TrimSpace(encoding))
+	switch enc {
+	case "dcz":
+		return NewDCZReader(r, dictBytes)
+	case "dcb":
+		return NewDCBReader(r, dictBytes)
+	default:
+		return NewReader(encoding, r)
+	}
 }
 
 // NewReader returns a pooled [io.ReadCloser] that decompresses data from r

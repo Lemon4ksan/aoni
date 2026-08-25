@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/sys"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -100,6 +101,7 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 			BaseURL:         &url.URL{},
 			Headers:         make(http.Header),
 			MaxResponseSize: 10 * 1024 * 1024,
+			DictionaryStore: dict.NewStore(),
 			Pipeline: PipelineConfig{
 				Decompress: true,
 				Validate:   true,

@@ -7,8 +7,12 @@ package pipeline
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	fio "github.com/lemon4ksan/foundation/io"
+
+	"github.com/lemon4ksan/aoni/internal/compress"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 )
 
 // StreamFilter defines a response body stream transformation filter.
@@ -75,13 +79,49 @@ func DecompressStreamFilter(req *http.Request) StreamFilter {
 			return body, nil
 		}
 
-		decompressedBody, decompressed := applyContentDecompression(r, body)
+		decompressedBody, decompressed := applyStreamDecompression(req, r, body)
 		if decompressed {
 			r.Uncompressed = true
 		}
 
 		return decompressedBody, nil
 	}
+}
+
+func applyStreamDecompression(req *http.Request, resp *http.Response, body io.ReadCloser) (io.ReadCloser, bool) {
+	encoding := resp.Header.Get("Content-Encoding")
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return body, false
+	}
+
+	normEnc := strings.ToLower(strings.TrimSpace(encoding))
+	if normEnc == dict.ContentEncodingDCZ || normEnc == dict.ContentEncodingDCB {
+		var dictData []byte
+		if req != nil && req.Context() != nil {
+			cfg := GetRequestConfig(req.Context())
+			if cfg != nil && cfg.AvailableDictionary != nil {
+				dictData = cfg.AvailableDictionary.Data
+			}
+		}
+
+		if len(dictData) > 0 {
+			reader, err := compress.NewDictionaryReader(normEnc, body, dictData)
+			if err == nil {
+				resetDecompressedHeader(resp)
+
+				return reader, true
+			}
+		}
+	}
+
+	reader, err := compress.NewReader(encoding, body)
+	if err != nil {
+		return body, false
+	}
+
+	resetDecompressedHeader(resp)
+
+	return reader, true
 }
 
 // TranscodeStreamFilter returns a StreamFilter that transcodes non-UTF-8 character sets to UTF-8.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -209,20 +210,22 @@ type CachedResponse struct {
 }
 
 type ClientDefaults struct {
-	Headers              http.Header
-	BeforeRequest        []func(req *http.Request)
-	AfterResponse        []func(resp *http.Response, err error)
-	Inspector            telemetry.TrafficInspector
-	ResponseValidator    func(*http.Response) error
-	SoftErrorDetectors   []func(*http.Response, []byte) error
-	ChallengeDetector    func(*http.Response) (bool, error)
-	ChallengeSolver      challenge.Solver
-	UARotationProfiles   []BrowserProfile
-	RefererState         *RefererState
-	MaxResponseSize      int64
-	MultiReadThreshold   int64
-	MultiReadDisableDisk bool
-	RefererAutomaton     bool
+	Headers                      http.Header
+	BeforeRequest                []func(req *http.Request)
+	AfterResponse                []func(resp *http.Response, err error)
+	Inspector                    telemetry.TrafficInspector
+	ResponseValidator            func(*http.Response) error
+	SoftErrorDetectors           []func(*http.Response, []byte) error
+	ChallengeDetector            func(*http.Response) (bool, error)
+	ChallengeSolver              challenge.Solver
+	UARotationProfiles           []BrowserProfile
+	RefererState                 *RefererState
+	MaxResponseSize              int64
+	MultiReadThreshold           int64
+	MultiReadDisableDisk         bool
+	RefererAutomaton             bool
+	DictionaryStore              *dict.Store
+	DisableDictionaryCompression bool
 }
 
 type BrowserProfile struct {

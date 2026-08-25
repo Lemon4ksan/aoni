@@ -15,6 +15,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -71,8 +73,63 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 
 	stdReq = stageUploadProgress(p, stdReq, tx)
 	stdReq = stageJA4Report(p, stdReq, tx)
+	stdReq = stageAvailableDictionary(p, stdReq, tx)
 
 	return stdReq
+}
+
+func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
+	if req == nil || req.URL == nil || !strings.EqualFold(req.URL.Scheme, "https") {
+		// RFC 9842 §8: Compression Dictionary Transport MUST only be used in secure contexts (HTTPS).
+		return req
+	}
+
+	cfg := GetRequestConfig(req.Context())
+	if cfg != nil && cfg.DisableDictionaryCompression {
+		return req
+	}
+
+	if p.defaults.DisableDictionaryCompression {
+		return req
+	}
+
+	store := p.defaults.DictionaryStore
+	if cfg != nil && cfg.DictionaryStore != nil {
+		store = cfg.DictionaryStore
+	}
+
+	if store == nil {
+		return req
+	}
+
+	dest := req.Header.Get("Sec-Fetch-Dest")
+
+	matchedDict, ok := store.Match(req.URL, dest)
+	if !ok || matchedDict == nil {
+		return req
+	}
+
+	// RFC 9842 §2.2: Available-Dictionary: :<sha256>:
+	req.Header.Set(dict.HeaderAvailableDictionary, dict.FormatAvailableDictionary(matchedDict.Hash))
+
+	// RFC 9842 §2.3: Dictionary-ID
+	if matchedDict.ID != "" {
+		req.Header.Set(dict.HeaderDictionaryID, strconv.Quote(matchedDict.ID))
+	}
+
+	// RFC 9842 §6.1: Accept-Encoding
+	ae := req.Header.Get("Accept-Encoding")
+	if ae != "" {
+		if !strings.Contains(strings.ToLower(ae), dict.ContentEncodingDCZ) {
+			req.Header.Set("Accept-Encoding", ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
+		}
+	}
+
+	if cfg != nil {
+		cfg.AvailableDictionary = matchedDict
+	}
+
+	return req
 }
 
 func stageBeforeRequestHooks[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {

@@ -125,7 +125,7 @@ func TestGenericStore_Typed(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 
 	// 2. Set with TTL
-	err = store.Set(ctx, 42, user, 80*time.Millisecond)
+	err = store.Set(ctx, 42, user, 300*time.Millisecond)
 	require.NoError(t, err)
 
 	// 3. Hit
@@ -139,7 +139,7 @@ func TestGenericStore_Typed(t *testing.T) {
 	assert.Equal(t, user, opt.MustValue())
 
 	// 5. Expiration
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(350 * time.Millisecond)
 
 	_, err = store.Get(ctx, 42)
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)

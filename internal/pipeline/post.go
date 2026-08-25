@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"mime"
@@ -20,6 +21,7 @@ import (
 	"github.com/lemon4ksan/foundation/text/transform"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 )
 
 var (
@@ -44,6 +46,11 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 	}
 
 	resp, err = stageDecompressAndTranscode(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageDictionaryCapture(p, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +469,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 
 	if !hasExplicitAcceptEncoding(req) {
 		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
-			decompressedBody, decompressed := applyContentDecompression(r, body)
+			decompressedBody, decompressed := p.applyContentDecompression(req, r, body)
 			if decompressed {
 				r.Uncompressed = true
 			}
@@ -502,10 +509,38 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
-func applyContentDecompression(resp *http.Response, body io.ReadCloser) (io.ReadCloser, bool) {
+func (p *Pipeline[Req, Resp]) applyContentDecompression(
+	req *http.Request,
+	resp *http.Response,
+	body io.ReadCloser,
+) (io.ReadCloser, bool) {
 	encoding := resp.Header.Get("Content-Encoding")
 	if encoding == "" || strings.EqualFold(encoding, "identity") {
 		return body, false
+	}
+
+	normEnc := strings.ToLower(strings.TrimSpace(encoding))
+	if normEnc == dict.ContentEncodingDCZ || normEnc == dict.ContentEncodingDCB {
+		var dictData []byte
+		if req != nil && req.Context() != nil {
+			cfg := GetRequestConfig(req.Context())
+			if cfg != nil && cfg.AvailableDictionary != nil {
+				dictData = cfg.AvailableDictionary.Data
+			} else if p.defaults.DictionaryStore != nil && req.URL != nil {
+				dest := req.Header.Get("Sec-Fetch-Dest")
+				if d, ok := p.defaults.DictionaryStore.Match(req.URL, dest); ok && d != nil {
+					dictData = d.Data
+				}
+			}
+		}
+
+		if len(dictData) > 0 {
+			reader, err := compress.NewDictionaryReader(normEnc, body, dictData)
+			if err == nil {
+				resetDecompressedHeader(resp)
+				return reader, true
+			}
+		}
 	}
 
 	reader, err := compress.NewReader(encoding, body)
@@ -516,6 +551,62 @@ func applyContentDecompression(resp *http.Response, body io.ReadCloser) (io.Read
 	resetDecompressedHeader(resp)
 
 	return reader, true
+}
+
+func stageDictionaryCapture[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	stdReq *http.Request,
+	resp *http.Response,
+	_ *Tx,
+) (*http.Response, error) {
+	if resp == nil || resp.StatusCode != http.StatusOK || resp.Body == nil || stdReq == nil || stdReq.URL == nil {
+		return resp, nil
+	}
+
+	if !strings.EqualFold(stdReq.URL.Scheme, "https") {
+		// RFC 9842 §8: secure contexts only
+		return resp, nil
+	}
+
+	useAsDict := resp.Header.Get(dict.HeaderUseAsDictionary)
+	if useAsDict == "" {
+		return resp, nil
+	}
+
+	cfg := GetRequestConfig(stdReq.Context())
+	if cfg != nil && cfg.DisableDictionaryCompression {
+		return resp, nil
+	}
+
+	if p.defaults.DisableDictionaryCompression {
+		return resp, nil
+	}
+
+	store := p.defaults.DictionaryStore
+	if cfg != nil && cfg.DictionaryStore != nil {
+		store = cfg.DictionaryStore
+	}
+
+	if store == nil {
+		return resp, nil
+	}
+
+	// Capture dictionary body up to DefaultMaxDictionarySize
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, dict.DefaultMaxDictionarySize))
+	_ = resp.Body.Close()
+
+	if err != nil && !errors.Is(err, io.EOF) {
+		resp.Body = io.NopCloser(bytes.NewReader(nil))
+		return resp, nil
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if len(bodyBytes) > 0 {
+		_, _ = store.Store(stdReq.URL, useAsDict, bodyBytes)
+	}
+
+	return resp, nil
 }
 
 func resetDecompressedHeader(resp *http.Response) {

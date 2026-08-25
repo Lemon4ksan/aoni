@@ -14,6 +14,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -163,5 +164,19 @@ func WithDuplicateRequestGuard(window time.Duration, logger core.Logger) aoni.Cl
 		cfg.Defaults.BeforeRequest = append(cfg.Defaults.BeforeRequest, func(req *http.Request) {
 			guard.CheckAndRecord(req.Method, req.URL.String())
 		})
+	}
+}
+
+// WithDictionaryStore returns an [aoni.ClientOption] configuring a custom RFC 9842 dictionary cache.
+func WithDictionaryStore(store *dict.Store) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DictionaryStore = store
+	}
+}
+
+// WithDisableDictionaryCompression returns an [aoni.ClientOption] disabling RFC 9842 compression dictionary negotiation.
+func WithDisableDictionaryCompression(disable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DisableDictionaryCompression = disable
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
@@ -888,6 +889,12 @@ type ClientDefaults struct {
 
 	// UARotationProfiles holds user agents and Client Hints for automatic browser persona rotation.
 	UARotationProfiles []BrowserProfile
+
+	// DictionaryStore caches HTTP compression dictionaries conforming to RFC 9842.
+	DictionaryStore *dict.Store
+
+	// DisableDictionaryCompression disables RFC 9842 compression dictionary discovery and negotiation.
+	DisableDictionaryCompression bool
 }
 
 // Clone creates a deep copy of ClientDefaults and all nested structures.
@@ -1410,20 +1417,22 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 //nolint:bodyclose // SoftErrorDetectors and ResponseValidator inspect responses without taking ownership of response lifecycle.
 func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
-		Headers:              c.cfg.Defaults.Headers,
-		BeforeRequest:        c.cfg.Defaults.BeforeRequest,
-		AfterResponse:        c.cfg.Defaults.AfterResponse,
-		Inspector:            c.cfg.Defaults.Inspector,
-		ResponseValidator:    c.cfg.Defaults.ResponseValidator,
-		SoftErrorDetectors:   c.cfg.Defaults.toInternalSoftErrorDetectors(),
-		ChallengeDetector:    c.cfg.Defaults.ChallengeDetector,
-		ChallengeSolver:      c.cfg.Defaults.ChallengeSolver,
-		UARotationProfiles:   c.cfg.Defaults.toInternalProfiles(),
-		RefererState:         c.referer,
-		MaxResponseSize:      c.cfg.Defaults.MaxResponseSize,
-		MultiReadThreshold:   c.cfg.Defaults.MultiReadThreshold,
-		MultiReadDisableDisk: c.cfg.Defaults.MultiReadDisableDisk,
-		RefererAutomaton:     c.cfg.Defaults.RefererAutomaton,
+		Headers:                      c.cfg.Defaults.Headers,
+		BeforeRequest:                c.cfg.Defaults.BeforeRequest,
+		AfterResponse:                c.cfg.Defaults.AfterResponse,
+		Inspector:                    c.cfg.Defaults.Inspector,
+		ResponseValidator:            c.cfg.Defaults.ResponseValidator,
+		SoftErrorDetectors:           c.cfg.Defaults.toInternalSoftErrorDetectors(),
+		ChallengeDetector:            c.cfg.Defaults.ChallengeDetector,
+		ChallengeSolver:              c.cfg.Defaults.ChallengeSolver,
+		UARotationProfiles:           c.cfg.Defaults.toInternalProfiles(),
+		RefererState:                 c.referer,
+		MaxResponseSize:              c.cfg.Defaults.MaxResponseSize,
+		MultiReadThreshold:           c.cfg.Defaults.MultiReadThreshold,
+		MultiReadDisableDisk:         c.cfg.Defaults.MultiReadDisableDisk,
+		RefererAutomaton:             c.cfg.Defaults.RefererAutomaton,
+		DictionaryStore:              c.cfg.Defaults.DictionaryStore,
+		DisableDictionaryCompression: c.cfg.Defaults.DisableDictionaryCompression,
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -288,4 +289,17 @@ func TestOption_WithNetwork(t *testing.T) {
 	assert.True(t, aoni.NetworkIP4.IsIP())
 	assert.True(t, aoni.NetworkIP6.IsIP())
 	assert.False(t, aoni.NetworkTCP.IsIP())
+}
+
+func TestOption_DictionaryCompression(t *testing.T) {
+	t.Parallel()
+
+	customStore := dict.NewStore(dict.WithMaxBytes(32 * 1024 * 1024))
+	cfg := &aoni.Config{}
+
+	option.WithDictionaryStore(customStore)(cfg)
+	assert.Equal(t, customStore, cfg.Defaults.DictionaryStore)
+
+	option.WithDisableDictionaryCompression(true)(cfg)
+	assert.True(t, cfg.Defaults.DisableDictionaryCompression)
 }
