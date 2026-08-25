@@ -320,6 +320,8 @@ aoni/
 
 ## Real-World Case Studies & Integrations
 
+- [ao](https://github.com/Lemon4ksan/ao): Independent high-performance stealth fork of `curl` with its HTTP/HTTPS/WS transport engine entirely powered by `libaoni` (`lib/aoni_bridge.c`).
+  - Emits bit-exact Chromium uTLS fingerprints (JA4 `t13d1515h2...`), hybrid Post-Quantum ML-KEM-768 key exchanges, and delivers **9,145+ RPS** across 100 concurrent POSIX threads (3-5x faster than standard multi-threaded curl) with 0% memory leaks and 0% GC pressure.
 - [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): High-throughput, zero-allocation fork of official `discordgo` powered by `aoni` & `aoni/realtime/ws` and revived to support latest Discord API changes with `vortex`.
   - Delivers 6.8x higher REST throughput (203,000+ RPS) and 3.1x faster WebSocket operations with 0 B/op memory allocations on frame framing.
 
