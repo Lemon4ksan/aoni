@@ -23,6 +23,7 @@ extern "C" {
 #define AONI_ERR_TIMEOUT        -3
 #define AONI_ERR_INVALID_PARAM  -4
 #define AONI_ERR_CLIENT_NIL     -5
+#define AONI_ERR_OUT_OF_MEMORY  -6
 
 /*
  * Browser Profile Constants
@@ -31,6 +32,12 @@ extern "C" {
 #define AONI_BROWSER_CHROME     1
 #define AONI_BROWSER_FIREFOX    2
 #define AONI_BROWSER_SAFARI     3
+
+/* Opaque pointer to an aoni fast.Client instance */
+typedef void* aoni_client_t;
+
+/* Opaque pointer to an off-heap OS memory arena (mmap / VirtualAlloc) */
+typedef void* aoni_arena_t;
 
 /*
  * Task descriptor representing an HTTP request & pre-allocated response slot.
@@ -49,15 +56,24 @@ typedef struct {
     uint8_t*       body_ptr;         /* Request payload pointer (NULL if no body) */
     size_t         body_len;         /* Length of request body */
 
-    /* Response outputs (Written directly into host memory by aoni) */
-    uint8_t*       resp_buf_ptr;     /* Pre-allocated response body buffer */
+    /* Response outputs */
+    uint8_t*       resp_buf_ptr;     /* Response body pointer:
+                                      *  - If non-NULL on input: aoni copies into caller's pre-allocated buffer.
+                                      *  - If NULL on input: aoni auto-allocates via offheap (free via aoni_task_free).
+                                      *  - If arena is set: allocated sequentially from arena. */
     size_t         resp_buf_cap;     /* Capacity of pre-allocated response body buffer */
     size_t         resp_buf_len;     /* Actual body bytes written (populated by aoni) */
-    uint8_t*       resp_headers_ptr; /* Optional pre-allocated response headers buffer (NULL = ignore) */
+
+    uint8_t*       resp_headers_ptr; /* Optional response headers buffer (NULL = ignore) */
     size_t         resp_headers_cap; /* Capacity of response headers buffer */
     size_t         resp_headers_len; /* Actual header bytes written (populated by aoni) */
+
     int32_t        status_code;      /* HTTP response status code (e.g. 200, 404, 500) */
     int32_t        error_code;       /* 0 = AONI_OK, <0 = Error Code */
+
+    /* Advanced Memory & Arena placement */
+    aoni_arena_t   arena;            /* Optional Off-Heap Arena for zero-alloc bump placement (NULL = disabled) */
+    void*          _internal_handle; /* Private internal handle for offheap tracking */
 } aoni_task_t;
 
 /*
@@ -73,36 +89,31 @@ typedef struct {
     char*       proxy_url;          /* Optional proxy URL (e.g. "socks5://127.0.0.1:9050", NULL = direct) */
 } aoni_config_t;
 
-/* Opaque pointer to an aoni fast.Client instance */
-typedef void* aoni_client_t;
-
 /*
- * aoni_client_create initializes a new fast.Client instance with the given configuration.
- * Returns NULL on initialization failure.
+ * Client Lifecycle
  */
 aoni_client_t aoni_client_create(aoni_config_t* config);
+void          aoni_client_destroy(aoni_client_t client);
 
 /*
- * aoni_client_destroy safely tears down connection pools and releases client resources.
+ * Request Execution
  */
-void aoni_client_destroy(aoni_client_t client);
+int32_t       aoni_client_do(aoni_client_t client, aoni_task_t* task);
+void          aoni_client_batch_do(aoni_client_t client, aoni_task_t* tasks, size_t count);
 
 /*
- * aoni_client_do executes a single synchronous HTTP request with zero heap allocations.
- * Returns status_code on success (>= 100), or negative error code on failure.
+ * Off-Heap Arena & Memory Management (0% Go GC Overhead)
  */
-int32_t aoni_client_do(aoni_client_t client, aoni_task_t* task);
+aoni_arena_t  aoni_arena_create(size_t size_bytes);
+void          aoni_arena_reset(aoni_arena_t arena);
+void          aoni_arena_destroy(aoni_arena_t arena);
+void          aoni_task_free(aoni_task_t* task);
+void          aoni_free(void* ptr);
 
 /*
- * aoni_client_batch_do processes N requests concurrently across the Go Netpoller
- * within a single FFI call, achieving sub-nanosecond per-request FFI amortization.
+ * Engine Version
  */
-void aoni_client_batch_do(aoni_client_t client, aoni_task_t* tasks, size_t count);
-
-/*
- * aoni_version returns the library version string.
- */
-char* aoni_version(void);
+char*         aoni_version(void);
 
 #ifdef __cplusplus
 }

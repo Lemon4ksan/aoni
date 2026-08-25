@@ -6,9 +6,12 @@ package main
 
 import (
 	"bytes"
+	"runtime/cgo"
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -24,6 +27,7 @@ const (
 	AONIErrTimeout        int32 = -3
 	AONIErrInvalidParam   int32 = -4
 	AONIErrClientNil      int32 = -5
+	AONIErrOutOfMemory    int32 = -6
 
 	AONIBrowserNone    uint8 = 0
 	AONIBrowserChrome  uint8 = 1
@@ -36,23 +40,25 @@ const (
 
 // Task represents the memory layout of C aoni_task_t in pure Go.
 type Task struct {
-	TaskID         uint64
-	Method         *byte
-	MethodLen      uintptr
-	URL            *byte
-	URLLen         uintptr
-	HeadersRaw     *byte
-	HeadersLen     uintptr
-	BodyPtr        *byte
-	BodyLen        uintptr
-	RespBufPtr     *byte
-	RespBufCap     uintptr
-	RespBufLen     uintptr
-	RespHeadersPtr *byte
-	RespHeadersCap uintptr
-	RespHeadersLen uintptr
-	StatusCode     int32
-	ErrorCode      int32
+	TaskID          uint64
+	Method          *byte
+	MethodLen       uintptr
+	URL             *byte
+	URLLen          uintptr
+	HeadersRaw      *byte
+	HeadersLen      uintptr
+	BodyPtr         *byte
+	BodyLen         uintptr
+	RespBufPtr      *byte
+	RespBufCap      uintptr
+	RespBufLen      uintptr
+	RespHeadersPtr  *byte
+	RespHeadersCap  uintptr
+	RespHeadersLen  uintptr
+	StatusCode      int32
+	ErrorCode       int32
+	Arena           unsafe.Pointer
+	_InternalHandle unsafe.Pointer
 }
 
 // Config represents the memory layout of C aoni_config_t in pure Go.
@@ -69,6 +75,8 @@ type Config struct {
 
 // Version returns the version string of the library.
 const Version = "1.0.0-silicon"
+
+var arenaMutex sync.Mutex
 
 // NewClientFromConfig instantiates a fast.Client from the given Config.
 func NewClientFromConfig(cfg *Config) *fast.Client {
@@ -99,7 +107,7 @@ func NewClientFromConfig(cfg *Config) *fast.Client {
 	return fast.NewClient(opts...)
 }
 
-// DoTask executes a single Task on the client with zero heap allocations.
+// DoTask executes a single Task on the client with zero Go GC overhead.
 func DoTask(client *fast.Client, t *Task) int32 {
 	if client == nil {
 		if t != nil {
@@ -149,7 +157,7 @@ func DoTask(client *fast.Client, t *Task) int32 {
 	}
 	defer resp.Close()
 
-	// 6. Write response headers to C buffer (if requested)
+	// 6. Response Headers
 	if t.RespHeadersPtr != nil && t.RespHeadersCap > 0 {
 		var rawHeaders []byte
 		if fastResp, ok := resp.(*fast.Response); ok && fastResp != nil {
@@ -169,21 +177,64 @@ func DoTask(client *fast.Client, t *Task) int32 {
 		}
 	}
 
-	// 7. Write response body to C buffer
+	// 7. Response Body & Memory Dispatch
 	t.StatusCode = int32(resp.StatusCode())
 	body := resp.UnsafeBodyBytes()
+	bodyLen := len(body)
 
-	if t.RespBufPtr != nil && t.RespBufCap > 0 {
+	// Mode 1: Off-Heap Arena Allocation
+	if t.Arena != nil {
+		arena := (*offheap.Arena)(t.Arena)
+		arenaMutex.Lock()
+		ptr := arena.Alloc(bodyLen)
+		arenaMutex.Unlock()
+
+		if ptr == nil {
+			t.ErrorCode = AONIErrOutOfMemory
+			return AONIErrOutOfMemory
+		}
+
+		if bodyLen > 0 {
+			dst := unsafe.Slice((*byte)(ptr), bodyLen)
+			copy(dst, body)
+		}
+		t.RespBufPtr = (*byte)(ptr)
+		t.RespBufCap = uintptr(bodyLen)
+		t.RespBufLen = uintptr(bodyLen)
+
+	} else if t.RespBufPtr != nil && t.RespBufCap > 0 {
+		// Mode 2: Pre-allocated buffer by caller
 		cBuf := unsafe.Slice(t.RespBufPtr, int(t.RespBufCap))
 		n := copy(cBuf, body)
 		t.RespBufLen = uintptr(n)
 
-		if len(body) > int(t.RespBufCap) {
+		if bodyLen > int(t.RespBufCap) {
 			t.ErrorCode = AONIErrBufferOverflow
 			return AONIErrBufferOverflow
 		}
+
 	} else {
-		t.RespBufLen = uintptr(len(body))
+		// Mode 3: Dynamic Off-Heap Auto-Allocation (0% Go GC overhead)
+		if bodyLen == 0 {
+			t.RespBufPtr = nil
+			t.RespBufCap = 0
+			t.RespBufLen = 0
+		} else {
+			offBuf, allocErr := offheap.NewBuffer(bodyLen)
+			if allocErr != nil {
+				t.ErrorCode = AONIErrOutOfMemory
+				return AONIErrOutOfMemory
+			}
+
+			_, _ = offBuf.Write(body)
+			bufSlice := offBuf.Bytes()
+
+			t.RespBufPtr = &bufSlice[0]
+			t.RespBufCap = uintptr(offBuf.Cap())
+			t.RespBufLen = uintptr(offBuf.Len())
+			handle := cgo.NewHandle(offBuf)
+			t._InternalHandle = unsafe.Pointer(uintptr(handle))
+		}
 	}
 
 	if t.ErrorCode == 0 {
@@ -222,6 +273,24 @@ func DoBatchTasks(client *fast.Client, tasks []Task) {
 	close(taskChan)
 
 	wg.Wait()
+}
+
+// FreeTaskOffHeap safely releases auto-allocated off-heap memory bound to the task.
+func FreeTaskOffHeap(t *Task) {
+	if t == nil || t._InternalHandle == nil {
+		return
+	}
+
+	handle := cgo.Handle(uintptr(t._InternalHandle))
+	if buf, ok := handle.Value().(*offheap.OffHeapBuffer); ok && buf != nil {
+		buf.Release()
+	}
+	handle.Delete()
+
+	t._InternalHandle = nil
+	t.RespBufPtr = nil
+	t.RespBufCap = 0
+	t.RespBufLen = 0
 }
 
 func parseRawHeaders(data []byte, req *fast.Request) {

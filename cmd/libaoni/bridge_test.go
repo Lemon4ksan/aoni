@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"unsafe"
+
+	"github.com/lemon4ksan/foundation/silicon/offheap"
 )
 
 func TestBridgeLifecycle(t *testing.T) {
@@ -184,20 +186,122 @@ func TestBridgeBufferOverflow(t *testing.T) {
 	}
 }
 
+func TestBridgeOffHeapAutoAllocation(t *testing.T) {
+	expectedPayload := strings.Repeat("AONI_OFFHEAP_TEST_PAYLOAD_1234567890_", 200) // ~7.4 KB
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(expectedPayload))
+	}))
+	defer server.Close()
+
+	client := NewClientFromConfig(nil)
+	if client == nil {
+		t.Fatal("failed to create client")
+	}
+
+	urlStr := server.URL
+
+	// Pass resp_buf_ptr = nil -> asks libaoni to allocate in Off-Heap
+	task := Task{
+		TaskID:     1001,
+		URL:        unsafe.StringData(urlStr),
+		URLLen:     uintptr(len(urlStr)),
+		RespBufPtr: nil,
+		RespBufCap: 0,
+	}
+
+	status := DoTask(client, &task)
+	if status != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (err_code=%d)", status, task.ErrorCode)
+	}
+
+	if task.RespBufPtr == nil {
+		t.Fatal("expected auto-allocated off-heap pointer, got nil")
+	}
+
+	if int(task.RespBufLen) != len(expectedPayload) {
+		t.Fatalf("expected len %d, got %d", len(expectedPayload), task.RespBufLen)
+	}
+
+	gotSlice := unsafe.Slice(task.RespBufPtr, int(task.RespBufLen))
+	if string(gotSlice) != expectedPayload {
+		t.Fatal("received payload does not match expected off-heap content")
+	}
+
+	// Free task offheap buffer
+	FreeTaskOffHeap(&task)
+	if task.RespBufPtr != nil || task._InternalHandle != nil {
+		t.Fatal("expected cleaned up task fields after FreeTaskOffHeap")
+	}
+}
+
+func TestBridgeOffHeapArenaBatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "arena-payload-%s", id)
+	}))
+	defer server.Close()
+
+	client := NewClientFromConfig(nil)
+	if client == nil {
+		t.Fatal("failed to create client")
+	}
+
+	// Create 2MB Off-Heap Arena directly from OS kernel
+	arena, err := offheap.NewArena(2 * 1024 * 1024)
+	if err != nil {
+		t.Fatalf("failed to allocate off-heap arena: %v", err)
+	}
+	defer arena.Release()
+
+	const numTasks = 50
+	tasks := make([]Task, numTasks)
+	urls := make([]string, numTasks)
+
+	for i := 0; i < numTasks; i++ {
+		urls[i] = fmt.Sprintf("%s/?id=%d", server.URL, i)
+		tasks[i] = Task{
+			TaskID: uint64(i),
+			URL:    unsafe.StringData(urls[i]),
+			URLLen: uintptr(len(urls[i])),
+			Arena:  unsafe.Pointer(arena),
+		}
+	}
+
+	DoBatchTasks(client, tasks)
+
+	for i := 0; i < numTasks; i++ {
+		if tasks[i].StatusCode != http.StatusOK {
+			t.Fatalf("task %d failed with status %d (err: %d)", i, tasks[i].StatusCode, tasks[i].ErrorCode)
+		}
+		if tasks[i].RespBufPtr == nil {
+			t.Fatalf("task %d: expected non-nil arena pointer", i)
+		}
+
+		got := string(unsafe.Slice(tasks[i].RespBufPtr, int(tasks[i].RespBufLen)))
+		expected := fmt.Sprintf("arena-payload-%d", i)
+		if got != expected {
+			t.Fatalf("task %d: expected body %q, got %q", i, expected, got)
+		}
+	}
+
+	// Single-cycle reset
+	arena.Reset()
+}
+
 func TestBytePtrToStringSafety(t *testing.T) {
-	// 1. Normal string
 	s := "http://127.0.0.1:8080\x00"
 	res := bytePtrToString(unsafe.StringData(s))
 	if res != "http://127.0.0.1:8080" {
 		t.Fatalf("expected %q, got %q", "http://127.0.0.1:8080", res)
 	}
 
-	// 2. Nil pointer
 	if bytePtrToString(nil) != "" {
 		t.Fatal("expected empty string for nil pointer")
 	}
 
-	// 3. Unbounded string (exceeds maxSafeCStringLen)
 	large := make([]byte, 5000)
 	for i := range large {
 		large[i] = 'a'
