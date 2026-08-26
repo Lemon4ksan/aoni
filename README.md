@@ -280,15 +280,24 @@ llvm-goc -fgo-pkgpath=main -O3 -S -o output.s myapp.go
 | :--- | :---: | :---: | :---: |
 | **Static Borrow Checker (`vortex lint`)** | ✗ | ✗ | **✓ (Formal CFG Separation Logic & Escape Prevention)** |
 | **Multi-Core Allocator Contention** | ⚠️ (`sync.Pool` lock contention) | ⚠️ (High contention) | **✓ (Core-Pinned `pool.PerPStorage` Zero-Contention)** |
+| **Linux `io_uring` Kernel Bypass** | ✗ | ✗ | **✓ (Zero-Syscall `mmap` SQ/CQ Ring Buffers @ 2.34M+ RPS)** |
 | **GC Overhead on Framing / Ping** | ✗ (Heap allocation) | ✗ (Heap allocation) | **✓ (0.00% GC — `offheap.SlabAllocator`)** |
 | **Native HTTP/2 Multiplexer** | ⚠️ (`x/net/http2` locks) | ✗ | **✓ (Native Zero-Alloc Table-Driven Huffman LUT)** |
 | **Native HTTP/3 / QUIC / QPACK** | ✗ | ✗ | **✓ (Pure-Go RFC 9000 & RFC 9204 Zero-Alloc Stream)** |
+| **Post-Quantum TLS 1.3 Key Exchange** | ✗ | ✗ | **✓ (FIPS 203 `X25519MLKEM768` & Zstd Cert Compression)** |
+| **RFC 8297 `103 Early Hints`** | ✗ | ✗ | **✓ (Proactive Link Parsing & Speculative Preconnect)** |
+| **Chromium Network Isolation (NIK)** | ✗ | ✗ | **✓ (Compound TopFrame/FrameSite Keys & CHIPS Partitioning)** |
+| **RFC 9218 Extensible Priorities** | ✗ | ✗ | **✓ (Structured Stream Priorities `u=0..7, i`)** |
+| **RFC 8767 Stale-While-Revalidate DNS** | ✗ | ✗ | **✓ (0ms Stale DNS with Deduplicated Async Background Refresh)** |
+| **RFC 9651 Compression Dictionaries** | ✗ | ✗ | **✓ (`dcb`, `dcz` & `Sec-Available-Dictionary` Transport)** |
 | **Generics-First Codecs** | ✗ (Manual) | ✗ (Interface reflection) | **✓ (Type-safe compile-time `[T]`)** |
 | **gRPC & gRPC-Web (4 Streaming Modes)** | ✗ | ✗ | **✓ (Unary, Server, Client & Bidi Stream)** |
 | **Chromium Happy Eyeballs v3** | ⚠️ (IPv4/v6 only) | ✗ | **✓ (H3 vs H2/H1 Protocol Racing)** |
 | **Auto-Recovery Pipeline** | ✗ | ✗ | **✓ (HTTP 421, 408, 425 & Alt-Svc Dynamic Backoff)** |
 | **W3C `No-Vary-Search` Cache** | ✗ | ✗ | **✓ (Smart Query Normalization)** |
 | **TLS 1.3 Encrypted Client Hello** | ✗ | ✗ | **✓ (ECH / RFC 9460 via DoH/DoQ)** |
+| **Credential Privacy & Anti-Replay** | ✗ | ✗ | **✓ (`Secret[T]` Memory Masking & RFC 8470 0-RTT Anti-Replay)** |
+| **Sandboxed PAC / WPAD Engine** | ✗ | ✗ | **✓ (Chromium-grade Proxy Auto-Config Rule Engine)** |
 | **OS Power Management** | ✗ | ✗ | **✓ (Auto-purge zombie socket pools on OS sleep)** |
 | **Active Circuit Breaking** | ✗ | ✗ | **✓ (Native EWMA & Error Ratio Tripping)** |
 | **Polite `Retry-After` Parsing** | ✗ | ✗ | **✓ (Delta-sec & RFC 1123 datetime)** |
@@ -312,7 +321,7 @@ aoni/
 ├── tunnel/       // L3/L4 tunneling: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
-├── netutil/      // Proxy rotators, DoH/DoT DNS resolvers, IPv6 subnet rotators
+├── netutil/      // Proxy rotators, DoH/DoT DNS resolvers, PAC engine, NIK, Priority, Early Hints
 ├── codec/        // Response decoders (JSON, Proto, gRPC-Web, XML) and url.Values encoders
 ├── realtime/     // WebSocket over H2 CONNECT (RFC 8441), SSE & NDJSON streams
 ├── resiliency/   // Local HTTP response caching, WAF challenge detectors & solvers, load balancers
@@ -352,6 +361,7 @@ For complete syntax reference, CLI options, and end-to-end workflows, see the [*
 
 ## Technical Specifications & Documentation
 
+- [**Security & Protocol Fidelity Invariants**](docs/SECURITY_AND_FIDELITY.md): Architectural defense model, SSRF protection, DNS rebinding, decompress bomb guards, and vulnerability matrix.
 - [**Vortex Contract Toolchain Guide**](docs/VORTEX.md): Complete AST declarative syntax, CLI manual, OpenAPI/AsyncAPI ingestion, in-memory mocks, and CI/CD integration.
 - [**Network Stack Specification**](docs/NETWORK_STACK.md): Detailed overview of Happy Eyeballs v3, HTTP 421/408/425 auto-recovery, ECH, and pool lifetime mechanics.
 - [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md): Architecture details on native PLAN9 AVX2 SIMD assembly (`simd_amd64.s`), 2MB LargePages slab arenas, and instruction execution budgets.

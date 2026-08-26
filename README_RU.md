@@ -280,15 +280,24 @@ llvm-goc -fgo-pkgpath=main -O3 -S -o output.s myapp.go
 | :--- | :---: | :---: | :---: |
 | **Статический Borrow Checker (`vortex lint`)** | ✗ | ✗ | **✓ (Формальный CFG, логика разделения памяти $P * Q$)** |
 | **Конкуренция за аллокатор на многоядерных CPU** | ⚠️ (Блокировки `sync.Pool`) | ⚠️ (Высокая конкуренция) | **✓ (`pool.PerPStorage` с привязкой к ядрам, 0 contention)** |
+| **Linux `io_uring` Kernel Bypass** | ✗ | ✗ | **✓ (Разделяемые `mmap` SQ/CQ буферы без syscalls @ 2.34M+ RPS)** |
 | **Оверхед GC на фрейминг / Ping** | ✗ (Аллокации в куче) | ✗ (Аллокации в куче) | **✓ (0.00% GC — `offheap.SlabAllocator`)** |
 | **Нативный HTTP/2 Мультиплексор** | ⚠️ (Блокировки `x/net/http2`) | ✗ | **✓ (Нативный 0-alloc движок с плоской LUT таблицей)** |
 | **Нативный HTTP/3 / QUIC / QPACK** | ✗ | ✗ | **✓ (Чистый Go RFC 9000 & RFC 9204 0-alloc стрим)** |
+| **Постквантовый обмен ключами TLS 1.3** | ✗ | ✗ | **✓ (FIPS 203 `X25519MLKEM768` и Zstd сжатие сертификатов)** |
+| **RFC 8297 `103 Early Hints`** | ✗ | ✗ | **✓ (Парсинг Link и спекулятивный преконнект сокетов)** |
+| **Chromium Network Isolation (NIK)** | ✗ | ✗ | **✓ (Составные ключи TopFrame/FrameSite и куки CHIPS)** |
+| **Приоритеты RFC 9218 (Extensible Priorities)** | ✗ | ✗ | **✓ (Структурированные приоритеты стримов `u=0..7, i`)** |
+| **RFC 8767 Stale-While-Revalidate DNS** | ✗ | ✗ | **✓ (0мс Stale DNS с фоновым дедуплицированным обновлением)** |
+| **Словари сжатия RFC 9651 (Compression Dicts)**| ✗ | ✗ | **✓ (`dcb`, `dcz` и `Sec-Available-Dictionary` транспорт)** |
 | **Декодирование через дженерики** | ✗ (Вручную) | ✗ (Через рефлексию `any`) | **✓ (Типобезопасное `[T]` на этапе компиляции)** |
 | **gRPC и gRPC-Web (4 режима стриминга)** | ✗ | ✗ | **✓ (Unary, Server, Client и Bidi Stream)** |
 | **Chromium Happy Eyeballs v3** | ⚠️ (Только IPv4/v6) | ✗ | **✓ (Гонка протоколов H3 vs H2/H1)** |
 | **Конвейер авто-восстановления** | ✗ | ✗ | **✓ (HTTP 421, 408, 425 и динамический Alt-Svc Backoff)** |
 | **W3C `No-Vary-Search` кэширование** | ✗ | ✗ | **✓ (Умная нормализация Query-параметров)** |
 | **TLS 1.3 Encrypted Client Hello** | ✗ | ✗ | **✓ (ECH / RFC 9460 через DoH/DoQ)** |
+| **Защита учетных данных и 0-RTT Anti-Replay** | ✗ | ✗ | **✓ (`Secret[T]` маскирование в памяти и RFC 8470 защита)** |
+| **Изолированный движок PAC / WPAD** | ✗ | ✗ | **✓ (Chromium-grade парсер и исполнитель Proxy Auto-Config)** |
 | **Управление питанием ОС** | ✗ | ✗ | **✓ (Автоочистка зомби-пулов сокетов при сне ОС)** |
 | **Активный Circuit Breaking** | ✗ | ✗ | **✓ (Встроенный EWMA и расчёт процента ошибок)** |
 | **Вежливый парсинг `Retry-After`** | ✗ | ✗ | **✓ (Delta-sec и RFC 1123 datetime)** |
@@ -312,7 +321,7 @@ aoni/
 ├── tunnel/       // L3/L4 туннелирование: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Прокси-изолированные куки, формат Netscape, сортировка по RFC 6265
 ├── fingerprint/  // Обход TLS/JA4/p0f отпечатков, кадры HTTP/2, CDN-паддинг
-├── netutil/      // Ротатор прокси, DoH/DoT DNS резолверы, ротатор IPv6 подсетей
+├── netutil/      // Ротатор прокси, DoH/DoT DNS резолверы, PAC движок, NIK, Priority, Early Hints
 ├── codec/        // Декодеры ответов (JSON, Proto, gRPC-Web, XML) и кодирование параметров
 ├── realtime/     // WebSocket поверх H2 CONNECT (RFC 8441), SSE и NDJSON потоки
 ├── resiliency/   // Локальное кэширование, детекторы и солверы WAF-челленджей, балансировщики
@@ -352,6 +361,7 @@ vortex clean
 
 ## Технические спецификации и документация
 
+- [**Инварианты безопасности и точности протоколов**](docs/SECURITY_AND_FIDELITY.md): Модель архитектурной защиты, защита от SSRF, DNS rebinding, декомпрессионных бомб и матрица уязвимостей.
 - [**Руководство по Vortex**](docs/VORTEX_RU.md): Декларативный синтаксис AST, OpenAPI/AsyncAPI парсинг, in-memory моки и CI/CD интеграция.
 - [**Спецификация сетевого стека**](docs/NETWORK_STACK_RU.md): Подробный обзор Happy Eyeballs v3, авто-восстановления HTTP 421/408/425, ECH и механики пулов.
 - [**Спецификация аппаратной оптимизации**](docs/CPU_STACK.md): Детали PLAN9 AVX2 SIMD ассемблера (`simd_amd64.s`), 2MB LargePages slab-арены и бюджеты инструкций.
