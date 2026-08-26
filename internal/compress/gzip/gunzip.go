@@ -283,7 +283,7 @@ func (z *Reader) Read(p []byte) (n int, err error) {
 
 	for n == 0 {
 		n, z.err = z.decompressor.Read(p)
-		z.digest = vectorCRC32Update(z.digest, p[:n])
+		z.digest = CRC32Update(z.digest, p[:n])
 
 		z.size += uint32(n)
 		if !errors.Is(z.err, io.EOF) {

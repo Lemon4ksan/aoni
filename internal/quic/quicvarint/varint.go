@@ -116,16 +116,6 @@ func Parse(b []byte) (uint64 /* value */, int /* bytes consumed */, error) {
 		return 0, 0, io.EOF
 	}
 
-	if hasVectorAsm {
-		if val, consumed, ok := vectorParse(b); ok {
-			return val, consumed, nil
-		}
-
-		if len(b) < 1<<((b[0]&0xc0)>>6) {
-			return 0, 0, io.ErrUnexpectedEOF
-		}
-	}
-
 	first := b[0]
 	switch first >> 6 {
 	case 0: // 1-byte encoding: 00xxxxxx
@@ -158,12 +148,6 @@ func Parse(b []byte) (uint64 /* value */, int /* bytes consumed */, error) {
 
 // Append appends i in the QUIC varint format.
 func Append(b []byte, i uint64) []byte {
-	if hasVectorAsm {
-		if res, ok := vectorAppend(b, i); ok {
-			return res
-		}
-	}
-
 	if i <= maxVarInt1 {
 		return append(b, uint8(i))
 	}
@@ -225,14 +209,6 @@ func AppendWithLen(b []byte, i uint64, length int) []byte {
 //
 //gcassert:inline
 func Len(i uint64) int {
-	if i > maxVarInt8 {
-		panic(&varintLengthError{Num: i})
-	}
-
-	if hasVectorAsm {
-		return vectorLen(i)
-	}
-
 	if i <= maxVarInt1 {
 		return 1
 	}

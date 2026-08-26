@@ -50,11 +50,6 @@ func NewRecordFramer() *RecordFramer {
 
 // ComputeNonceXOR XORs the 8-byte sequence number into the rightmost 8 bytes of the 12-byte IV (RFC 8446 §5.3).
 func ComputeNonceXOR(iv []byte, seq uint64, dst *[12]byte) {
-	if hasVectorTLSNonce && len(iv) >= 12 {
-		vectorComputeNonceXOR(iv, seq, dst)
-		return
-	}
-
 	copy(dst[:], iv)
 	binary.BigEndian.PutUint64(dst[4:12], binary.BigEndian.Uint64(dst[4:12])^seq)
 }

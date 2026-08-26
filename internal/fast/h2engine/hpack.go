@@ -608,10 +608,6 @@ var byteStorage = pool.NewPerPStorage(func() *[]byte {
 
 // readInt decodes an unsigned variable-length integer with an N-bit prefix (RFC 7541 §5.1).
 func readInt(n int, b []byte) ([]byte, uint64) {
-	if hasVectorInt {
-		return vectorReadInt(n, b)
-	}
-
 	return readIntFallback(n, b)
 }
 
@@ -659,10 +655,6 @@ func ReadInt(n int, b []byte) ([]byte, uint64) {
 
 // appendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
 func appendInt(dst []byte, bits uint8, index uint64) []byte {
-	if hasVectorInt {
-		return vectorAppendInt(dst, bits, index)
-	}
-
 	if len(dst) == 0 {
 		dst = append(dst, 0)
 	}

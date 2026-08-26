@@ -17,7 +17,7 @@ func BenchmarkH1_ParseHexUint(b *testing.B) {
 
 	var total int
 	for i := 0; i < b.N; i++ {
-		val, _, _ := vectorParseHexUint(src)
+		val, _, _ := ParseHexUint(src)
 		total += val
 	}
 	_ = total
@@ -30,7 +30,7 @@ func BenchmarkH1_FormatHexUint(b *testing.B) {
 
 	var total int
 	for i := 0; i < b.N; i++ {
-		n := vectorFormatHexUint(&buf, 6725)
+		n := FormatHexUint(&buf, 6725)
 		total += n
 	}
 	_ = total

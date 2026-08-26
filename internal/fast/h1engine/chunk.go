@@ -11,10 +11,6 @@ import (
 // ParseHexUint parses a hex-encoded uint from src.
 // Returns the parsed integer, number of bytes consumed, and error if malformed.
 func ParseHexUint(src []byte) (int, int, error) {
-	if hasVectorChunk {
-		return vectorParseHexUint(src)
-	}
-
 	return parseHexUintFallback(src)
 }
 
@@ -26,20 +22,12 @@ func ReadBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 // FormatHexUint writes the hex representation of val into buf.
 // Returns the number of bytes written.
 func FormatHexUint(buf *[16]byte, val int) int {
-	if hasVectorChunk {
-		return vectorFormatHexUint(buf, val)
-	}
-
 	return formatHexUintFallback(buf, val)
 }
 
 // FormatChunkHeader writes the hex chunk header with \r\n trailer into buf.
 // Returns the number of bytes written.
 func FormatChunkHeader(buf *[24]byte, val int) int {
-	if hasVectorChunk {
-		return vectorFormatChunkHeader(buf, val)
-	}
-
 	n := formatHexUintFallback((*[16]byte)(buf[:16]), val)
 	buf[n] = '\r'
 	buf[n+1] = '\n'

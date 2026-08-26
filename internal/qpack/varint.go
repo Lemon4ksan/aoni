@@ -17,10 +17,6 @@ var (
 )
 
 func appendInt(dst []byte, prefixLen uint8, val uint64) []byte {
-	if hasVectorInt {
-		return vectorAppendInt(dst, prefixLen, val)
-	}
-
 	if prefixLen > 8 || prefixLen == 0 {
 		panic("invalid prefix length")
 	}
@@ -43,10 +39,6 @@ func appendInt(dst []byte, prefixLen uint8, val uint64) []byte {
 }
 
 func readInt(prefixLen uint8, data []byte) (uint64, int, error) {
-	if hasVectorInt {
-		return vectorReadInt(prefixLen, data)
-	}
-
 	if len(data) == 0 {
 		return 0, 0, io.ErrUnexpectedEOF
 	}

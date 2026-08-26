@@ -260,7 +260,7 @@ func (z *Writer) Write(p []byte) (int, error) {
 
 	z.size += uint32(len(p))
 
-	z.digest = vectorCRC32Update(z.digest, p)
+	z.digest = CRC32Update(z.digest, p)
 
 	n, z.err = z.compressor.Write(p)
 

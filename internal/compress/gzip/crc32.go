@@ -10,9 +10,5 @@ import (
 
 // CRC32Update calculates the IEEE CRC-32 checksum update of data starting with the given initial crc.
 func CRC32Update(crc uint32, data []byte) uint32 {
-	if hasVectorCRC32 {
-		return vectorCRC32Update(crc, data)
-	}
-
 	return crc32.Update(crc, crc32.IEEETable, data)
 }
