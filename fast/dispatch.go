@@ -31,6 +31,14 @@ func (c *Client) dispatchSingleRequest(
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	sanitizeTraceHeaders(fastReq)
 
+	// Enforce RFC 8470 / RFC 9001: 0-RTT Early Data is strictly restricted to safe idempotent methods.
+	method := bytesconv.B2S(fastReq.Header.Method())
+	if method != h1engine.MethodGet && method != h1engine.MethodHead && method != h1engine.MethodOptions {
+		reqCfg := pipeline.GetOrInitRequestConfig(ctx)
+		reqCfg.Disable0RTT = true
+		fastReq.Header.Del(h1engine.HeaderEarlyData)
+	}
+
 	host := bytesconv.B2S(fastReq.URI().Host())
 	alpnMode := c.resolveALPNMode(ctx, fastReq)
 

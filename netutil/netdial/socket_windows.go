@@ -57,6 +57,11 @@ func DialRIOSocket(ctx context.Context, network, target string, opts DialOptions
 	return conn, nil
 }
 
+// DialIOUringSocket falls back to DialDirectTCP on Windows.
+func DialIOUringSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
+	return DialDirectTCP(ctx, network, target, "", opts)
+}
+
 func applyLinuxSocketOptions(_ uintptr, _ DialOptions) error {
 	return nil
 }

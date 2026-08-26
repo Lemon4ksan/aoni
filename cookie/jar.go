@@ -17,6 +17,8 @@ import (
 	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
+
+	"github.com/lemon4ksan/aoni/netutil/nik"
 )
 
 type (
@@ -44,9 +46,17 @@ func WithPartitionKey(ctx context.Context, key string) context.Context {
 	return asyncctx.WithValue(ctx, partitionCtxKey{}, key)
 }
 
-// GetPartitionKey retrieves the active CHIPS top-level site partition key from context.
+// GetPartitionKey retrieves the active CHIPS top-level site partition key or Network Isolation Key from context.
 func GetPartitionKey(ctx context.Context) string {
-	return asyncctx.GetOr(ctx, partitionCtxKey{}, "")
+	if k := asyncctx.GetOr(ctx, partitionCtxKey{}, ""); k != "" {
+		return k
+	}
+
+	if nikKey, ok := nik.FromContext(ctx); ok {
+		return nikKey.KeyString()
+	}
+
+	return ""
 }
 
 type cookieKey struct {

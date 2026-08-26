@@ -143,6 +143,10 @@ func MarshalToken(t *Token) []byte {
 
 // UnmarshalToken parses an RFC 9577 §2.2.1 Token from raw binary bytes using fixed keyIDLen and authLen.
 func UnmarshalToken(data []byte, keyIDLen, authLen int) (*Token, error) {
+	if keyIDLen < 0 || authLen < 0 {
+		return nil, ErrInvalidTokenData
+	}
+
 	expectedLen := 2 + 32 + 32 + keyIDLen + authLen
 	if len(data) < expectedLen {
 		return nil, ErrInvalidTokenData

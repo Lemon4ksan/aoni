@@ -258,3 +258,23 @@ func WithCoreAffinity(cores ...int) aoni.ClientOption {
 		cfg.Network.CPUAffinityCores = cores
 	}
 }
+
+// WithPACEngine returns an [aoni.ClientOption] configuring a dynamic PAC (Proxy Auto-Config) engine for routing requests.
+func WithPACEngine(engine *proxy.PACEngine) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if engine != nil {
+			cfg.Network.TransportProxy = engine.ProxyFunc()
+		}
+	}
+}
+
+// WithPACRules returns an [aoni.ClientOption] creating and attaching a [proxy.PACEngine] with declarative rules.
+func WithPACRules(defaultRoute string, rules ...proxy.PACRule) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		engine := proxy.NewPACEngine(defaultRoute)
+		for _, r := range rules {
+			engine.AddRule(r)
+		}
+		cfg.Network.TransportProxy = engine.ProxyFunc()
+	}
+}

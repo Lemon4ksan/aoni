@@ -6,7 +6,6 @@ package h1engine
 
 import (
 	"bufio"
-	"unsafe"
 )
 
 // ParseHexUint parses a hex-encoded uint from src.
@@ -38,14 +37,7 @@ func FormatHexUint(buf *[16]byte, val int) int {
 // Returns the number of bytes written.
 func FormatChunkHeader(buf *[24]byte, val int) int {
 	if hasVectorChunk {
-		return int(h1_format_chunk_header(
-			uint64(uintptr(unsafe.Pointer(&buf[0]))),
-			uint64(val),
-			0,
-			0,
-			0,
-			0,
-		))
+		return vectorFormatChunkHeader(buf, val)
 	}
 
 	n := formatHexUintFallback((*[16]byte)(buf[:16]), val)

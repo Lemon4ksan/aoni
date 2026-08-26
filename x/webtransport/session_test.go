@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/quic"
-	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 type mockTransport struct {
@@ -308,58 +307,6 @@ func TestSession_DrainAndClose(t *testing.T) {
 
 	if payload.ApplicationErrorCode != 404 || payload.ErrorMessage != "session closed by test" {
 		t.Fatalf("close payload mismatch: %+v", payload)
-	}
-}
-
-func TestServer_RouteIncomingStreamsAndDatagrams(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(ServerConfig{})
-	defer srv.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctrl1, ctrl2 := net.Pipe()
-	defer ctrl1.Close()
-	defer ctrl2.Close()
-
-	go func() {
-		_ = srv.HandleSession(ctx, ctrl1, 44, newMockTransport())
-	}()
-
-	// Read 200 OK headers from server
-	var buf [256]byte
-
-	_, _ = ctrl2.Read(buf[:])
-
-	// Route incoming datagram
-	quarterID := uint64(11) // 44 / 4
-
-	var dgramBuf [32]byte
-
-	n := quicvarint.Append(dgramBuf[:0], quarterID)
-	copy(dgramBuf[len(n):], []byte("dgram_payload"))
-
-	if err := srv.RouteIncomingDatagram(dgramBuf[:len(n)+13]); err != nil {
-		t.Fatalf("RouteIncomingDatagram failed: %v", err)
-	}
-
-	srv.mu.RLock()
-	sess := srv.sessions[44]
-	srv.mu.RUnlock()
-
-	if sess == nil {
-		t.Fatal("session 44 not found on server")
-	}
-
-	received, err := sess.ReceiveDatagram(ctx)
-	if err != nil {
-		t.Fatalf("ReceiveDatagram failed: %v", err)
-	}
-
-	if string(received) != "dgram_payload" {
-		t.Fatalf("expected 'dgram_payload', got %q", string(received))
 	}
 }
 

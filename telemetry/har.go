@@ -15,6 +15,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/headkit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/internal/version"
 )
@@ -82,7 +83,7 @@ func (g *HARGenerator) Record(
 			Value:    c.Value,
 			Path:     c.Path,
 			Domain:   c.Domain,
-			Expires:  c.Expires.Format(time.RFC3339Nano),
+			Expires:  timekit.FormatRFC3339(c.Expires),
 			HTTPOnly: c.HttpOnly,
 			Secure:   c.Secure,
 		})
@@ -100,7 +101,7 @@ func (g *HARGenerator) Record(
 			Value:    c.Value,
 			Path:     c.Path,
 			Domain:   c.Domain,
-			Expires:  c.Expires.Format(time.RFC3339Nano),
+			Expires:  timekit.FormatRFC3339(c.Expires),
 			HTTPOnly: c.HttpOnly,
 			Secure:   c.Secure,
 		})
@@ -109,7 +110,7 @@ func (g *HARGenerator) Record(
 	bodyBytes := captureHARResponseBody(resp)
 
 	g.AddEntry(HAREntry{
-		StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
+		StartedDateTime: timekit.FormatRFC3339(startTime),
 		Time:            duration,
 		Request: HARRequest{
 			Method:      req.Method,

@@ -49,3 +49,14 @@ func vectorFormatHexUint(buf *[16]byte, val int) int {
 		0,
 	))
 }
+
+func vectorFormatChunkHeader(buf *[24]byte, val int) int {
+	return int(h1_format_chunk_header(
+		uint64(uintptr(unsafe.Pointer(&buf[0]))),
+		uint64(val),
+		0,
+		0,
+		0,
+		0,
+	))
+}

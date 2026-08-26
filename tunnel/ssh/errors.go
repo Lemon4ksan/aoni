@@ -7,7 +7,6 @@ package ssh
 import (
 	"github.com/lemon4ksan/aoni/tunnel/ssh/agent"
 	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/server"
 	"github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
 )
 
@@ -50,7 +49,4 @@ var (
 
 	// ErrParallelTransferFailed is returned when one or more chunks fail during parallel SFTP transfer.
 	ErrParallelTransferFailed = sftp.ErrParallelTransferFailed
-
-	// ErrServerClosed is returned when operations are performed on a closed SSH server.
-	ErrServerClosed = server.ErrServerClosed
 )

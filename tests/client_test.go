@@ -2832,4 +2832,41 @@ func TestClient_AuditFeatures(t *testing.T) {
 		defer respToken.Body.Close()
 		assert.Equal(t, http.StatusOK, respToken.StatusCode)
 	})
+
+	t.Run("preconnect_and_preresolve", func(t *testing.T) {
+		t.Parallel()
+
+		var headReceived atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				headReceived.Store(true)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.NewClient(nil)
+
+		// Preresolve
+		err := client.Preresolve(t.Context(), "127.0.0.1")
+		require.NoError(t, err)
+
+		// Preconnect
+		err = client.Preconnect(t.Context(), server.URL)
+		require.NoError(t, err)
+		assert.True(t, headReceived.Load())
+
+		// Fast client preconnect and preresolve
+		fastClient := fast.NewClient()
+		defer fastClient.Close()
+
+		err = fastClient.Preresolve(t.Context(), "127.0.0.1")
+		require.NoError(t, err)
+
+		err = fastClient.Preconnect(t.Context(), server.URL)
+		require.NoError(t, err)
+	})
 }

@@ -10,7 +10,15 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/nik"
 )
+
+// WithNIK constructs an [RequestModifier] binding a Chromium-grade [nik.NetworkIsolationKey] to the request context.
+func WithNIK(key nik.NetworkIsolationKey) RequestModifier {
+	return Custom(func(req Request) {
+		req.SetContext(nik.WithNIK(req.Context(), key))
+	})
+}
 
 // WithContext constructs an [RequestModifier] updating the execution context associated with the request.
 func WithContext(ctx context.Context) RequestModifier {

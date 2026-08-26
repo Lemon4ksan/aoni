@@ -353,11 +353,16 @@ func ParseAvailableDictionary(header string) ([32]byte, error) {
 	}
 
 	rawB64 := s[1 : len(s)-1]
-
-	n, err := base64.StdEncoding.Decode(hash[:], []byte(rawB64))
-	if err != nil || n != 32 {
+	if len(rawB64) > 64 {
 		return hash, ErrInvalidAvailableDictionary
 	}
+
+	decoded, err := base64.StdEncoding.DecodeString(rawB64)
+	if err != nil || len(decoded) != 32 {
+		return hash, ErrInvalidAvailableDictionary
+	}
+
+	copy(hash[:], decoded)
 
 	return hash, nil
 }

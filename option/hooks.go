@@ -193,3 +193,17 @@ func WithCPUAffinity(cores ...int) aoni.ClientOption {
 		cfg.Network.CPUAffinityCores = append(cfg.Network.CPUAffinityCores, cores...)
 	}
 }
+
+// WithEarlyHintsHandler returns an [aoni.ClientOption] registering a callback executed
+// when an intermediate RFC 8297 103 Early Hints response is received.
+func WithEarlyHintsHandler(handler func(hints http.Header)) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if handler != nil {
+			cfg.Defaults.AfterResponse = append(cfg.Defaults.AfterResponse, func(resp *http.Response, err error) {
+				if resp != nil && resp.StatusCode == 103 {
+					handler(resp.Header)
+				}
+			})
+		}
+	}
+}

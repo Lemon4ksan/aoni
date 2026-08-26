@@ -19,3 +19,8 @@ func applyLinuxSocketOptions(_ uintptr, _ DialOptions) error {
 func DialRIOSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
 	return DialDirectTCP(ctx, network, target, "", opts)
 }
+
+// DialIOUringSocket falls back to DialDirectTCP on non-Linux OSes.
+func DialIOUringSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
+	return DialDirectTCP(ctx, network, target, "", opts)
+}

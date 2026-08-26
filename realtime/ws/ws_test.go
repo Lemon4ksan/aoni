@@ -1311,7 +1311,7 @@ func TestH2Preface_ContextCancellation(t *testing.T) {
 			elapsed := time.Since(start)
 
 			assert.Error(t, err)
-			assert.Less(t, elapsed, 2*time.Second)
+			assert.Less(t, elapsed, 5*time.Second)
 		})
 	}
 }

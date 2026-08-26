@@ -125,7 +125,7 @@ func TestGenericStore_Typed(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 
 	// 2. Set with TTL
-	err = store.Set(ctx, 42, user, 300*time.Millisecond)
+	err = store.Set(ctx, 42, user, 600*time.Millisecond)
 	require.NoError(t, err)
 
 	// 3. Hit
@@ -139,7 +139,7 @@ func TestGenericStore_Typed(t *testing.T) {
 	assert.Equal(t, user, opt.MustValue())
 
 	// 5. Expiration
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 
 	_, err = store.Get(ctx, 42)
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
@@ -217,6 +217,60 @@ func BenchmarkShardedStore_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			_, _ = store.GetDirect(ctx, "bench-key")
+		}
+	})
+}
+
+func TestLRUStore(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.NewLRUStore[string, []byte](2)
+
+	// Set 2 items
+	require.NoError(t, store.Set(ctx, "k1", []byte("v1"), time.Hour))
+	require.NoError(t, store.Set(ctx, "k2", []byte("v2"), time.Hour))
+	assert.Equal(t, 2, store.Len())
+
+	// Access k1 to make k2 least recently used
+	val, err := store.Get(ctx, "k1")
+	require.NoError(t, err)
+	assert.Equal(t, "v1", string(val))
+
+	// Insert k3 -> should evict k2
+	require.NoError(t, store.Set(ctx, "k3", []byte("v3"), time.Hour))
+
+	_, err = store.Get(ctx, "k2")
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+
+	val, err = store.Get(ctx, "k1")
+	require.NoError(t, err)
+	assert.Equal(t, "v1", string(val))
+
+	val, err = store.Get(ctx, "k3")
+	require.NoError(t, err)
+	assert.Equal(t, "v3", string(val))
+
+	// Delete k1
+	require.NoError(t, store.Delete(ctx, "k1"))
+	_, err = store.Get(ctx, "k1")
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+}
+
+func BenchmarkLRUStore_Parallel(b *testing.B) {
+	ctx := b.Context()
+
+	store := cache.NewLRUStore[string, []byte](1024)
+
+	val := []byte("cached-payload-content")
+	_ = store.Set(ctx, "bench-key", val, time.Hour)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = store.Get(ctx, "bench-key")
 		}
 	})
 }

@@ -13,8 +13,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/crypto/ssh"
 )
+
+type tcpipForwardMsg struct {
+	Addr  string
+	Rport uint32
+}
+
+var ioBufferPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 32*1024)
+	return &b
+})
 
 // ClientConfig configures an embedded reverse SSH tunnel client.
 type ClientConfig struct {

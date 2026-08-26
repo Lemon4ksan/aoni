@@ -3,13 +3,12 @@
 // license that can be found in the LICENSE file.
 
 // Package ssh provides an enterprise-grade SSH tunneling, command execution,
-// SFTP transfer, and SSH server framework fully integrated with aoni's L4 transport pipeline.
+// SFTP transfer, and SSH client framework fully integrated with aoni's L4 transport pipeline.
 package ssh
 
 import (
 	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
 	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/server"
 	"github.com/lemon4ksan/aoni/tunnel/ssh/tarpit"
 )
 
@@ -19,16 +18,6 @@ type (
 	Cmd       = client.Cmd
 	Option    = client.Option
 	CmdOption = client.CmdOption
-)
-
-// Type aliases for Server operations.
-type (
-	Server           = server.Server
-	Session          = server.Session
-	Context          = server.Context
-	ServerHandler    = server.Handler
-	ServerOption     = server.Option
-	SubsystemHandler = server.SubsystemHandler
 )
 
 // DefaultWindowSize specifies the default initial SSH channel window size (16MB).
@@ -42,9 +31,6 @@ var NewClient = client.New
 
 // DialContext connects client to the remote target host using configured options, proxies, or jump hosts.
 var DialContext = client.Dial
-
-// NewServer creates a new SSH server with optional options.
-var NewServer = server.New
 
 // Type aliases for CA operations.
 type (

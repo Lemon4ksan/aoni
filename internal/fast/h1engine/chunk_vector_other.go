@@ -15,3 +15,10 @@ func vectorParseHexUint(src []byte) (int, int, error) {
 func vectorFormatHexUint(buf *[16]byte, val int) int {
 	return formatHexUintFallback(buf, val)
 }
+
+func vectorFormatChunkHeader(buf *[24]byte, val int) int {
+	n := formatHexUintFallback((*[16]byte)(buf[:16]), val)
+	buf[n] = '\r'
+	buf[n+1] = '\n'
+	return n + 2
+}

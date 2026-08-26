@@ -11,6 +11,8 @@ import (
 	"net"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/lemon4ksan/aoni/netutil/iouring"
 )
 
 const (
@@ -44,5 +46,15 @@ func applyLinuxSocketOptions(fd uintptr, opts DialOptions) error {
 
 // DialRIOSocket falls back to standard DialDirectTCP on Linux OS.
 func DialRIOSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
+	return DialDirectTCP(ctx, network, target, "", opts)
+}
+
+// DialIOUringSocket dials a TCP connection utilizing Linux io_uring kernel ring buffers.
+func DialIOUringSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
+	conn, err := iouring.DialIOUring(ctx, network, target)
+	if err == nil {
+		return conn, nil
+	}
+
 	return DialDirectTCP(ctx, network, target, "", opts)
 }

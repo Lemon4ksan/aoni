@@ -89,18 +89,14 @@ func (k *VAPIDKeys) PublicKeyBase64() string {
 
 // PrivateKeyBase64 returns the 32-byte scalar private key encoded in base64url.
 func (k *VAPIDKeys) PrivateKeyBase64() string {
-	if k == nil || k.PrivateKey == nil {
+	if k == nil || k.PrivateKey == nil || k.PrivateKey.D == nil {
 		return ""
 	}
 
-	dBytes := k.PrivateKey.D.Bytes()
-	if len(dBytes) < 32 {
-		padded := make([]byte, 32)
-		copy(padded[32-len(dBytes):], dBytes)
-		dBytes = padded
-	}
+	var dBytes [32]byte
+	k.PrivateKey.D.FillBytes(dBytes[:])
 
-	return base64.RawURLEncoding.EncodeToString(dBytes)
+	return base64.RawURLEncoding.EncodeToString(dBytes[:])
 }
 
 type jwtHeader struct {
@@ -159,10 +155,8 @@ func (k *VAPIDKeys) SignJWT(endpoint string, subject string, ttl time.Duration) 
 
 	// ES256 raw signature: 32 bytes R || 32 bytes S
 	sigBytes := make([]byte, 64)
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-	copy(sigBytes[32-len(rBytes):32], rBytes)
-	copy(sigBytes[64-len(sBytes):64], sBytes)
+	r.FillBytes(sigBytes[:32])
+	s.FillBytes(sigBytes[32:])
 
 	sigB64 := base64.RawURLEncoding.EncodeToString(sigBytes)
 

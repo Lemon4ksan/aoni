@@ -6,7 +6,6 @@ package ssh
 
 import (
 	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/server"
 )
 
 var (
@@ -48,21 +47,4 @@ var (
 	WithStderr                  = client.WithStderr
 	WithStdin                   = client.WithStdin
 	WithEnv                     = client.WithEnv
-)
-
-var (
-	WithAddr                 = server.WithAddr
-	WithHandler              = server.WithHandler
-	WithHostKeySigner        = server.WithHostKeySigner
-	WithHostKeyPEM           = server.WithHostKeyPEM
-	WithHostKeyFile          = server.WithHostKeyFile
-	WithPasswordAuth         = server.WithPasswordAuth
-	WithPublicKeyAuth        = server.WithPublicKeyAuth
-	WithSubsystem            = server.WithSubsystem
-	WithVersion              = server.WithVersion
-	WithGlobalRequestHandler = server.WithGlobalRequestHandler
-	WithUserCAKeys           = server.WithUserCAKeys
-	WithUserCAPEM            = server.WithUserCAPEM
-	WithUserCAFile           = server.WithUserCAFile
-	WithHostCertificate      = server.WithHostCertificate
 )

@@ -13,12 +13,25 @@ import (
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
+	"github.com/lemon4ksan/aoni/netutil/priority"
 	"github.com/lemon4ksan/aoni/netutil/privacypass"
+	"github.com/lemon4ksan/aoni/netutil/secret"
 )
+
+// WithPriority constructs an [RequestModifier] setting the RFC 9218 "Priority" header (e.g. "u=1, i" or "u=0").
+func WithPriority(urgency int, incremental bool) RequestModifier {
+	return WithHeader(priority.HeaderPriority, priority.New(urgency, incremental).Format())
+}
+
+// WithPriorityPreset constructs an [RequestModifier] setting the RFC 9218 "Priority" header using a predefined [priority.Priority] preset.
+func WithPriorityPreset(p priority.Priority) RequestModifier {
+	return WithHeader(priority.HeaderPriority, p.Format())
+}
 
 // WithGRPCWebTimeout constructs an [RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
 func WithGRPCWebTimeout(d time.Duration) RequestModifier {
@@ -103,6 +116,11 @@ func WithBearer(token string) RequestModifier {
 	}
 }
 
+// WithSecretBearer constructs an [RequestModifier] setting a Bearer token from a protected [secret.Secret].
+func WithSecretBearer(token secret.Secret[string]) RequestModifier {
+	return WithBearer(token.Value())
+}
+
 // WithBasicAuth constructs an [RequestModifier] setting HTTP Basic Authentication credentials
 // per RFC 7617 (The 'Basic' HTTP Authentication Scheme).
 func WithBasicAuth(username, password string) RequestModifier {
@@ -111,6 +129,11 @@ func WithBasicAuth(username, password string) RequestModifier {
 		Key:   username,
 		Value: password,
 	}
+}
+
+// WithSecretBasicAuth constructs an [RequestModifier] setting Basic Authentication credentials with a protected password [secret.Secret].
+func WithSecretBasicAuth(username string, password secret.Secret[string]) RequestModifier {
+	return WithBasicAuth(username, password.Value())
 }
 
 // WithPKCE constructs an [RequestModifier] adding PKCE code_challenge and code_challenge_method
@@ -179,12 +202,12 @@ func WithIfMatch(etag string) RequestModifier {
 
 // WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since conditional header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfModifiedSince, t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfModifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since conditional header (RFC 9110 §5.6.7 & §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfUnmodifiedSince, t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
@@ -207,7 +230,7 @@ func WithIfRangeETag(etag string) RequestModifier {
 
 // WithIfRangeDate constructs an [RequestModifier] setting the If-Range header with an HTTP date (RFC 9110 §5.6.7 & §13.1.5).
 func WithIfRangeDate(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfRange, t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfRange, timekit.FormatHTTPDate(t))
 }
 
 // WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).

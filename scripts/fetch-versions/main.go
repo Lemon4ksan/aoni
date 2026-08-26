@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
@@ -49,6 +50,92 @@ func main() {
 
 		_ = resp.Body.Close()
 	}
+
+	// 5. Fetch iOS
+	if iosVer := fetchIOSVersion(client); iosVer != "" {
+		fmt.Printf("IOS=%s\n", iosVer)
+	}
+
+	// 6. Fetch Android
+	if androidVer := fetchAndroidVersion(client); androidVer != "" {
+		fmt.Printf("ANDROID=%s\n", androidVer)
+	}
+}
+
+type ipswResponse struct {
+	Firmwares []struct {
+		Version string `json:"version"`
+		Signed  bool   `json:"signed"`
+	} `json:"firmwares"`
+}
+
+func fetchIOSVersion(client *http.Client) string {
+	req, err := http.NewRequest(fheader.MethodGet, "https://api.ipsw.me/v4/device/iPhone16,2", nil) //nolint:noctx
+	if err != nil {
+		return ""
+	}
+	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var ipsw ipswResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ipsw); err == nil {
+		for _, fw := range ipsw.Firmwares {
+			if fw.Signed && fw.Version != "" {
+				return fw.Version
+			}
+		}
+	}
+
+	return ""
+}
+
+type wikiResponse struct {
+	Entities struct {
+		Q94 struct {
+			Claims struct {
+				P348 []struct {
+					Rank     string `json:"rank"`
+					Mainsnak struct {
+						DataValue struct {
+							Value string `json:"value"`
+						} `json:"datavalue"`
+					} `json:"mainsnak"`
+				} `json:"P348"`
+			} `json:"claims"`
+		} `json:"Q94"`
+	} `json:"entities"`
+}
+
+func fetchAndroidVersion(client *http.Client) string {
+	req, err := http.NewRequest(fheader.MethodGet, "https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims", nil) //nolint:noctx
+	if err != nil {
+		return ""
+	}
+	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var wiki wikiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wiki); err == nil {
+		for _, claim := range wiki.Entities.Q94.Claims.P348 {
+			if claim.Rank == "preferred" && claim.Mainsnak.DataValue.Value != "" {
+				val := claim.Mainsnak.DataValue.Value
+				parts := strings.Split(val, ".")
+				return parts[0]
+			}
+		}
+	}
+
+	return ""
 }
 
 func fetchChromeVersion(client *http.Client, platform string) string {

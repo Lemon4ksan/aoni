@@ -33,6 +33,8 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 		utls.BoringGREASEECH(),
 		&utls.SupportedCurvesExtension{
 			Curves: []utls.CurveID{
+				utls.X25519MLKEM768,
+				utls.X25519Kyber768Draft00,
 				utls.X25519,
 				utls.CurveP256,
 				utls.CurveP384,
@@ -63,25 +65,27 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 		&utls.UtlsCompressCertExtension{
 			Algorithms: []utls.CertCompressionAlgo{
 				utls.CertCompressionBrotli,
+				utls.CertCompressionZstd,
 			},
 		},
 		&utls.QUICTransportParametersExtension{},
 		&utls.KeyShareExtension{KeyShares: []utls.KeyShare{
+			{Group: utls.X25519MLKEM768},
 			{Group: utls.X25519},
 		}},
 	},
 }
 
 // SecCHUA is the Chrome user agent string.
-const SecCHUA = `"Google Chrome";v="151", "Chromium";v="151", "Not_A Brand";v="24"`
+const SecCHUA = `"Google Chrome";v="152", "Chromium";v="152", "Not_A Brand";v="24"`
 
 // Various user agent strings for different platforms.
 const (
-	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.71 Mobile Safari/537.36"
-	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/151.0.7922.57 Mobile/15E148 Safari/604.1"
+	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.64 Mobile Safari/537.36"
+	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/152.0.7977.64 Mobile/15E148 Safari/604.1"
 
 	PlatformWindows = `"Windows"`
 	PlatformMacOS   = `"macOS"`
@@ -240,7 +244,7 @@ func buildHeadersDesktop(os profiles.OSKey) []profiles.HeaderEntry {
 		{Name: ":method", Value: ""},
 		{Name: ":path", Value: ""},
 		{Name: ":scheme", Value: ""},
-		{Name: profiles.ACCEPT_ENCODING, Value: "gzip, deflate, br"},
+		{Name: profiles.ACCEPT_ENCODING, Value: "gzip, deflate, br, zstd"},
 		{Name: profiles.ACCEPT_LANGUAGE, Value: "en-US,en;q=0.9"},
 		{Name: profiles.AUTHORIZATION, Value: ""},
 		{Name: profiles.COOKIE, Value: ""},

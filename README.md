@@ -66,6 +66,8 @@ vortex check --strict ./...
    `\r\n` protocol delimiter scans run on 64-bit SWAR / AVX2 SIMD vector chunks at **~9 GB/s**, while HTTP/2 HPACK Huffman decoding uses pre-computed flat Look-Up Tables (LUT).
 5. **vDSO Timestamping Bypass**:
    Bypasses standard `time.Now()` syscall overhead with atomic monotonic clock tick reading in **0.28 ns** (11.2x faster than stdlib).
+6. **Native Linux `io_uring` Kernel Bypass (`netutil/iouring`)**:
+   Direct ring-buffer memory-mapped submission (SQ) and completion (CQ) queues, bypassing synchronous socket syscalls and delivering **0 B/op, 0 allocs/op** at hardware line-rate with `option.WithExperimental(option.ExpKernelBypass)`.
 
 ## Quick Start
 

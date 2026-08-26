@@ -20,7 +20,23 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/dpop"
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
+	"github.com/lemon4ksan/aoni/netutil/priority"
+	"github.com/lemon4ksan/aoni/netutil/secret"
 )
+
+// WithPriority returns an [aoni.ClientOption] setting a default RFC 9218 "Priority" header on every request.
+func WithPriority(urgency int, incremental bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithPriority(urgency, incremental))
+	}
+}
+
+// WithPriorityPreset returns an [aoni.ClientOption] setting a default RFC 9218 "Priority" header from a preset.
+func WithPriorityPreset(p priority.Priority) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithPriorityPreset(p))
+	}
+}
 
 // WithBaseURL returns an [aoni.ClientOption] setting the default Base URI for resolving relative request paths (RFC 3986 §5.1).
 //
@@ -137,6 +153,11 @@ func WithBearer(token string) aoni.ClientOption {
 	}
 }
 
+// WithSecretBearer returns an [aoni.ClientOption] setting a default Bearer token from a protected [secret.Secret].
+func WithSecretBearer(token secret.Secret[string]) aoni.ClientOption {
+	return WithBearer(token.Value())
+}
+
 // WithBasicAuth returns an [aoni.ClientOption] setting default HTTP Basic Authentication credentials (RFC 7617).
 func WithBasicAuth(username, password string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -146,6 +167,11 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 
 		cfg.Defaults.Headers.Set(fheader.Authorization, netutil.FormatBasicAuth(username, password))
 	}
+}
+
+// WithSecretBasicAuth returns an [aoni.ClientOption] setting default Basic Authentication with a protected password [secret.Secret].
+func WithSecretBasicAuth(username string, password secret.Secret[string]) aoni.ClientOption {
+	return WithBasicAuth(username, password.Value())
 }
 
 // WithDigestAuth returns an [aoni.ClientOption] enabling RFC 7616 HTTP Digest Access Authentication

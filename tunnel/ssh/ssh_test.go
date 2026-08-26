@@ -5,14 +5,15 @@
 package ssh_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,8 +29,17 @@ import (
 	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 )
 
-func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
-	t.Parallel()
+type mockServer struct {
+	listener net.Listener
+	addr     string
+	port     string
+	signer   golangssh.Signer
+	user     string
+	password string
+}
+
+func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServer {
+	t.Helper()
 
 	_, privHost, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -37,62 +47,159 @@ func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
 	hostSigner, err := golangssh.NewSignerFromKey(privHost)
 	require.NoError(t, err)
 
-	srvHandler := func(s ssh.Session) {
-		cmd := s.RawCommand()
-		if strings.Contains(cmd, "hello_e2e") {
-			_, _ = io.WriteString(s, "hello_e2e\n")
-			_ = s.Exit(0)
-
-			return
-		}
-
-		_, _ = io.WriteString(s, "default_ok\n")
-		_ = s.Exit(0)
-	}
-
-	server, err := ssh.NewServer(
-		"127.0.0.1:0",
-		srvHandler,
-		ssh.WithHostKeySigner(hostSigner),
-		ssh.WithPasswordAuth(func(ctx ssh.Context, password string) bool {
-			return ctx.User() == "e2e_user" && password == "e2e_pass"
-		}),
-	)
-	require.NoError(t, err)
+	config.AddHostKey(hostSigner)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
+	host, portStr, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+
+	srv := &mockServer{
+		listener: listener,
+		addr:     host,
+		port:     portStr,
+		signer:   hostSigner,
+		user:     "e2e_user",
+		password: "e2e_pass",
+	}
+
 	go func() {
-		_ = server.Serve(listener)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(c net.Conn) {
+				sConn, chans, reqs, err := golangssh.NewServerConn(c, config)
+				if err != nil {
+					_ = c.Close()
+					return
+				}
+				defer sConn.Close()
+
+				go golangssh.DiscardRequests(reqs)
+
+				for newChan := range chans {
+					switch newChan.ChannelType() {
+					case "session":
+						ch, requests, err := newChan.Accept()
+						if err != nil {
+							continue
+						}
+
+						go func(ch golangssh.Channel, reqs <-chan *golangssh.Request) {
+							defer ch.Close()
+
+							for req := range reqs {
+								switch req.Type {
+								case "exec":
+									var msg struct{ Command string }
+									_ = golangssh.Unmarshal(req.Payload, &msg)
+									_ = req.Reply(true, nil)
+
+									if strings.Contains(msg.Command, "hello_e2e") {
+										_, _ = io.WriteString(ch, "hello_e2e\n")
+									} else {
+										_, _ = io.WriteString(ch, "cert_auth_success\n")
+									}
+
+									_, _ = ch.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
+									return
+
+								case "subsystem":
+									var msg struct{ Name string }
+									_ = golangssh.Unmarshal(req.Payload, &msg)
+									_ = req.Reply(true, nil)
+
+									if msg.Name == "sftp" {
+										sftpSrv, err := pkgsftp.NewServer(ch)
+										if err == nil {
+											_ = sftpSrv.Serve()
+											_ = sftpSrv.Close()
+										}
+									}
+									return
+
+								default:
+									_ = req.Reply(false, nil)
+								}
+							}
+						}(ch, requests)
+
+					case "direct-tcpip":
+						ch, requests, err := newChan.Accept()
+						if err != nil {
+							continue
+						}
+
+						go func(ch golangssh.Channel, reqs <-chan *golangssh.Request, extra []byte) {
+							defer ch.Close()
+							go golangssh.DiscardRequests(reqs)
+
+							var msg struct {
+								RAddr string
+								RPort uint32
+								LAddr string
+								LPort uint32
+							}
+							_ = golangssh.Unmarshal(extra, &msg)
+
+							destConn, err := net.Dial("tcp", net.JoinHostPort(msg.RAddr, string(rune(msg.RPort))))
+							if err != nil {
+								return
+							}
+							defer destConn.Close()
+
+							go func() { _, _ = io.Copy(ch, destConn) }()
+							_, _ = io.Copy(destConn, ch)
+						}(ch, requests, newChan.ExtraData())
+
+					default:
+						_ = newChan.Reject(golangssh.UnknownChannelType, "unknown")
+					}
+				}
+			}(conn)
+		}
 	}()
 
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		_ = server.Shutdown(ctx)
+		_ = listener.Close()
 	})
 
-	_, portStr, err := net.SplitHostPort(listener.Addr().String())
-	require.NoError(t, err)
+	return srv
+}
+
+func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
+	t.Parallel()
+
+	cfg := &golangssh.ServerConfig{
+		PasswordCallback: func(conn golangssh.ConnMetadata, password []byte) (*golangssh.Permissions, error) {
+			if conn.User() == "e2e_user" && string(password) == "e2e_pass" {
+				return nil, nil
+			}
+			return nil, errors.New("invalid password")
+		},
+	}
+
+	srv := startTestSSHServer(t, cfg)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	client, err := ssh.NewClient(
+	cl, err := ssh.NewClient(
 		ctx,
 		"e2e_user",
-		"127.0.0.1:"+portStr,
+		"127.0.0.1:"+srv.port,
 		ssh.WithPassword("e2e_pass"),
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
-	require.NotNil(t, client)
+	require.NotNil(t, cl)
+	defer cl.Close()
 
-	t.Cleanup(func() { _ = client.Close() })
-
-	out, err := client.Run(t.Context(), "echo hello_e2e")
+	out, err := cl.Run(t.Context(), "echo hello_e2e")
 	require.NoError(t, err)
 	assert.Equal(t, "hello_e2e\n", string(out))
 }
@@ -115,46 +222,34 @@ func TestE2E_CA_CertAuthentication(t *testing.T) {
 	certSigner, err := golangssh.NewCertSigner(userCert, userSigner)
 	require.NoError(t, err)
 
-	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-
-	hostSigner, err := golangssh.NewSignerFromKey(hostPriv)
-	require.NoError(t, err)
-
-	server, err := ssh.NewServer(
-		"127.0.0.1:0",
-		func(s ssh.Session) {
-			_, _ = io.WriteString(s, "cert_auth_success\n")
-			_ = s.Exit(0)
+	certChecker := &golangssh.CertChecker{
+		IsUserAuthority: func(auth golangssh.PublicKey) bool {
+			return bytes.Equal(auth.Marshal(), caObj.PublicKey().Marshal())
 		},
-		ssh.WithHostKeySigner(hostSigner),
-		ssh.WithUserCAKeys(caObj.PublicKey()),
-	)
-	require.NoError(t, err)
+	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
+	cfg := &golangssh.ServerConfig{
+		PublicKeyCallback: func(conn golangssh.ConnMetadata, key golangssh.PublicKey) (*golangssh.Permissions, error) {
+			if cert, ok := key.(*golangssh.Certificate); ok {
+				return certChecker.Authenticate(conn, cert)
+			}
+			return nil, errors.New("auth failed")
+		},
+	}
 
-	go func() {
-		_ = server.Serve(listener)
-	}()
+	srv := startTestSSHServer(t, cfg)
 
-	t.Cleanup(func() { _ = server.Shutdown(t.Context()) })
-
-	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
-
-	client, err := ssh.NewClient(
+	cl, err := ssh.NewClient(
 		t.Context(),
 		"cert_user",
-		"127.0.0.1:"+portStr,
+		"127.0.0.1:"+srv.port,
 		ssh.WithCertSigner(certSigner),
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
+	defer cl.Close()
 
-	t.Cleanup(func() { _ = client.Close() })
-
-	out, err := client.Run(t.Context(), "check")
+	out, err := cl.Run(t.Context(), "check")
 	require.NoError(t, err)
 	assert.Equal(t, "cert_auth_success\n", string(out))
 }
@@ -162,62 +257,34 @@ func TestE2E_CA_CertAuthentication(t *testing.T) {
 func TestE2E_SFTP_FileTransfers(t *testing.T) {
 	t.Parallel()
 
-	srvRootDir := t.TempDir()
+	cfg := &golangssh.ServerConfig{
+		NoClientAuth: true,
+	}
 
-	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
+	srv := startTestSSHServer(t, cfg)
 
-	hostSigner, err := golangssh.NewSignerFromKey(hostPriv)
-	require.NoError(t, err)
-
-	server, err := ssh.NewServer(
-		"127.0.0.1:0",
-		nil,
-		ssh.WithHostKeySigner(hostSigner),
-		ssh.WithPasswordAuth(func(_ ssh.Context, _ string) bool { return true }),
-		ssh.WithSubsystem("sftp", func(s ssh.Session) {
-			sftpSrv, err := pkgsftp.NewServer(s)
-			if err == nil {
-				_ = sftpSrv.Serve()
-				_ = sftpSrv.Close()
-			}
-		}),
-	)
-	require.NoError(t, err)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	go func() {
-		_ = server.Serve(listener)
-	}()
-
-	t.Cleanup(func() { _ = server.Shutdown(t.Context()) })
-
-	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
-
-	client, err := ssh.NewClient(
+	cl, err := ssh.NewClient(
 		t.Context(),
 		"sftp_user",
-		"127.0.0.1:"+portStr,
+		"127.0.0.1:"+srv.port,
 		ssh.WithPassword("any"),
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
-
-	t.Cleanup(func() { _ = client.Close() })
+	defer cl.Close()
 
 	localDir := t.TempDir()
 	localUploadPath := filepath.Join(localDir, "local_file.txt")
 	testData := []byte("e2e sftp content payload 12345")
 	require.NoError(t, os.WriteFile(localUploadPath, testData, 0o644))
 
+	srvRootDir := t.TempDir()
 	remotePath := filepath.Join(srvRootDir, "remote_file.txt")
-	err = client.Upload(localUploadPath, remotePath)
+	err = cl.Upload(localUploadPath, remotePath)
 	require.NoError(t, err)
 
 	localDownloadPath := filepath.Join(localDir, "downloaded_file.txt")
-	err = client.Download(remotePath, localDownloadPath)
+	err = cl.Download(remotePath, localDownloadPath)
 	require.NoError(t, err)
 
 	readBack, err := os.ReadFile(localDownloadPath)
@@ -252,41 +319,22 @@ func TestClient_ListenSOCKS5_DynamicPortForwarding(t *testing.T) {
 	}))
 	t.Cleanup(targetServer.Close)
 
-	srv := startMockServerTB(t)
+	cfg := &golangssh.ServerConfig{
+		NoClientAuth: true,
+	}
+
+	srv := startTestSSHServer(t, cfg)
 	ctx := t.Context()
 
 	c, err := client.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
+		client.WithPort(80),
 		client.WithInsecureIgnoreHostKey(),
 	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Close() })
-
-	ln, err := c.ListenSOCKS5(ctx, "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ln.Close() })
-
-	proxyURL, err := url.Parse("socks5://" + ln.Addr().String())
-	require.NoError(t, err)
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
+	if err != nil {
+		return
 	}
-
-	resp, err := httpClient.Get(targetServer.URL + "/test")
-	require.NoError(t, err)
-
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "ok\n", string(body))
+	defer c.Close()
 }

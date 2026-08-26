@@ -18,6 +18,7 @@ import (
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/timekit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -295,12 +296,12 @@ func WithAccept(accept string) RequestModifier {
 
 // WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfModifiedSince, t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfModifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfUnmodifiedSince, t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/silicon/clock"
+	"github.com/lemon4ksan/foundation/timekit"
 )
 
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired per RFC 9111 §3.
@@ -68,7 +68,7 @@ func (s *InMemoryStore[K, V]) Get(_ context.Context, key K) (V, error) {
 	entry, ok := s.items[key]
 	s.mu.RUnlock()
 
-	if !ok || clock.CoarseTime().After(entry.expiresAt) {
+	if !ok || timekit.CoarseNow().After(entry.expiresAt) {
 		var zero V
 		return zero, ErrCacheMiss
 	}
@@ -86,7 +86,7 @@ func (s *InMemoryStore[K, V]) GetDirect(_ context.Context, key K) (V, error) {
 	entry, ok := s.items[key]
 	s.mu.RUnlock()
 
-	if !ok || clock.CoarseTime().After(entry.expiresAt) {
+	if !ok || timekit.CoarseNow().After(entry.expiresAt) {
 		var zero V
 		return zero, ErrCacheMiss
 	}
@@ -116,7 +116,7 @@ func (s *InMemoryStore[K, V]) Set(_ context.Context, key K, val V, ttl time.Dura
 
 	s.items[key] = genericEntry[V]{
 		value:     storedVal,
-		expiresAt: clock.CoarseTime().Add(ttl),
+		expiresAt: timekit.CoarseNow().Add(ttl),
 	}
 
 	return nil
@@ -203,7 +203,7 @@ func (s *ShardedStore[K, V]) Get(_ context.Context, key K) (V, error) {
 	entry, ok := shard.items[key]
 	shard.mu.RUnlock()
 
-	if !ok || clock.CoarseTime().After(entry.expiresAt) {
+	if !ok || timekit.CoarseNow().After(entry.expiresAt) {
 		var zero V
 		return zero, ErrCacheMiss
 	}
@@ -224,7 +224,7 @@ func (s *ShardedStore[K, V]) GetDirect(_ context.Context, key K) (V, error) {
 	entry, ok := shard.items[key]
 	shard.mu.RUnlock()
 
-	if !ok || clock.CoarseTime().After(entry.expiresAt) {
+	if !ok || timekit.CoarseNow().After(entry.expiresAt) {
 		var zero V
 		return zero, ErrCacheMiss
 	}
@@ -257,7 +257,7 @@ func (s *ShardedStore[K, V]) Set(_ context.Context, key K, val V, ttl time.Durat
 
 	shard.items[key] = genericEntry[V]{
 		value:     storedVal,
-		expiresAt: clock.CoarseTime().Add(ttl),
+		expiresAt: timekit.CoarseNow().Add(ttl),
 	}
 
 	return nil
@@ -295,4 +295,59 @@ func (s *ShardedStore[K, V]) Close() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+}
+
+// LRUStore provides a bounded-memory LRU cache backend with O(1) Get and Put.
+type LRUStore[K comparable, V any] struct {
+	lru *generic.LRU[K, genericEntry[V]]
+}
+
+// NewLRUStore creates a new [LRUStore] with a specified capacity limit.
+func NewLRUStore[K comparable, V any](capacity int) *LRUStore[K, V] {
+	return &LRUStore[K, V]{
+		lru: generic.NewLRU[K, genericEntry[V]](capacity),
+	}
+}
+
+// Get retrieves a copy of cached item for key from the LRU cache.
+func (s *LRUStore[K, V]) Get(_ context.Context, key K) (V, error) {
+	entry, ok := s.lru.Get(key)
+	if !ok || timekit.CoarseNow().After(entry.expiresAt) {
+		if ok {
+			s.lru.Delete(key)
+		}
+		var zero V
+		return zero, ErrCacheMiss
+	}
+
+	if b, isBytes := any(entry.value).([]byte); isBytes {
+		return any(slices.Clone(b)).(V), nil
+	}
+
+	return entry.value, nil
+}
+
+// Set stores a value in the LRU cache with TTL expiration.
+func (s *LRUStore[K, V]) Set(_ context.Context, key K, val V, ttl time.Duration) error {
+	storedVal := val
+	if b, isBytes := any(val).([]byte); isBytes {
+		storedVal = any(slices.Clone(b)).(V)
+	}
+
+	s.lru.Put(key, genericEntry[V]{
+		value:     storedVal,
+		expiresAt: timekit.CoarseNow().Add(ttl),
+	})
+	return nil
+}
+
+// Delete evicts a key from the LRU cache.
+func (s *LRUStore[K, V]) Delete(_ context.Context, key K) error {
+	s.lru.Delete(key)
+	return nil
+}
+
+// Len returns the number of active entries in the LRU cache.
+func (s *LRUStore[K, V]) Len() int {
+	return s.lru.Len()
 }
