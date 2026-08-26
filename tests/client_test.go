@@ -2273,9 +2273,9 @@ func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
 		t.Parallel()
 
 		type FilterParams struct {
-			CommaTags values.CommaSlice[string] `url:"comma_tags"`
-			PipeTags  []string                  `url:"pipe_tags,pipe"`
-			SpaceTags []string                  `url:"space_tags,space"`
+			CommaTags values.CommaSlice[string] `query:"comma_tags"`
+			PipeTags  []string                  `query:"pipe_tags,pipe"`
+			SpaceTags []string                  `query:"space_tags,space"`
 		}
 
 		p := FilterParams{

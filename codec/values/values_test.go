@@ -165,8 +165,8 @@ func TestProtobufIntegration(t *testing.T) {
 		t.Parallel()
 
 		type RequestWithProto struct {
-			Query string         `url:"q"`
-			Meta  *typepb.Option `url:"meta"`
+			Query string         `query:"q"`
+			Meta  *typepb.Option `query:"meta"`
 		}
 
 		req := RequestWithProto{
@@ -185,10 +185,10 @@ func TestStructToQueryString(t *testing.T) {
 	t.Parallel()
 
 	type SearchQuery struct {
-		Term  string `url:"q"`
-		Page  int    `url:"page,omitempty"`
-		Sort  string `url:"sort,omitempty"`
-		Group string `url:"group"          default:"public"`
+		Term  string `query:"q"`
+		Page  int    `query:"page,omitempty"`
+		Sort  string `query:"sort,omitempty"`
+		Group string `query:"group"          default:"public"`
 	}
 
 	t.Run("struct_encoding", func(t *testing.T) {
@@ -222,11 +222,33 @@ func TestStructToQueryString(t *testing.T) {
 	})
 }
 
+func TestEncode_TagPriority(t *testing.T) {
+	t.Parallel()
+
+	type TagPriorityStruct struct {
+		FieldQuery string `query:"q_name" url:"u_name" json:"j_name"`
+		FieldURL   string `url:"u_name"   json:"j_name"`
+		FieldJSON  string `json:"j_name"`
+	}
+
+	s := TagPriorityStruct{
+		FieldQuery: "val1",
+		FieldURL:   "val2",
+		FieldJSON:  "val3",
+	}
+
+	v, err := Encode(s)
+	require.NoError(t, err)
+	assert.Equal(t, "val1", v.Get("q_name"))
+	assert.Equal(t, "val2", v.Get("u_name"))
+	assert.Equal(t, "val3", v.Get("j_name"))
+}
+
 func TestEncode_UnsupportedKind(t *testing.T) {
 	t.Parallel()
 
 	type InvalidStruct struct {
-		Ch chan int `url:"ch"`
+		Ch chan int `query:"ch"`
 	}
 
 	_, err := Encode(InvalidStruct{Ch: make(chan int)})

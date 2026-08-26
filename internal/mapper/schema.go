@@ -25,7 +25,7 @@ type FieldSchema struct {
 	HasComma    bool          // True if slice values should be formatted as comma-separated values
 	HasSpace    bool          // True if slice values should be formatted as space-separated values
 	HasPipe     bool          // True if slice values should be formatted as pipe-separated values
-	IsIgnored   bool          // True if tagged with `json:"-"` / `url:"-"` or unexported
+	IsIgnored   bool          // True if tagged with `query:"-"` / `url:"-"` / `json:"-"` or unexported
 }
 
 // StructSchema holds pre-computed field metadata for a target struct type.
@@ -71,7 +71,7 @@ func BuildStructSchema(t reflect.Type) *StructSchema {
 	for i := range numField {
 		field := t.Field(i)
 		defaultVal := field.Tag.Get("default")
-		tag := refkit.GetTag(field, "url", "json")
+		tag := refkit.GetTag(field, "query", "url", "json")
 
 		fSchema := FieldSchema{
 			Index:       i,

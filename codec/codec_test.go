@@ -99,8 +99,8 @@ func TestCodec_GenericHelpers(t *testing.T) {
 		t.Parallel()
 
 		type Filter struct {
-			Query string `url:"q"`
-			Page  int    `url:"page"`
+			Query string `query:"q"`
+			Page  int    `query:"page"`
 		}
 
 		f := Filter{Query: "test", Page: 2}

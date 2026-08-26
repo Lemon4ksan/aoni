@@ -41,9 +41,9 @@ type Post struct {
 }
 
 type PostFilter struct {
-	UserID int    `url:"userId" default:"1"`
-	Limit  int    `url:"limit"  default:"3"`
-	Sort   string `url:"sort"   default:"id"`
+	UserID int    `query:"userId" default:"1"`
+	Limit  int    `query:"limit"  default:"3"`
+	Sort   string `query:"sort"   default:"id"`
 }
 
 func main() {
@@ -68,7 +68,7 @@ func main() {
 	// 2. Path + query: fetch comments /posts/{id}/comments?postId={id}
 	// By passing a struct to WithQuery, aoni automatically encodes its fields.
 	params := struct {
-		PostID int `url:"postId"`
+		PostID int `query:"postId"`
 	}{PostID: 1}
 
 	comments, err := request.GetTo[[]Comment](ctx, client,

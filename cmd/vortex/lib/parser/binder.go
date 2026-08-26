@@ -620,7 +620,9 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 				customTag = strings.Trim(field.Tag.Value, "`")
 
 				st := reflect.StructTag(customTag)
-				if u := st.Get("url"); u != "" && u != "-" {
+				if q := st.Get("query"); q != "" && q != "-" {
+					wireName = strings.Split(q, ",")[0]
+				} else if u := st.Get("url"); u != "" && u != "-" {
 					wireName = strings.Split(u, ",")[0]
 				} else if j := st.Get("json"); j != "" && j != "-" {
 					wireName = strings.Split(j, ",")[0]

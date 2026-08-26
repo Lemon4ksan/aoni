@@ -39,9 +39,9 @@ type benchPayload struct {
 }
 
 type queryParams struct {
-	Query string `url:"q"`
-	ID    uint64 `url:"id"`
-	Limit int    `url:"limit,omitempty"`
+	Query string `query:"q"`
+	ID    uint64 `query:"id"`
+	Limit int    `query:"limit,omitempty"`
 }
 
 // setupInmemoryStdServer starts an in-memory net/http server over h1engine.InmemoryListener

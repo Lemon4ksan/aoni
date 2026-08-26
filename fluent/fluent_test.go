@@ -43,9 +43,9 @@ type errorPayload struct {
 }
 
 type queryFilter struct {
-	Page  int    `url:"page"`
-	Sort  string `url:"sort"`
-	Limit int    `url:"limit"`
+	Page  int    `query:"page"`
+	Sort  string `query:"sort"`
+	Limit int    `query:"limit"`
 }
 
 func TestFluent_GetJSON(t *testing.T) {

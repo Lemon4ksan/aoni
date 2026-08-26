@@ -95,7 +95,7 @@ func TestPatcher_PatchExistingStruct_AddField(t *testing.T) {
 	originalSource := `package api
 
 type UserDTO struct {
-	ID string ` + "`" + `url:"id"` + "`" + `
+	ID string ` + "`" + `query:"id"` + "`" + `
 }
 `
 
@@ -116,9 +116,9 @@ type UserDTO struct {
 
 	patchedStr := string(patched)
 	assert.Contains(t, patchedStr, "ID")
-	assert.Contains(t, patchedStr, "`url:\"id\"`")
+	assert.Contains(t, patchedStr, "`query:\"id\"`")
 	assert.Contains(t, patchedStr, "Avatar")
-	assert.Contains(t, patchedStr, "`url:\"avatar_url,omitempty\"`")
+	assert.Contains(t, patchedStr, "`query:\"avatar_url,omitempty\"`")
 }
 
 func TestPatcher_PatchFile_OnDisk(t *testing.T) {

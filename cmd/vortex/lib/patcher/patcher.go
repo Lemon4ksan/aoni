@@ -260,7 +260,7 @@ func renderStructField(f *ir.FieldIR) *ast.Field {
 
 	tagLit := &ast.BasicLit{
 		Kind:  token.STRING,
-		Value: fmt.Sprintf("`url:%q`", tagValue+",omitempty"),
+		Value: fmt.Sprintf("`query:%q`", tagValue+",omitempty"),
 	}
 
 	typeExpr := parseTypeExpr(f.Type.Name)

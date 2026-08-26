@@ -15,9 +15,9 @@ import (
 )
 
 type sampleUser struct {
-	ID    int    `url:"id"`
-	Name  string `url:"name,omitempty"`
-	Email string `url:"-"`
+	ID    int    `query:"id"`
+	Name  string `query:"name,omitempty"`
+	Email string `query:"-"`
 }
 
 func TestSchemaCache(t *testing.T) {

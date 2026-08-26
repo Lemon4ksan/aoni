@@ -26,15 +26,15 @@
 //
 // # Advanced Query & Form Encoding
 //
-// [Encode] reflects Go structs and maps into standard [url.Values] using "url" or "json" tags,
+// [Encode] reflects Go structs and maps into standard [url.Values] using "query", "url", or "json" tags,
 // resolving pointers and anonymous structures recursively with schema caching ([sync.Map]):
 //
 //  1. Custom Slice Delimiters:
 //     Slices can be formatted using specific string separators on the wire.
-//     Add the optional target delimiter keyword inside the struct's url tag option:
-//     - `url:"tags,comma"` -> produces ?tags=go,rust,python
-//     - `url:"tags,space"` -> produces ?tags=go+rust+python
-//     - `url:"tags,pipe"`  -> produces ?tags=go|rust|pipe
+//     Add the optional target delimiter keyword inside the struct's query tag option:
+//     - `query:"tags,comma"` -> produces ?tags=go,rust,python
+//     - `query:"tags,space"` -> produces ?tags=go+rust+python
+//     - `query:"tags,pipe"`  -> produces ?tags=go|rust|pipe
 //
 //  2. TextMarshaler Interception:
 //     If a nested type implements [encoding.TextMarshaler] (such as standard [time.Time] or [net.IP]),
@@ -60,10 +60,10 @@
 //	)
 //
 //	type RequestParams struct {
-//		Name     string                    `url:"name"`
-//		IsActive values.BoolInt            `url:"active"`
-//		Tags     values.CommaSlice[string] `url:"tags"`
-//		Meta     *wrapperspb.StringValue   `url:"meta"`
+//		Name     string                    `query:"name"`
+//		IsActive values.BoolInt            `query:"active"`
+//		Tags     values.CommaSlice[string] `query:"tags"`
+//		Meta     *wrapperspb.StringValue   `query:"meta"`
 //	}
 //
 //	func main() {
