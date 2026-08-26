@@ -8,8 +8,8 @@ github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJn
 github.com/klauspost/compress v1.19.1/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
-github.com/lemon4ksan/foundation v0.0.0-20260826192542-a2a8ca1a9afa h1:6IQE3MXlcosBSBa9pwrBN/js7C7Vz7In6sEYWccEt9M=
-github.com/lemon4ksan/foundation v0.0.0-20260826192542-a2a8ca1a9afa/go.mod h1:MsA5LvHlsPmx1MBCumICPaT7D0p3f1B51zpGDIEaTKc=
+github.com/lemon4ksan/foundation v0.0.0-20260826200314-de4763a9c376 h1:yPWfuiP4tfGV55HJjHweDpdgna4xKNnQOLYIlv4rcYg=
+github.com/lemon4ksan/foundation v0.0.0-20260826200314-de4763a9c376/go.mod h1:MsA5LvHlsPmx1MBCumICPaT7D0p3f1B51zpGDIEaTKc=
 github.com/pkg/sftp v1.13.11 h1:0N92SLTB8JqASJB14ZLHHzFnBV8mG9zw4K7jghEFWuE=
 github.com/pkg/sftp v1.13.11/go.mod h1:uNkH9roSXglNJqM+glJJi+TQXQUm0fXFWqCFmT8hsN0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

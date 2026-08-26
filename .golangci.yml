@@ -21,7 +21,8 @@ formatters:
 
     gofumpt:
       module-path: github.com/lemon4ksan/aoni
-      extra-rules: true
+      extra:
+        group-params: true
 
     goimports:
       local-prefixes:

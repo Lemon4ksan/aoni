@@ -13,6 +13,8 @@ jobs:
   lint:
     name: Lint & Code Standards
     runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: "simd"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -20,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.27.x"
           cache: true
 
       - name: Download dependencies
@@ -38,6 +40,8 @@ jobs:
   test-matrix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      GOEXPERIMENT: "simd"
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.27.x"
           cache: true
 
       - name: Download dependencies
@@ -84,7 +88,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.27.x"
           cache: true
 
       - name: Download dependencies
@@ -107,6 +111,8 @@ jobs:
   fuzz-heavy:
     name: Wire Security Fuzzing (curl-level 55 targets)
     runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: "simd"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -114,7 +120,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.27.x"
           cache: true
 
       - name: Download dependencies

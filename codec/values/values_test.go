@@ -226,8 +226,8 @@ func TestEncode_TagPriority(t *testing.T) {
 	t.Parallel()
 
 	type TagPriorityStruct struct {
-		FieldQuery string `query:"q_name" url:"u_name" json:"j_name"`
-		FieldURL   string `url:"u_name"   json:"j_name"`
+		FieldQuery string `json:"j_name_q" query:"q_name" url:"u_name_q"`
+		FieldURL   string `json:"j_name_u" url:"u_name"`
 		FieldJSON  string `json:"j_name"`
 	}
 
