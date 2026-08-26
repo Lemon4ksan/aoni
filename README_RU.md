@@ -4,6 +4,8 @@
 
 ### Унифицированный высокопроизводительный стек сетевых протоколов для Go
 
+_«В сетях хаос — это норма. Пусть aoni будет твоим ледяным якорем»_
+
 [![Go Version](https://img.shields.io/badge/go-1.27%2B-007d9c?logo=go&logoColor=white&style=flat-square)](https://go.dev/)
 [![Go Reference](https://img.shields.io/badge/godoc-reference-007d9c?style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue?style=flat-square)](LICENSE)
@@ -13,8 +15,6 @@
 [![Security Invariants](https://img.shields.io/badge/безопасность-Fuzz%20%26%20Invariants-success?style=flat-square)](docs/SECURITY_AND_FIDELITY.md)
 
 <b>aoni</b> — это унифицированный высокопроизводительный движок сетевых протоколов Интернета для Go. Объединяет стандарты IETF RFC, спецификации W3C и механизмы устойчивости Chromium в единую zero-allocation архитектуру.
-
-> _«В тот момент, когда байты покидают одну машину, чтобы достичь другой — это происходит с 0 аллокаций, на кремниевой скорости линии, без расхождения типов и без шансов на блокировку WAF.»_
 
 #### [English](README.md) • Русский • [Спецификация безопасности](docs/SECURITY_AND_FIDELITY.md) • [Руководство по Vortex](docs/VORTEX_RU.md)
 

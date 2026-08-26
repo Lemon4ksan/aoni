@@ -4,6 +4,8 @@
 
 ### The Unified High-Performance Internet Protocol Stack for Go
 
+_«In networks chaos is the default — let aoni be your ice cold anchor»_
+
 [![Go Version](https://img.shields.io/badge/go-1.27%2B-007d9c?logo=go&logoColor=white&style=flat-square)](https://go.dev/)
 [![Go Reference](https://img.shields.io/badge/godoc-reference-007d9c?style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue?style=flat-square)](LICENSE)
@@ -13,8 +15,6 @@
 [![Security Invariants](https://img.shields.io/badge/security-Fuzz%20%26%20Invariants-success?style=flat-square)](docs/SECURITY_AND_FIDELITY.md)
 
 **aoni** is a unified, ultra-high-performance Internet Protocol engine for Go. Consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience mechanisms into a single, profile-driven zero-allocation architecture.
-
-> _«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»_
 
 #### English • [Русский](README_RU.md) • [Architecture Specification](docs/SECURITY_AND_FIDELITY.md) • [Vortex Guide](docs/VORTEX.md)
 
