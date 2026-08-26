@@ -12,9 +12,7 @@
 [![Linux io_uring](https://img.shields.io/badge/linux-io__uring%202.34M%2B%20RPS-orange?style=flat-square)](netutil/iouring)
 [![Security Invariants](https://img.shields.io/badge/security-Fuzz%20%26%20Invariants-success?style=flat-square)](docs/SECURITY_AND_FIDELITY.md)
 
-<p align="center">
-  <em><b>aoni</b> is a unified, ultra-high-performance Internet Protocol engine for Go. Consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience mechanisms into a single, profile-driven zero-allocation architecture.</em>
-</p>
+**aoni** is a unified, ultra-high-performance Internet Protocol engine for Go. Consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience mechanisms into a single, profile-driven zero-allocation architecture.
 
 > _«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»_
 
@@ -22,9 +20,7 @@
 
 </div>
 
----
-
-## ⚙️ Installation
+## Installation
 
 `aoni` requires **Go version `1.27` or higher**.
 
@@ -32,7 +28,7 @@
 go get github.com/lemon4ksan/aoni
 ```
 
-## ⚡ Quickstart
+## Quickstart
 
 Type-safe, single-line, zero-allocation HTTP request with full generic deserialization:
 
@@ -78,9 +74,7 @@ func main() {
 }
 ```
 
----
-
-## 🤖 Performance Profile: Aoni vs Traditional HTTP Clients
+## ⚡ Performance Profile: Aoni vs Traditional HTTP Clients
 
 Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 
@@ -92,9 +86,7 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 | `net/http` (Stdlib) | 165,000 | 78 allocs/op | 6,800 B/op | ⚠️ (H2 only) | ✗ | ✗ |
 | `go-resty/resty` | 142,000 | 86 allocs/op | 8,940 B/op | ✗ | ✗ | ✗ |
 
----
-
-## 🏛️ Core Architectural Pillars
+## Core Architectural Pillars
 
 ### 1. The Evergreen Public Contract vs. Adaptive Silicon Reactor
 > _«Code written against **aoni v1.0.0** is guaranteed to compile and execute without modifications on any **v1.x** version 5, 10, and 20 years from now.»_
@@ -124,9 +116,7 @@ vortex check --strict ./...
 5. **vDSO Timestamping Bypass**: Bypasses standard `time.Now()` syscall overhead with atomic monotonic clock ticks in **0.28 ns** (11.2x faster than stdlib).
 6. **Native Linux `io_uring` Kernel Bypass (`netutil/iouring`)**: Direct memory-mapped submission (SQ) and completion (CQ) queues, bypassing synchronous socket syscalls at hardware line-rate.
 
----
-
-## 🛠️ Vortex Declarative AST Toolchain
+## Vortex Declarative AST Toolchain
 
 `aoni` includes **`vortex`**, a zero-allocation declarative contract compiler and OpenAPI 3.1 / AsyncAPI 2.x/3.x / Protobuf toolchain:
 
@@ -163,9 +153,7 @@ vortex check --strict ./...
 
 For complete syntax reference and workflows, see the [**Vortex Toolchain Guide**](docs/VORTEX.md) and [**Vortex Specification**](docs/SPEC.md).
 
----
-
-## 🔥 Advanced Protocols & Capabilities
+## Advanced Protocols & Capabilities
 
 <details>
 <summary><b>1. Native Protobuf & gRPC-Web (Unary & Streaming)</b></summary>
@@ -240,9 +228,7 @@ client := aoni.NewClient(nil,
 
 </details>
 
----
-
-## 🔬 Microarchitectural Benchmark Suite
+## Microarchitectural Benchmark Suite
 
 <details>
 <summary><b>Detailed Subsystem Microbenchmarks (Click to Expand)</b></summary>
@@ -275,9 +261,7 @@ client := aoni.NewClient(nil,
 
 </details>
 
----
-
-## 🌐 Feature & Protocol Scope
+## Feature & Protocol Scope
 
 | Feature / Architectural Layer | Go `net/http` | Standard Wrapper (e.g. Resty) | `aoni` Engine |
 | :--- | :---: | :---: | :---: |
@@ -312,8 +296,6 @@ client := aoni.NewClient(nil,
 | **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
----
-
 ## 📦 Repository Layout
 
 ```
@@ -334,16 +316,12 @@ aoni/
 └── x/            // Extensions & supplementary protocols (x/otel, x/socketio, x/geoip)
 ```
 
----
-
-## 🚀 Real-World Case Studies & Integrations
+## Real-World Case Studies & Integrations
 
 - [ao](https://github.com/Lemon4ksan/ao): Independent high-performance stealth fork of `curl` with its HTTP/HTTPS/WS transport engine entirely powered by `libaoni` (`lib/aoni_bridge.c`).
   - Emits bit-exact Chromium uTLS fingerprints (JA4 `t13d1515h2...`), hybrid Post-Quantum ML-KEM-768 key exchanges, and delivers **9,145+ RPS** across 100 concurrent POSIX threads (3-5x faster than standard multi-threaded curl) with 0% memory leaks and 0% GC pressure.
 - [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): High-throughput, zero-allocation fork of official `discordgo` powered by `aoni` & `aoni/realtime/ws` and revived to support latest Discord API changes with `vortex`.
   - Delivers 6.8x higher REST throughput (203,000+ RPS) and 3.1x faster WebSocket operations with 0 B/op memory allocations on frame framing.
-
----
 
 ## 📚 Technical Specifications & Documentation
 
@@ -355,8 +333,6 @@ aoni/
 - [**Demystifying the Voodoo**](docs/VOODOO.md): Deep dive into HPACK state manipulation, TCP window tuning via syscalls, and packet jitter framing.
 - [**Cookbook & Practical Recipes**](docs/COOKBOOK.md): Practical recipes for REST, WebSockets, gRPC-Web, and streaming workflows.
 - [**Code Examples**](examples): Runnable code snippets for REST, WebSockets, gRPC-Web, and browser evasion integrations.
-
----
 
 ## 🧾 License
 
