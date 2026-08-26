@@ -34,9 +34,8 @@ func BenchmarkDecodeAddressAssign_Heap(b *testing.B) {
 	payload := buildBenchPayload()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		entries, _ := DecodeAddressAssignPayloadPOD(nil, payload)
 		_ = entries
 	}
@@ -53,9 +52,8 @@ func BenchmarkDecodeAddressAssign_Arena(b *testing.B) {
 	defer arena.Release()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		arena.Reset()
 		entries, _ := DecodeAddressAssignPayloadPOD(arena, payload)
 		_ = entries
@@ -73,9 +71,8 @@ func BenchmarkDecodeAddressAssign_Slab(b *testing.B) {
 	defer slab.Release()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		entries, _ := DecodeAddressAssignPayloadPODSlab(slab, payload)
 
 		for _, e := range entries {
@@ -103,9 +100,8 @@ func BenchmarkEncodeAddressRequestCapsule(b *testing.B) {
 	var buf [512]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = EncodeAddressRequestCapsule(reqs, buf[:])
 	}
 }
@@ -134,9 +130,8 @@ func BenchmarkDecodeAddressRequestPayloadTo(b *testing.B) {
 	dst := make([]RequestedAddress, 0, 4)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = dst[:0]
 		_, _ = DecodeAddressRequestPayloadTo(payload, dst)
 	}
@@ -161,9 +156,8 @@ func BenchmarkEncodeRouteAdvertisementCapsule(b *testing.B) {
 	var buf [512]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = EncodeRouteAdvertisementCapsule(routes, buf[:])
 	}
 }
@@ -192,9 +186,8 @@ func BenchmarkDecodeRouteAdvertisementPayloadTo(b *testing.B) {
 	dst := make([]IPAddressRange, 0, 4)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = dst[:0]
 		_, _ = DecodeRouteAdvertisementPayloadTo(payload, dst)
 	}

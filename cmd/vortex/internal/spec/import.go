@@ -191,7 +191,7 @@ func parseImportOptions(args []string, stderr io.Writer) (*importOptions, error)
 	opts.targetService = opts.serviceName
 
 	if opts.specFile != "" {
-		for _, s := range strings.Split(opts.specFile, ",") {
+		for s := range strings.SplitSeq(opts.specFile, ",") {
 			if strings.TrimSpace(s) != "" {
 				opts.specList = append(opts.specList, strings.TrimSpace(s))
 			}
@@ -202,7 +202,7 @@ func parseImportOptions(args []string, stderr io.Writer) (*importOptions, error)
 		arg := posArgs[0]
 		isSpec := false
 
-		for _, item := range strings.Split(arg, ",") {
+		for item := range strings.SplitSeq(arg, ",") {
 			item = strings.TrimSpace(item)
 			if strings.HasSuffix(item, ".har") || strings.HasSuffix(item, ".json") ||
 				strings.HasSuffix(item, ".yaml") || strings.HasSuffix(item, ".yml") ||
@@ -304,7 +304,7 @@ func resolveImportTargets(opts *importOptions, stdout io.Writer) {
 
 func runJSBundleImport(opts *importOptions, stdout io.Writer) error {
 	var jsGlobs []string
-	for _, p := range strings.Split(opts.jsFlag, ",") {
+	for p := range strings.SplitSeq(opts.jsFlag, ",") {
 		p = strings.TrimSpace(p)
 		if p != "" {
 			jsGlobs = append(jsGlobs, p)
@@ -409,7 +409,7 @@ func runOpenAPIImport(_ context.Context, opts *importOptions, stdout io.Writer) 
 
 	if opts.jsFlag != "" {
 		var jsGlobs []string
-		for _, p := range strings.Split(opts.jsFlag, ",") {
+		for p := range strings.SplitSeq(opts.jsFlag, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				jsGlobs = append(jsGlobs, p)

@@ -75,8 +75,7 @@ func RetryOnErr() core.RetryCondition {
 func RetryOnTransientErrors() core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		if err != nil {
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
+			if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 				return true
 			}
 
@@ -124,12 +123,9 @@ func RetryOnGatewayErrors() core.RetryCondition {
 // RetryOnGRPCStatus returns a [aoni.RetryCondition] triggering retries when gRPC trailer status matches codes.
 func RetryOnGRPCStatus(statusCodes ...string) core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
-		var (
-			codeStr string
-			grpcErr *decode.GRPCWebError
-		)
+		var codeStr string
 
-		if errors.As(err, &grpcErr) {
+		if grpcErr, ok := errors.AsType[*decode.GRPCWebError](err); ok {
 			codeStr = grpcErr.StatusCode
 		} else if resp != nil {
 			codeStr = resp.Header("grpc-status")

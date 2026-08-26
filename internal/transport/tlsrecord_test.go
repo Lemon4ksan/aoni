@@ -150,9 +150,10 @@ func BenchmarkComputeNonceXOR(b *testing.B) {
 	var nonce [12]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		transport.ComputeNonceXOR(iv, uint64(i), &nonce)
+	var counter uint64
+	for b.Loop() {
+		transport.ComputeNonceXOR(iv, counter, &nonce)
+		counter++
 	}
 }

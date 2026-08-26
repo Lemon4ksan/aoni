@@ -13,10 +13,9 @@ import (
 func BenchmarkH1_ParseHexUint(b *testing.B) {
 	src := []byte("1a4f")
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var total int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		val, _, _ := ParseHexUint(src)
 		total += val
 	}
@@ -26,10 +25,9 @@ func BenchmarkH1_ParseHexUint(b *testing.B) {
 func BenchmarkH1_FormatHexUint(b *testing.B) {
 	var buf [16]byte
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var total int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		n := FormatHexUint(&buf, 6725)
 		total += n
 	}
@@ -40,9 +38,8 @@ func BenchmarkH1_WriteHexInt(b *testing.B) {
 	var out bytes.Buffer
 	w := bufio.NewWriter(&out)
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		out.Reset()
 		_ = writeHexInt(w, 6725)
 	}

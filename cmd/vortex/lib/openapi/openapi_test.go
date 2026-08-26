@@ -403,7 +403,7 @@ func TestDiscordImport(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 
-	for _, line := range strings.Split(string(code), "\n") {
+	for line := range strings.Lines(string(code)) {
 		if strings.Contains(line, "UpdateUserMessage") || strings.Contains(line, "user_id_") {
 			t.Logf("MATCH: %s", line)
 		}

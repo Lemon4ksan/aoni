@@ -267,8 +267,7 @@ func (p *Pipeline[Req, Resp]) enrichError(
 		return nil
 	}
 
-	var coreErr *core.Error
-	if errors.As(err, &coreErr) {
+	if coreErr, ok := errors.AsType[*core.Error](err); ok {
 		if coreErr.URL == "" && req != nil && req.URL != nil {
 			coreErr.URL = req.URL.String()
 		}

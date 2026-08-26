@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 // Writer is an interface stackless writer must conform to.
@@ -101,8 +99,8 @@ func (w *writer) do(op op) error {
 	if err != nil {
 		return err
 	}
-	if w.xw.bb != nil && len(w.xw.bb.B) > 0 {
-		_, err = w.dstW.Write(w.xw.bb.B)
+	if w.xw.bb != nil && len(w.xw.bb.b) > 0 {
+		_, err = w.dstW.Write(w.xw.bb.b)
 	}
 	w.xw.Reset()
 
@@ -140,22 +138,48 @@ func writerFunc(ctx any) {
 	}
 }
 
+type byteBuffer struct {
+	b []byte
+}
+
+func (b *byteBuffer) Write(p []byte) (int, error) {
+	b.b = append(b.b, p...)
+	return len(p), nil
+}
+
+func (b *byteBuffer) Reset() {
+	b.b = b.b[:0]
+}
+
 type xWriter struct {
-	bb *bytebufferpool.ByteBuffer
+	bb *byteBuffer
 }
 
 func (w *xWriter) Write(p []byte) (int, error) {
 	if w.bb == nil {
-		w.bb = bufferPool.Get()
+		w.bb = acquireByteBuffer()
 	}
 	return w.bb.Write(p)
 }
 
 func (w *xWriter) Reset() {
 	if w.bb != nil {
-		bufferPool.Put(w.bb)
+		releaseByteBuffer(w.bb)
 		w.bb = nil
 	}
 }
 
-var bufferPool bytebufferpool.Pool
+var bufferPool = sync.Pool{
+	New: func() any {
+		return &byteBuffer{}
+	},
+}
+
+func acquireByteBuffer() *byteBuffer {
+	return bufferPool.Get().(*byteBuffer) //nolint:forcetypeassert
+}
+
+func releaseByteBuffer(b *byteBuffer) {
+	b.Reset()
+	bufferPool.Put(b)
+}

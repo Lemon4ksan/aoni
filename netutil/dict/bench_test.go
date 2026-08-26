@@ -18,10 +18,9 @@ func BenchmarkStore_Match(b *testing.B) {
 
 	_, _ = store.Store(baseURL, `match="/v1/users/*", id="users-v1"`, []byte("user dictionary payload"))
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		d, ok := store.Match(targetURL, "")
 		if !ok || d == nil {
 			b.Fatal("match failed")
@@ -32,10 +31,9 @@ func BenchmarkStore_Match(b *testing.B) {
 func BenchmarkFormatAvailableDictionary(b *testing.B) {
 	hash := dict.ComputeSHA256([]byte("benchmark sample dictionary"))
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		s := dict.FormatAvailableDictionary(hash)
 		if len(s) == 0 {
 			b.Fatal("formatting failed")

@@ -233,7 +233,7 @@ func TestWebTransportE2EStressBattle(t *testing.T) {
 				serverSess.EnqueueBidiStream(sStr)
 			}()
 
-			payload := []byte(fmt.Sprintf("wt-stream-stress-data-%04d-payload", idx))
+			payload := fmt.Appendf(nil, "wt-stream-stress-data-%04d-payload", idx)
 			if _, wErr := cStr.Write(payload); wErr != nil {
 				errCh <- fmt.Errorf("stream %d write: %w", idx, wErr)
 				return
@@ -334,8 +334,8 @@ func TestWebTransportE2EStressBattle(t *testing.T) {
 
 	startDgram := time.Now()
 
-	for i := 0; i < numDatagrams; i++ {
-		payload := []byte(fmt.Sprintf("dgram-%06d", i))
+	for i := range numDatagrams {
+		payload := fmt.Appendf(nil, "dgram-%06d", i)
 		_ = clientSess.SendDatagram(payload)
 	}
 

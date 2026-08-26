@@ -52,7 +52,7 @@ func TestLiveChromiumEchoServer(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < numStreams; i++ {
+	for i := range numStreams {
 		wg.Add(1)
 
 		go func(idx int) {
@@ -68,7 +68,7 @@ func TestLiveChromiumEchoServer(t *testing.T) {
 			}
 			defer str.Close()
 
-			payload := []byte(fmt.Sprintf("aoni-webtransport-test-stream-%d-payload-data", idx))
+			payload := fmt.Appendf(nil, "aoni-webtransport-test-stream-%d-payload-data", idx)
 			if _, wErr := str.Write(payload); wErr != nil {
 				errCh <- fmt.Errorf("stream %d write failed: %w", idx, wErr)
 				return

@@ -305,8 +305,7 @@ func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 		return generic.SuccessTyped[T, *APIError](val)
 	}
 
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return generic.FailureTyped[T](apiErr)
 	}
 
@@ -318,26 +317,26 @@ func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 
 // IsNotFound reports whether err represents an HTTP 404 Not Found response.
 func IsNotFound(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsNotFound()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsNotFound()
 }
 
 // IsUnauthorized reports whether err represents an HTTP 401 Unauthorized response.
 func IsUnauthorized(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsUnauthorized()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsUnauthorized()
 }
 
 // IsForbidden reports whether err represents an HTTP 403 Forbidden response.
 func IsForbidden(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsForbidden()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsForbidden()
 }
 
 // IsRateLimited reports whether err represents an HTTP 429 Too Many Requests response.
 func IsRateLimited(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsRateLimited()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsRateLimited()
 }
 
 // IsTooManyRequests is an alias for [IsRateLimited].
@@ -347,14 +346,14 @@ func IsTooManyRequests(err error) bool {
 
 // IsConflict reports whether err represents an HTTP 409 Conflict response.
 func IsConflict(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsConflict()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsConflict()
 }
 
 // IsBadRequest reports whether err represents an HTTP 400 Bad Request response.
 func IsBadRequest(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsBadRequest()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsBadRequest()
 }
 
 // IsTimeout reports whether err represents an HTTP 408/504 Timeout or context deadline exceeded.
@@ -363,21 +362,20 @@ func IsTimeout(err error) bool {
 		return true
 	}
 
-	var apiErr *APIError
-
-	return errors.As(err, &apiErr) && apiErr.IsTimeout()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsTimeout()
 }
 
 // IsServerError reports whether err represents an HTTP 5xx server-side response.
 func IsServerError(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsServerError()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsServerError()
 }
 
 // IsClientError reports whether err represents an HTTP 4xx client-side response.
 func IsClientError(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.IsClientError()
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.IsClientError()
 }
 
 // BodyString returns the error response payload as a string.

@@ -14,9 +14,8 @@ func BenchmarkWS_ApplyMask_64B(b *testing.B) {
 
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		applyFastMask(buf, mask)
 	}
 }
@@ -27,9 +26,8 @@ func BenchmarkWS_ApplyMask_1KB(b *testing.B) {
 
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		applyFastMask(buf, mask)
 	}
 }
@@ -40,9 +38,8 @@ func BenchmarkWS_ApplyMask_64KB(b *testing.B) {
 
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		applyFastMask(buf, mask)
 	}
 }
@@ -53,9 +50,8 @@ func BenchmarkWS_BuildFrameHeader(b *testing.B) {
 	conn := &wsRawConn{isClient: true}
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = conn.buildFrameHeaderZeroAlloc(0x01, 1024, false, hdr[:])
 	}
 }

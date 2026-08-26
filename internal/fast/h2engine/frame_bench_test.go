@@ -17,9 +17,8 @@ func BenchmarkFrameHeader_ReadFrame(b *testing.B) {
 	br := bufio.NewReader(bytes.NewReader(raw))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		br.Reset(bytes.NewReader(raw))
 
 		fr, err := h2engine.ReadFrameFrom(br)

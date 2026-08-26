@@ -84,7 +84,7 @@ func (c *Cmd) runTuple(
 
 	var jsGlobs []string
 	if jsFlag != "" {
-		for _, p := range strings.Split(jsFlag, ",") {
+		for p := range strings.SplitSeq(jsFlag, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				jsGlobs = append(jsGlobs, p)

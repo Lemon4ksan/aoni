@@ -417,15 +417,13 @@ func EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 				}
 
 				fmt.Fprintf(&buf, "\tfeeder := New%s()\n", feederName)
-				buf.WriteString("\tb.ReportAllocs()\n")
-				buf.WriteString("\tb.ResetTimer()\n\n")
-				buf.WriteString("\tfor i := 0; i < b.N; i++ {\n")
+				buf.WriteString("\tb.ReportAllocs()\n\n")
+				buf.WriteString("\tfor b.Loop() {\n")
 				fmt.Fprintf(&buf, "\t\t%s = feeder.Feed%sParams()\n", strings.Join(blanks, ", "), m.Name)
 				buf.WriteString("\t}\n}\n\n")
 			} else {
-				buf.WriteString("\tb.ReportAllocs()\n")
-				buf.WriteString("\tb.ResetTimer()\n\n")
-				buf.WriteString("\tfor i := 0; i < b.N; i++ {\n")
+				buf.WriteString("\tb.ReportAllocs()\n\n")
+				buf.WriteString("\tfor b.Loop() {\n")
 				buf.WriteString("\t}\n}\n\n")
 			}
 		}

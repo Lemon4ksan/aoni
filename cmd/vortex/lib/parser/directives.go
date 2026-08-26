@@ -119,7 +119,7 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 		}
 
 		if onStr, ok := d.Args["on"]; ok {
-			for _, st := range strings.Split(onStr, ",") {
+			for st := range strings.SplitSeq(onStr, ",") {
 				if code, err := strconv.Atoi(strings.TrimSpace(st)); err == nil {
 					retry.OnStatus = append(retry.OnStatus, code)
 				}
@@ -536,7 +536,7 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			m.LocalCacheTTL = ttl
 		}
 	case "expect_status":
-		for _, st := range strings.Split(d.Value, ",") {
+		for st := range strings.SplitSeq(d.Value, ",") {
 			for _, part := range strings.Fields(st) {
 				if code, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
 					m.ExpectStatus = append(m.ExpectStatus, code)
@@ -555,7 +555,7 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			codesStr := strings.TrimSpace(parts[0])
 
 			targetType := strings.TrimSpace(parts[1])
-			for _, cStr := range strings.Split(codesStr, ",") {
+			for cStr := range strings.SplitSeq(codesStr, ",") {
 				for _, part := range strings.Fields(cStr) {
 					if code, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
 						m.Return.StatusMap[code] = ir.GoTypeIR{Name: targetType, IsCustomType: true}

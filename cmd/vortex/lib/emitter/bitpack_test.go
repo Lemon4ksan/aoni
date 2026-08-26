@@ -185,9 +185,8 @@ func TestExtendedPacket_Roundtrip(t *testing.T) {
 func BenchmarkPacketHeader_PackUint64(b *testing.B) {
 	hdr := PacketHeader{OpCode: 7, IsAck: true, Length: 500000, JobID: 123456}
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = hdr.PackUint64()
 	}
 }
@@ -196,9 +195,8 @@ func BenchmarkPacketHeader_PackTo(b *testing.B) {
 	hdr := PacketHeader{OpCode: 7, IsAck: true, Length: 500000, JobID: 123456}
 	var buf [8]byte
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		hdr.PackTo(buf[:])
 	}
 }
@@ -213,9 +211,8 @@ func BenchmarkPacketHeader_BatchUnpack(b *testing.B) {
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(raw)))
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = UnpackPacketHeaderSlice(dst[:0], raw)
 	}
 }

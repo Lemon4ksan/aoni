@@ -122,8 +122,8 @@ func Undo(ctx context.Context, rootDir, opID string) (*OpEntry, error) {
 	targetIdx := -1
 	if opID == "" {
 		// Find last active (non-undone) operation
-		for i := len(journal.Entries) - 1; i >= 0; i-- {
-			if !journal.Entries[i].Undone {
+		for i, entry := range slices.Backward(journal.Entries) {
+			if !entry.Undone {
 				targetIdx = i
 				break
 			}

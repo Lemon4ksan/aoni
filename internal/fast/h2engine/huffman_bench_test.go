@@ -15,9 +15,8 @@ func BenchmarkHuffman_Encode_Short(b *testing.B) {
 	dst := make([]byte, 0, 64)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = h2engine.HuffmanEncode(dst[:0], src)
 	}
 
@@ -31,9 +30,8 @@ func BenchmarkHuffman_Encode_Long(b *testing.B) {
 	dst := make([]byte, 0, 256)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = h2engine.HuffmanEncode(dst[:0], src)
 	}
 
@@ -45,9 +43,8 @@ func BenchmarkHuffman_Decode_Short(b *testing.B) {
 	dst := make([]byte, 0, 64)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = h2engine.HuffmanDecode(dst[:0], src)
 	}
 
@@ -62,9 +59,8 @@ func BenchmarkHuffman_Decode_Long(b *testing.B) {
 	dst := make([]byte, 0, 256)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		dst = h2engine.HuffmanDecode(dst[:0], src)
 	}
 
@@ -77,10 +73,9 @@ func BenchmarkHuffman_EncodeLength(b *testing.B) {
 	)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var total int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		total += h2engine.HuffmanEncodeLength(src)
 	}
 

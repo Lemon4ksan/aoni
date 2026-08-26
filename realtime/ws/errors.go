@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 var (
@@ -119,18 +120,14 @@ func ParseCloseMessage(payload []byte) (code int, reason string) {
 
 // IsCloseError reports whether err is a [CloseError] matching any of the specified target status codes (RFC 6455 §7.4).
 func IsCloseError(err error, codes ...int) bool {
-	var ce *CloseError
-	if errors.As(err, &ce) {
-		if len(codes) == 0 {
-			return true
-		}
-
-		for _, c := range codes {
-			if ce.Code == c {
-				return true
-			}
-		}
+	ce, ok := errors.AsType[*CloseError](err)
+	if !ok {
+		return false
 	}
 
-	return false
+	if len(codes) == 0 {
+		return true
+	}
+
+	return slices.Contains(codes, ce.Code)
 }

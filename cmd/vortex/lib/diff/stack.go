@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1011,9 +1012,7 @@ func (s *DiffStack) RenderStackDiagram() string {
 	fmt.Fprintf(&buf, "=== Vortex Diff Comparison Stack (%d frames) ===\n", len(s.Frames))
 	fmt.Fprintf(&buf, "TOP\n")
 
-	for i := len(s.Frames) - 1; i >= 0; i-- {
-		f := s.Frames[i]
-
+	for i, f := range slices.Backward(s.Frames) {
 		prefix := "├──"
 		if i == 0 {
 			prefix = "└──"

@@ -883,7 +883,7 @@ func (p *Parser) parseUnion(root *ir.RootIR, name string, docLines []string, str
 
 			st := reflect.StructTag(tagVal)
 			if statusStr := st.Get("status"); statusStr != "" {
-				for _, sc := range strings.Split(statusStr, ",") {
+				for sc := range strings.SplitSeq(statusStr, ",") {
 					for _, part := range strings.Fields(sc) {
 						if code, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
 							statusCodes = append(statusCodes, code)

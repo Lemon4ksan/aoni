@@ -216,7 +216,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		arg := posArgs[0]
 		isSpec := false
 
-		for _, token := range strings.Split(arg, ",") {
+		for token := range strings.SplitSeq(arg, ",") {
 			token = strings.TrimSpace(token)
 			if strings.HasSuffix(token, ".har") || strings.HasSuffix(token, ".json") ||
 				strings.HasSuffix(token, ".yaml") || strings.HasSuffix(token, ".yml") {
@@ -416,7 +416,7 @@ func (c *CmdInit) runPackageInit(
 		metaKind = "OpenAPI/HAR"
 
 		var resolvedSpecs []string
-		for _, sp := range strings.Split(specSource, ",") {
+		for sp := range strings.SplitSeq(specSource, ",") {
 			sp = strings.TrimSpace(sp)
 			if sp == "" {
 				continue

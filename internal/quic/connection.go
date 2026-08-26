@@ -1261,8 +1261,7 @@ func (c *Conn) handleUnpackError(
 		c.logger.Debugf("Dropping %s packet (%d bytes) that could not be unpacked. Error: %s", pt, p.Size(), err)
 		return false, nil
 	default:
-		var headerErr *headerParseError
-		if errors.As(err, &headerErr) {
+		if _, ok := errors.AsType[*headerParseError](err); ok {
 			c.logger.Debugf(
 				"Dropping %s packet (%d bytes) for which we couldn't unpack the header. Error: %s",
 				pt,
@@ -1897,8 +1896,7 @@ func (c *Conn) closeWithTransportError(code TransportErrorCode) {
 
 func (c *Conn) handleCloseError(closeErr *closeError) {
 	if closeErr.immediate {
-		var nerr net.Error
-		if errors.As(closeErr.err, &nerr) {
+		if _, ok := errors.AsType[net.Error](closeErr.err); ok {
 			c.logger.Errorf("Destroying connection: %s", closeErr.err)
 		} else {
 			c.logger.Errorf("Destroying connection with error: %s", closeErr.err)
@@ -1918,25 +1916,19 @@ func (c *Conn) handleCloseError(closeErr *closeError) {
 		defer func() { closeErr.err = e }()
 	}
 
-	var (
-		applicationErr *ApplicationError
-		transportErr   *TransportError
-		isRemoteClose  bool
-	)
+	var isRemoteClose bool
 
-	switch {
-	case errors.Is(e, qerr.ErrIdleTimeout),
-		errors.Is(e, qerr.ErrHandshakeTimeout):
-	case errors.As(e, new(*StatelessResetError)):
-	case errors.As(e, new(*VersionNegotiationError)):
-	case errors.As(e, new(*errCloseForRecreating)):
-	case errors.As(e, &applicationErr):
+	if errors.Is(e, qerr.ErrIdleTimeout) || errors.Is(e, qerr.ErrHandshakeTimeout) {
+	} else if _, ok := errors.AsType[*StatelessResetError](e); ok {
+	} else if _, ok := errors.AsType[*VersionNegotiationError](e); ok {
+	} else if _, ok := errors.AsType[*errCloseForRecreating](e); ok {
+	} else if applicationErr, ok := errors.AsType[*ApplicationError](e); ok {
 		isRemoteClose = applicationErr.Remote
-	case errors.As(e, &transportErr):
+	} else if transportErr, ok := errors.AsType[*TransportError](e); ok {
 		isRemoteClose = transportErr.Remote
-	case closeErr.immediate:
+	} else if closeErr.immediate {
 		e = closeErr.err
-	default:
+	} else {
 		e = &qerr.TransportError{
 			ErrorCode:    qerr.InternalError,
 			ErrorMessage: e.Error(),
@@ -2596,18 +2588,15 @@ func (c *Conn) sendPackedCoalescedPacket(packet *coalescedPacket, ecn protocol.E
 
 func (c *Conn) sendConnectionClose(e error) ([]byte, error) {
 	var (
-		packet         *coalescedPacket
-		err            error
-		transportErr   *qerr.TransportError
-		applicationErr *qerr.ApplicationError
+		packet *coalescedPacket
+		err    error
 	)
 
-	switch {
-	case errors.As(e, &transportErr):
+	if transportErr, ok := errors.AsType[*qerr.TransportError](e); ok {
 		packet, err = c.packer.PackConnectionClose(transportErr, c.maxPacketSize(), c.version)
-	case errors.As(e, &applicationErr):
+	} else if applicationErr, ok := errors.AsType[*qerr.ApplicationError](e); ok {
 		packet, err = c.packer.PackApplicationClose(applicationErr, c.maxPacketSize(), c.version)
-	default:
+	} else {
 		packet, err = c.packer.PackConnectionClose(&qerr.TransportError{
 			ErrorCode:    qerr.InternalError,
 			ErrorMessage: fmt.Sprintf("connection BUG: unspecified error type (msg: %s)", e.Error()),

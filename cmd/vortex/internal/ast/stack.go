@@ -84,7 +84,7 @@ func (c *CmdStack) runPush(args []string, stack *diff.DiffStack, stdout, stderr 
 
 	var tags []string
 	if *tagsFlag != "" {
-		for _, t := range strings.Split(*tagsFlag, ",") {
+		for t := range strings.SplitSeq(*tagsFlag, ",") {
 			t = strings.TrimSpace(t)
 			if t != "" {
 				tags = append(tags, t)

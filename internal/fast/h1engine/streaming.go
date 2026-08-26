@@ -9,8 +9,6 @@ import (
 	"bytes"
 	"io"
 	"sync"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 type bodyStreamHeader interface {
@@ -90,7 +88,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
+func acquireRequestStream(b *ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes = bytes.NewReader(b.B)
 	rs.reader = r

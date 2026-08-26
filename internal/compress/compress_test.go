@@ -199,9 +199,8 @@ func BenchmarkGunzip(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Gunzip(compressed, dst)
 	}
 }
@@ -253,9 +252,8 @@ func BenchmarkUnzstd(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Unzstd(compressed, dst)
 	}
 }
@@ -266,9 +264,8 @@ func BenchmarkUnbrotli(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Unbrotli(compressed, dst)
 	}
 }
@@ -279,9 +276,8 @@ func BenchmarkInflate(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Inflate(compressed, dst)
 	}
 }
@@ -297,9 +293,8 @@ func BenchmarkStdlibGunzip(b *testing.B) {
 	compressed := buf.Bytes()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r, err := stdgzip.NewReader(bytes.NewReader(compressed))
 		if err != nil {
 			b.Fatal(err)
@@ -315,9 +310,8 @@ func BenchmarkStdlibInflate(b *testing.B) {
 	compressed := createDeflateData(nil, payload)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r := flate.NewReader(bytes.NewReader(compressed))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
@@ -502,9 +496,8 @@ func BenchmarkGzip(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Gzip(payload, dst)
 	}
 }
@@ -514,9 +507,8 @@ func BenchmarkDeflate(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Deflate(payload, dst)
 	}
 }
@@ -526,9 +518,8 @@ func BenchmarkBrotli(b *testing.B) {
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = compress.Brotli(payload, dst)
 	}
 }

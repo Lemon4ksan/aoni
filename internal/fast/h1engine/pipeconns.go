@@ -16,8 +16,8 @@ import (
 //
 // PipeConns is NOT safe for concurrent use by multiple goroutines!
 func NewPipeConns() *PipeConns {
-	ch1 := make(chan *byteBuffer, 4)
-	ch2 := make(chan *byteBuffer, 4)
+	ch1 := make(chan *ByteBuffer, 4)
+	ch2 := make(chan *ByteBuffer, 4)
 
 	pc := &PipeConns{
 		stopCh: make(chan struct{}),
@@ -99,10 +99,10 @@ func (pc *PipeConns) Close() error {
 type pipeConn struct {
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	b          *byteBuffer
+	b          *ByteBuffer
 
-	rCh chan *byteBuffer
-	wCh chan *byteBuffer
+	rCh chan *ByteBuffer
+	wCh chan *ByteBuffer
 	pc  *PipeConns
 
 	readDeadlineTimer  *time.Timer
@@ -120,7 +120,7 @@ type pipeConn struct {
 
 func (c *pipeConn) Write(p []byte) (int, error) {
 	b := acquireByteBuffer()
-	b.b = append(b.b[:0], p...)
+	b.B = append(b.B[:0], p...)
 
 	select {
 	case <-c.pc.stopCh:
@@ -218,7 +218,7 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 		}
 	}
 
-	c.bb = c.b.b
+	c.bb = c.b.B
 	return nil
 }
 
@@ -307,26 +307,4 @@ func (pipeAddr) Network() string {
 
 func (pipeAddr) String() string {
 	return "pipe"
-}
-
-type byteBuffer struct {
-	b []byte
-}
-
-func acquireByteBuffer() *byteBuffer {
-	return byteBufferPool.Get().(*byteBuffer) //nolint:forcetypeassert
-}
-
-func releaseByteBuffer(b *byteBuffer) {
-	if b != nil {
-		byteBufferPool.Put(b)
-	}
-}
-
-var byteBufferPool = &sync.Pool{
-	New: func() any {
-		return &byteBuffer{
-			b: make([]byte, 1024),
-		}
-	},
 }

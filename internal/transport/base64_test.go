@@ -42,9 +42,8 @@ func BenchmarkBase64EncodeURL_SHA256(b *testing.B) {
 	dst := make([]byte, 64)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = transport.Base64EncodeURL(sum[:], dst)
 	}
 }

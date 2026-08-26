@@ -13,9 +13,8 @@ import (
 
 func BenchmarkDocumentBuilder_Build(b *testing.B) {
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		doc := text.NewDocument().
 			Title("🚀", "Benchmark").
 			Section("📦", "Details").
@@ -44,9 +43,8 @@ func BenchmarkDocumentBuilder_RenderMarkdown(b *testing.B) {
 	renderer := text.DefaultMarkdownRenderer
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = renderer.Render(io.Discard, d)
 	}
 }
@@ -56,9 +54,8 @@ func BenchmarkShield_ProtectAndRestore(b *testing.B) {
 	input := "Prefix ```go\nvar x = 10\n``` middle `code` suffix"
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		masked, restore := shield.Protect(input)
 		_ = restore(masked)
 	}

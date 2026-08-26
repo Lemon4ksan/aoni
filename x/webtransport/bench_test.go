@@ -33,9 +33,8 @@ func BenchmarkEncodeCloseSessionCapsule(b *testing.B) {
 	var buf [256]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = EncodeCloseSessionCapsule(payload, buf[:])
 	}
 }
@@ -53,9 +52,8 @@ func BenchmarkDecodeCloseSessionPayloadTo(b *testing.B) {
 	var target CloseSessionPayload
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = DecodeCloseSessionPayloadTo(buf[:n], &target)
 	}
 }
@@ -77,9 +75,8 @@ func BenchmarkSession_SendDatagram(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = sess.SendDatagram(payload)
 	}
 }
@@ -88,9 +85,8 @@ func BenchmarkEncodeMaxStreamsCapsule(b *testing.B) {
 	var buf [64]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = EncodeMaxStreamsCapsule(CapsuleWTMaxStreamsBidi, 1000, buf[:])
 	}
 }
@@ -99,9 +95,8 @@ func BenchmarkEncodeMaxDataCapsule(b *testing.B) {
 	var buf [64]byte
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = EncodeMaxDataCapsule(CapsuleWTMaxData, 1048576, buf[:])
 	}
 }

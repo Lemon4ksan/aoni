@@ -12,10 +12,9 @@ import (
 
 func BenchmarkDecodePacketNumber(b *testing.B) {
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var total protocol.PacketNumber
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		pn := protocol.DecodePacketNumber(protocol.PacketNumberLen2, 0xa82f30ea, 0x9b32)
 		total += pn
 	}
@@ -25,10 +24,9 @@ func BenchmarkDecodePacketNumber(b *testing.B) {
 
 func BenchmarkPacketNumberLengthForHeader(b *testing.B) {
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	var total protocol.PacketNumberLen
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		l := protocol.PacketNumberLengthForHeader(0xace8fe, 0xabe8b3)
 		total += l
 	}

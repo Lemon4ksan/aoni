@@ -271,8 +271,7 @@ func (e *Error) IsTimeout() bool {
 		return false
 	}
 
-	var netErr net.Error
-	if errors.As(e.Err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](e.Err); ok && netErr.Timeout() {
 		return true
 	}
 
@@ -289,8 +288,7 @@ func (e *Error) IsTemporary() bool {
 		return true
 	}
 
-	var netErr net.Error
-	if errors.As(e.Err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](e.Err); ok && netErr.Timeout() {
 		return true
 	}
 
@@ -307,9 +305,9 @@ func (e *Error) IsTLS() bool {
 		return true
 	}
 
-	var certErr *tls.CertificateVerificationError
+	_, ok := errors.AsType[*tls.CertificateVerificationError](e.Err)
 
-	return errors.As(e.Err, &certErr)
+	return ok
 }
 
 // IsProxy reports whether the failure occurred on the proxy hop.

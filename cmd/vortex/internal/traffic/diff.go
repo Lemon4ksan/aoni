@@ -402,7 +402,7 @@ func (c *CmdDiff) runSpecDiff(
 }
 
 func isSpecFile(p string) bool {
-	for _, token := range strings.Split(p, ",") {
+	for token := range strings.SplitSeq(p, ",") {
 		token = strings.TrimSpace(token)
 		if strings.HasSuffix(token, ".har") || strings.HasSuffix(token, ".json") ||
 			strings.HasSuffix(token, ".yaml") || strings.HasSuffix(token, ".yml") {

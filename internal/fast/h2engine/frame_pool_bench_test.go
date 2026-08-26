@@ -15,7 +15,7 @@ import (
 func BenchmarkAcquireRelease_SyncPool_Ping(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := h2engine.AcquireFrame(h2engine.FramePing)
 		h2engine.ReleaseFrame(fr)
 	}
@@ -26,9 +26,8 @@ func BenchmarkAcquireRelease_ConnPool_Ping(b *testing.B) {
 	defer pool.Release()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := pool.AcquireFrame(h2engine.FramePing)
 		pool.ReleaseFrame(fr)
 	}
@@ -37,7 +36,7 @@ func BenchmarkAcquireRelease_ConnPool_Ping(b *testing.B) {
 func BenchmarkAcquireRelease_SyncPool_WindowUpdate(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := h2engine.AcquireFrame(h2engine.FrameWindowUpdate)
 		h2engine.ReleaseFrame(fr)
 	}
@@ -48,9 +47,8 @@ func BenchmarkAcquireRelease_ConnPool_WindowUpdate(b *testing.B) {
 	defer pool.Release()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := pool.AcquireFrame(h2engine.FrameWindowUpdate)
 		pool.ReleaseFrame(fr)
 	}
@@ -59,7 +57,7 @@ func BenchmarkAcquireRelease_ConnPool_WindowUpdate(b *testing.B) {
 func BenchmarkAcquireRelease_SyncPool_RstStream(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := h2engine.AcquireFrame(h2engine.FrameResetStream)
 		h2engine.ReleaseFrame(fr)
 	}
@@ -70,9 +68,8 @@ func BenchmarkAcquireRelease_ConnPool_RstStream(b *testing.B) {
 	defer pool.Release()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		fr := pool.AcquireFrame(h2engine.FrameResetStream)
 		pool.ReleaseFrame(fr)
 	}

@@ -219,8 +219,7 @@ func (t *Transport) doDial(
 	go func() {
 		err := conn.run()
 
-		var recreateErr *errCloseForRecreating
-		if errors.As(err, &recreateErr) {
+		if recreateErr, ok := errors.AsType[*errCloseForRecreating](err); ok {
 			recreateChan <- *recreateErr
 			return
 		}
@@ -400,8 +399,7 @@ func (t *Transport) listen(conn rawConn) {
 		// TODO: This code is used to ignore wsa errors on Windows.
 		// Since net.Error.Temporary is deprecated as of Go 1.18, we should find a better solution.
 		// See https://github.com/lemon4ksan/aoni/internal/quic/issues/1737 for details.
-		var nerr net.Error
-		if errors.As(err, &nerr) {
+		if _, ok := errors.AsType[net.Error](err); ok {
 			t.mutex.Lock()
 			closed := t.closeErr != nil
 			t.mutex.Unlock()

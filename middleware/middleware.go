@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/lemon4ksan/aoni"
@@ -30,9 +31,9 @@ func Chain(doer any, middlewares ...aoni.Middleware) aoni.RequestDoer {
 		panic("middleware: invalid doer type passed to Chain")
 	}
 
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		if middlewares[i] != nil {
-			rd = middlewares[i](rd)
+	for _, mw := range slices.Backward(middlewares) {
+		if mw != nil {
+			rd = mw(rd)
 		}
 	}
 

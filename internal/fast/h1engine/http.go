@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/valyala/bytebufferpool"
 )
 
 var (
@@ -46,7 +45,7 @@ type Request struct {
 
 	bodyStream io.Reader
 	w          requestBodyWriter
-	body       *bytebufferpool.ByteBuffer
+	body       *ByteBuffer
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
@@ -106,7 +105,7 @@ type Response struct {
 	// Local TCPAddr from concurrently net.Conn.
 	laddr net.Addr
 	w     responseBodyWriter
-	body  *bytebufferpool.ByteBuffer
+	body  *ByteBuffer
 
 	bodyRaw []byte
 
@@ -488,7 +487,7 @@ func (req *Request) bodyBytes() []byte {
 	return req.body.B
 }
 
-func (resp *Response) bodyBuffer() *bytebufferpool.ByteBuffer {
+func (resp *Response) bodyBuffer() *ByteBuffer {
 	if resp.body == nil {
 		resp.body = responseBodyPool.Get()
 	}
@@ -496,7 +495,7 @@ func (resp *Response) bodyBuffer() *bytebufferpool.ByteBuffer {
 	return resp.body
 }
 
-func (req *Request) bodyBuffer() *bytebufferpool.ByteBuffer {
+func (req *Request) bodyBuffer() *ByteBuffer {
 	if req.body == nil {
 		req.body = requestBodyPool.Get()
 	}
@@ -505,8 +504,8 @@ func (req *Request) bodyBuffer() *bytebufferpool.ByteBuffer {
 }
 
 var (
-	responseBodyPool bytebufferpool.Pool
-	requestBodyPool  bytebufferpool.Pool
+	responseBodyPool ByteBufferPool
+	requestBodyPool  ByteBufferPool
 )
 
 // BodyGunzip returns un-gzipped body data.
@@ -544,7 +543,7 @@ func (resp *Response) BodyGunzipWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func gunzipData(p []byte, maxBodySize int) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
+	var bb ByteBuffer
 	_, err := writeGunzip(&bb, p, maxBodySize)
 	if err != nil {
 		return nil, err
@@ -587,7 +586,7 @@ func (resp *Response) BodyUnbrotliWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func unBrotliData(p []byte, maxBodySize int) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
+	var bb ByteBuffer
 	_, err := writeUnbrotli(&bb, p, maxBodySize)
 	if err != nil {
 		return nil, err
@@ -658,7 +657,7 @@ func (resp *Response) BodyUnzstdWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func unzstdData(p []byte, maxBodySize int) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
+	var bb ByteBuffer
 	_, err := writeUnzstd(&bb, p, maxBodySize)
 	if err != nil {
 		return nil, err
@@ -667,7 +666,7 @@ func unzstdData(p []byte, maxBodySize int) ([]byte, error) {
 }
 
 func inflateData(p []byte, maxBodySize int) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
+	var bb ByteBuffer
 	_, err := writeInflate(&bb, p, maxBodySize)
 	if err != nil {
 		return nil, err
@@ -1202,7 +1201,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
-	var buf bytebufferpool.ByteBuffer
+	var buf ByteBuffer
 	if err := WriteMultipartForm(&buf, f, boundary); err != nil {
 		return nil, err
 	}
@@ -2550,8 +2549,8 @@ func (req *Request) RemoveUserValueBytes(key []byte) {
 }
 
 func getHTTPString(hw httpWriter) string {
-	w := bytebufferpool.Get()
-	defer bytebufferpool.Put(w)
+	w := acquireByteBuffer()
+	defer releaseByteBuffer(w)
 
 	bw := bufio.NewWriter(w)
 	if err := hw.Write(bw); err != nil {

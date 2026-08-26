@@ -296,14 +296,12 @@ func isFatalError(err error) bool {
 		return true
 	}
 
-	var tlsErr *tls.CertificateVerificationError
-	if errors.As(err, &tlsErr) {
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
 		return true
 	}
 
-	var unknownAuth *x509.UnknownAuthorityError
-
-	return errors.As(err, &unknownAuth)
+	_, ok := errors.AsType[*x509.UnknownAuthorityError](err)
+	return ok
 }
 
 // parseRetryAfter parses standard HTTP Retry-After headers (seconds or HTTP date).
@@ -325,8 +323,7 @@ func parseRetryAfter(resp aoni.Response) (time.Duration, bool) {
 
 		return time.Duration(seconds) * time.Second, true
 	} else if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) {
+		if numErr, ok := errors.AsType[*strconv.NumError](err); ok && errors.Is(numErr.Err, strconv.ErrRange) {
 			return time.Duration(math.MaxInt64), true
 		}
 	}

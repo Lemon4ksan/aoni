@@ -7,6 +7,7 @@ package emitter
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
@@ -128,7 +129,7 @@ func emitNestedTupleFieldUnmarshal(buf *bytes.Buffer, f ir.TupleFieldIR) {
 	indent += "\t"
 	fmt.Fprintf(buf, "%s_ = json.Unmarshal(%s, &t.%s)\n", indent, curVar, f.GoName)
 
-	for i := len(path) - 1; i >= 0; i-- {
+	for i := range slices.Backward(path) {
 		indent = strings.Repeat("\t", i+1)
 		fmt.Fprintf(buf, "%s}\n", indent)
 	}
