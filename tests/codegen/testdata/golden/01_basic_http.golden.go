@@ -12,11 +12,10 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 type userAPIClient struct {
-	r request.Requester
+	r *aoni.Client
 }
 
 func newUserAPI(doer any, opts ...aoni.ClientOption) *userAPIClient {
@@ -27,7 +26,7 @@ func newUserAPI(doer any, opts ...aoni.ClientOption) *userAPIClient {
 	var baseOpts []aoni.ClientOption
 	baseOpts = append(baseOpts, opts...)
 
-	targetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...)
+	targetReq := aoni.NewClient(doer, append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...)
 
 	return &userAPIClient{
 		r: targetReq,
@@ -39,8 +38,8 @@ func NewUserAPI(doer any, opts ...aoni.ClientOption) UserAPI {
 	return newUserAPI(doer, opts...)
 }
 
-// R returns the underlying request.Requester used by the client.
-func (c *userAPIClient) R() request.Requester {
+// R returns the underlying *aoni.Client used by the client.
+func (c *userAPIClient) R() *aoni.Client {
 	return c.r
 }
 
@@ -53,7 +52,7 @@ func (c *userAPIClient) GetUser(ctx context.Context, id string, mods ...aoni.Req
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := request.GetTo[UserDTO](ctx, c.r, "users/{id}", allMods...)
+	resp, err := c.r.Get[UserDTO](ctx, "users/{id}", allMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +67,7 @@ func (c *userAPIClient) CreateUser(ctx context.Context, req CreateUserRequest, m
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := request.PostTo[UserDTO](ctx, c.r, "users", req, allMods...)
+	resp, err := c.r.Post[UserDTO](ctx, "users", req, allMods...)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/testutil"
 )
 
@@ -40,7 +39,7 @@ func TestMockEngine(t *testing.T) {
 	t.Run("GetTo_Mock", func(t *testing.T) {
 		t.Parallel()
 
-		user, err := request.GetTo[userResponse](context.Background(), client, "/api/user/1")
+		user, err := client.Get[userResponse](context.Background(), "/api/user/1")
 		require.NoError(t, err)
 		require.NotNil(t, user)
 		assert.Equal(t, 1, user.ID)
@@ -50,9 +49,8 @@ func TestMockEngine(t *testing.T) {
 	t.Run("PostTo_Mock", func(t *testing.T) {
 		t.Parallel()
 
-		created, err := request.PostTo[userResponse](
+		created, err := client.Post[userResponse](
 			context.Background(),
-			client,
 			"/api/user",
 			userResponse{Name: "Woz"},
 		)
@@ -65,7 +63,7 @@ func TestMockEngine(t *testing.T) {
 	t.Run("Unmatched_Route", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := request.GetTo[userResponse](context.Background(), client, "/unmatched")
+		_, err := client.Get[userResponse](context.Background(), "/unmatched")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected request")
 	})

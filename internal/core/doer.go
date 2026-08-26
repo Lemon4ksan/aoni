@@ -7,7 +7,13 @@ package core
 import (
 	"context"
 	"net"
+	"net/http"
 )
+
+// HTTPRequester specifies an execution contract capable of executing parameterized HTTP requests.
+type HTTPRequester interface {
+	Request(ctx context.Context, method, path string, mods ...RequestModifier) (*http.Response, error)
+}
 
 // GenericDoer represents an abstract execution engine for processing arbitrary Req types into Resp types.
 type GenericDoer[Req any, Resp any] interface {

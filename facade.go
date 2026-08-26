@@ -15,11 +15,11 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
@@ -43,7 +43,7 @@ func New(opts ...ClientOption) *Client {
 //   - Relative paths are resolved against DefaultClient's BaseURL.
 //   - Caller MUST close resp.Body to prevent TCP socket descriptor leaks.
 func Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Get(ctx, path, mods...)
+	return DefaultClient.Request(ctx, http.MethodGet, path, mods...)
 }
 
 // Post executes an HTTP POST request against path using the shared [DefaultClient].
@@ -51,7 +51,7 @@ func Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Respo
 // Invariants:
 //   - Caller MUST close resp.Body.
 func Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Post(ctx, path, mods...)
+	return DefaultClient.Request(ctx, http.MethodPost, path, mods...)
 }
 
 // Put executes an HTTP PUT request against path using the shared [DefaultClient].
@@ -59,7 +59,7 @@ func Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Resp
 // Invariants:
 //   - Caller MUST close resp.Body.
 func Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Put(ctx, path, mods...)
+	return DefaultClient.Request(ctx, http.MethodPut, path, mods...)
 }
 
 // Patch executes an HTTP PATCH request against path using the shared [DefaultClient].
@@ -67,7 +67,7 @@ func Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Respo
 // Invariants:
 //   - Caller MUST close resp.Body.
 func Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Patch(ctx, path, mods...)
+	return DefaultClient.Request(ctx, http.MethodPatch, path, mods...)
 }
 
 // Delete executes an HTTP DELETE request against path using the shared [DefaultClient].
@@ -75,7 +75,7 @@ func Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Res
 // Invariants:
 //   - Caller MUST close resp.Body.
 func Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Delete(ctx, path, mods...)
+	return DefaultClient.Request(ctx, http.MethodDelete, path, mods...)
 }
 
 // Head executes an HTTP HEAD request against path using the shared [DefaultClient] to inspect headers.
@@ -83,66 +83,7 @@ func Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Re
 // Invariants:
 //   - Caller MUST close resp.Body.
 func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return DefaultClient.Head(ctx, path, mods...)
-}
-
-// decodeResponseTo drains, decodes, and releases an HTTP response stream into a newly allocated target of type T.
-//
-// Resource Management Invariant:
-// decodeResponseTo GUARANTEES that resp.Body is fully drained and closed ([DrainAndClose])
-// before returning, ensuring zero TCP socket leaks under both success and error conditions.
-//
-// Error Semantics:
-//   - If the HTTP status code is >= 400, returns an [*APIError] containing the status code
-//     and a bounded preview snippet (up to 1KB) of the error response body.
-//   - If body decoding fails, returns the underlying parser error.
-func decodeResponseTo[T any](resp *http.Response) (*T, error) {
-	if resp == nil {
-		return nil, ErrNilRequest
-	}
-
-	defer DrainAndClose(resp)
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodySnippet, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-
-		return nil, &APIError{
-			StatusCode: resp.StatusCode,
-			Body:       bodySnippet,
-		}
-	}
-
-	var target T
-
-	contentType := resp.Header.Get("Content-Type")
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := decode.Payload(contentType, bodyBytes, &target); err != nil {
-		return nil, err
-	}
-
-	return &target, nil
-}
-
-func injectBodyMod(body any, mods []RequestModifier) []RequestModifier {
-	if body == nil {
-		return mods
-	}
-
-	bodyMod := WithSmartBody(body)
-	if bodyMod.Kind == 0 && bodyMod.Fn == nil {
-		return mods
-	}
-
-	allMods := make([]RequestModifier, 0, len(mods)+1)
-	allMods = append(allMods, bodyMod)
-	allMods = append(allMods, mods...)
-
-	return allMods
+	return DefaultClient.Request(ctx, http.MethodHead, path, mods...)
 }
 
 // GetTo executes a GET request using [DefaultClient] and decodes the response payload into a new instance of T.
@@ -154,29 +95,19 @@ func injectBodyMod(body any, mods []RequestModifier) []RequestModifier {
 // Returns an [*APIError] on non-2xx status codes (4xx/5xx). Use [IsNotFound], [IsRateLimited],
 // or standard [errors.Is] to inspect the returned error.
 func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
-	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[T](resp)
+	return DefaultClient.Get[T](ctx, path, mods...)
 }
 
 // PostTo executes a POST request with payload using [DefaultClient] and decodes the response payload into T.
 //
 // Smart Body Handling:
-// The body argument is automatically detected and serialized via [WithSmartBody] (struct/map to JSON,
+// The body argument is automatically detected and serialized (struct/map to JSON,
 // proto.Message to protobuf, url.Values to form-urlencoded, string/bytes as raw payload).
 //
 // Resource Management:
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	resp, err := DefaultClient.Post(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[T](resp)
+	return DefaultClient.Post[T](ctx, path, body, mods...)
 }
 
 // PutTo executes a PUT request with payload using [DefaultClient] and decodes the response payload into T.
@@ -184,12 +115,7 @@ func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestMo
 // Resource Management:
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	resp, err := DefaultClient.Put(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[T](resp)
+	return DefaultClient.Put[T](ctx, path, body, mods...)
 }
 
 // PatchTo executes a PATCH request with payload using [DefaultClient] and decodes the response payload into T.
@@ -197,12 +123,7 @@ func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestMod
 // Resource Management:
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	resp, err := DefaultClient.Patch(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[T](resp)
+	return DefaultClient.Patch[T](ctx, path, body, mods...)
 }
 
 // DeleteTo executes a DELETE request using [DefaultClient] and decodes any returned response payload into T.
@@ -210,12 +131,7 @@ func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestM
 // Resource Management:
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
-	resp, err := DefaultClient.Delete(ctx, path, mods...) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[T](resp)
+	return DefaultClient.Delete[T](ctx, path, mods...)
 }
 
 // Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.
@@ -223,17 +139,12 @@ func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) 
 // This is particularly useful in functional error-handling pipelines (e.g. railway-oriented programming)
 // where callers want to inspect Success/Failure states without multiple if-err guards.
 func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (generic.Result[T], *http.Response) {
-	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
+	val, resp, err := DefaultClient.GetEx[T](ctx, path, mods...)
 	if err != nil {
 		return generic.Failure[T](err), resp
 	}
 
-	target, decodeErr := decodeResponseTo[T](resp)
-	if decodeErr != nil {
-		return generic.Failure[T](decodeErr), resp
-	}
-
-	return generic.Success(*target), resp
+	return generic.Success(*val), resp
 }
 
 // FetchTyped executes a GET request using the shared default client and returns a [generic.TypedResult]
@@ -243,17 +154,12 @@ func FetchTyped[T any](
 	path string,
 	mods ...RequestModifier,
 ) (generic.TypedResult[T, *APIError], *http.Response) {
-	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
+	val, resp, err := DefaultClient.GetEx[T](ctx, path, mods...)
 	if err != nil {
 		return AsTypedResult(generic.Zero[T](), err), resp
 	}
 
-	target, decodeErr := decodeResponseTo[T](resp)
-	if decodeErr != nil {
-		return AsTypedResult(generic.Zero[T](), decodeErr), resp
-	}
-
-	return generic.SuccessTyped[T, *APIError](*target), resp
+	return generic.SuccessTyped[T, *APIError](*val), resp
 }
 
 // Scoped executes fn within an isolated, ephemeral [Client] scope configured with opts.
@@ -374,55 +280,55 @@ func WithRetry(attempts int) RequestModifier {
 
 // WithUserAgent constructs an [RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) RequestModifier {
-	return WithHeader("User-Agent", ua)
+	return WithHeader(fheader.UserAgent, ua)
 }
 
 // WithContentType constructs an [RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
 func WithContentType(ct string) RequestModifier {
-	return WithHeader("Content-Type", ct)
+	return WithHeader(fheader.ContentType, ct)
 }
 
 // WithAccept constructs an [RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
 func WithAccept(accept string) RequestModifier {
-	return WithHeader("Accept", accept)
+	return WithHeader(fheader.Accept, accept)
 }
 
 // WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader("If-Modified-Since", t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfModifiedSince, t.UTC().Format(http.TimeFormat))
 }
 
 // WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader("If-Unmodified-Since", t.UTC().Format(http.TimeFormat))
+	return WithHeader(fheader.IfUnmodifiedSince, t.UTC().Format(http.TimeFormat))
 }
 
 // WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
 func WithRange(start, end int64) RequestModifier {
 	if start < 0 {
-		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10))
+		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10))
 	}
 
 	if end < 0 {
-		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-")
+		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
 	}
 
-	return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
+	return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 }
 
 // WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
 func WithCacheControl(directives ...string) RequestModifier {
-	return WithHeader("Cache-Control", strings.Join(directives, ", "))
+	return WithHeader(fheader.CacheControl, strings.Join(directives, ", "))
 }
 
 // WithNoCache constructs an [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
 func WithNoCache() RequestModifier {
-	return WithHeader("Cache-Control", "no-cache")
+	return WithHeader(fheader.CacheControl, fheader.ValueNoCache)
 }
 
 // WithNoStore constructs an [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
 func WithNoStore() RequestModifier {
-	return WithHeader("Cache-Control", "no-store")
+	return WithHeader(fheader.CacheControl, fheader.ValueNoStore)
 }
 
 // WithBaseURL returns an [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
@@ -467,7 +373,7 @@ func WithClientUserAgent(ua string) ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set("User-Agent", ua)
+		cfg.Defaults.Headers.Set(fheader.UserAgent, ua)
 	}
 }
 
@@ -548,14 +454,14 @@ func WithSmartBody(body any) RequestModifier {
 
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: "application/x-protobuf",
+			ContentType: fheader.MIMEApplicationProtobuf,
 			Bytes:       bodyBytes,
 		}
 
 	case url.Values:
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: "application/x-www-form-urlencoded",
+			ContentType: fheader.MIMEApplicationForm,
 			Bytes:       bytesconv.S2B(b.Encode()),
 		}
 
@@ -574,7 +480,7 @@ func WithSmartBody(body any) RequestModifier {
 	case string:
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: "text/plain; charset=utf-8",
+			ContentType: fheader.MIMETextPlainCharsetUTF8,
 			Bytes:       bytesconv.S2B(b),
 		}
 
@@ -591,7 +497,7 @@ func WithSmartBody(body any) RequestModifier {
 
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: "application/json",
+			ContentType: fheader.MIMEApplicationJSON,
 			Bytes:       bodyBytes,
 		}
 	}

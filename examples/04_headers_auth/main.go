@@ -13,11 +13,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type ProtectedResource struct {
@@ -33,7 +31,7 @@ func main() {
 	)
 
 	// Bearer token authentication
-	res, err := request.GetTo[ProtectedResource](ctx, client,
+	res, err := client.Get[ProtectedResource](ctx,
 		"/bearer",
 		mod.WithBearer("my-secret-token"),
 	)
@@ -44,7 +42,7 @@ func main() {
 	fmt.Println("Bearer:", res.Message)
 
 	// Basic authentication
-	basicRes, err := request.GetTo[ProtectedResource](ctx, client,
+	basicRes, err := client.Get[ProtectedResource](ctx,
 		"/basic-auth/user/passwd",
 		mod.WithBasicAuth("user", "passwd"),
 	)
@@ -55,7 +53,7 @@ func main() {
 	fmt.Println("Basic:", basicRes.Message)
 
 	// Custom headers
-	headerRes, err := request.GetTo[ProtectedResource](ctx, client,
+	headerRes, err := client.Get[ProtectedResource](ctx,
 		"/headers",
 		mod.WithHeader("X-Custom-Header", "hello-aoni"),
 		mod.WithHeader("X-Request-ID", "abc-123"),

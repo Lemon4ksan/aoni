@@ -11,9 +11,10 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -21,20 +22,20 @@ var errNotProtoMessage = errors.New("aoni/codec: body does not implement proto.M
 
 // Codec defines a unified strategy for marshaling outbound request payloads and unmarshaling incoming response streams.
 //
-// Implementations construct [aoni.RequestModifier] instances that bind specific content-type encoders
+// Implementations construct [core.RequestModifier] instances that bind specific content-type encoders
 // (JSON, XML, YAML, Protobuf, gRPC-Web) and assign matched stream decoders.
 type Codec interface {
-	// Encode constructs an [aoni.RequestModifier] that serializes body into the outgoing request payload.
-	Encode(body any) aoni.RequestModifier
+	// Encode constructs an [core.RequestModifier] that serializes body into the outgoing request payload.
+	Encode(body any) core.RequestModifier
 
-	// Decode constructs an [aoni.RequestModifier] that assigns a matching response body parser.
-	Decode() aoni.RequestModifier
+	// Decode constructs an [core.RequestModifier] that assigns a matching response body parser.
+	Decode() core.RequestModifier
 }
 
 type jsonCodec struct{}
 
-func (jsonCodec) Encode(body any) aoni.RequestModifier { return mod.WithJSONBody(body) }
-func (jsonCodec) Decode() aoni.RequestModifier         { return decode.WithJSON() }
+func (jsonCodec) Encode(body any) core.RequestModifier { return mod.WithJSONBody(body) }
+func (jsonCodec) Decode() core.RequestModifier         { return decode.WithJSON() }
 
 // JSONCodec provides standard JSON request payload encoding and response stream decoding strategies.
 // Outbound requests set 'Content-Type: application/json' and 'Accept: application/json'.
@@ -42,8 +43,8 @@ var JSONCodec Codec = jsonCodec{}
 
 type xmlCodec struct{}
 
-func (xmlCodec) Encode(body any) aoni.RequestModifier { return mod.WithXMLBody(body) }
-func (xmlCodec) Decode() aoni.RequestModifier         { return decode.WithXML() }
+func (xmlCodec) Encode(body any) core.RequestModifier { return mod.WithXMLBody(body) }
+func (xmlCodec) Decode() core.RequestModifier         { return decode.WithXML() }
 
 // XMLCodec provides standard XML request payload encoding and response stream decoding strategies.
 // Outbound requests set 'Content-Type: application/xml' and 'Accept: application/xml'.
@@ -51,8 +52,8 @@ var XMLCodec Codec = xmlCodec{}
 
 type yamlCodec struct{}
 
-func (yamlCodec) Encode(body any) aoni.RequestModifier { return mod.WithYAMLBody(body) }
-func (yamlCodec) Decode() aoni.RequestModifier         { return decode.WithYAML() }
+func (yamlCodec) Encode(body any) core.RequestModifier { return mod.WithYAMLBody(body) }
+func (yamlCodec) Decode() core.RequestModifier         { return decode.WithYAML() }
 
 // YAMLCodec provides YAML request payload encoding and response stream decoding strategies.
 // Outbound requests set 'Content-Type: application/yaml' and 'Accept: application/yaml'.
@@ -60,18 +61,18 @@ var YAMLCodec Codec = yamlCodec{}
 
 type protoCodec struct{}
 
-func (protoCodec) Encode(body any) aoni.RequestModifier {
+func (protoCodec) Encode(body any) core.RequestModifier {
 	msg, ok := body.(proto.Message)
 	if !ok {
-		return mod.Custom(func(req aoni.Request) {
-			aoni.MarkModifierError(req, errNotProtoMessage)
+		return mod.Custom(func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).BodyError = errNotProtoMessage
 		})
 	}
 
 	return mod.WithProtoBody(msg)
 }
 
-func (protoCodec) Decode() aoni.RequestModifier { return decode.WithProto() }
+func (protoCodec) Decode() core.RequestModifier { return decode.WithProto() }
 
 // ProtoCodec provides binary Protocol Buffer request encoding and response stream decoding strategies.
 // Outbound requests set 'Content-Type: application/x-protobuf' and 'Accept: application/x-protobuf'.
@@ -79,18 +80,18 @@ var ProtoCodec Codec = protoCodec{}
 
 type grpcWebCodec struct{}
 
-func (grpcWebCodec) Encode(body any) aoni.RequestModifier {
+func (grpcWebCodec) Encode(body any) core.RequestModifier {
 	msg, ok := body.(proto.Message)
 	if !ok {
-		return mod.Custom(func(req aoni.Request) {
-			aoni.MarkModifierError(req, errNotProtoMessage)
+		return mod.Custom(func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).BodyError = errNotProtoMessage
 		})
 	}
 
 	return mod.WithGRPCWebBody(msg)
 }
 
-func (grpcWebCodec) Decode() aoni.RequestModifier { return decode.WithGRPCWeb() }
+func (grpcWebCodec) Decode() core.RequestModifier { return decode.WithGRPCWeb() }
 
 // GRPCWebCodec provides 5-byte framed gRPC-Web Protocol Buffer request encoding and decoding strategies.
 // Conforms to gRPC-Web specification: encodes messages with 5-byte frame headers (1-byte compressed flag + 4-byte big-endian message length)

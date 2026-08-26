@@ -15,48 +15,40 @@ import (
 	"github.com/lemon4ksan/aoni"
 )
 
+// Request is an alias for [aoni.RequestBuilder].
+type Request = aoni.RequestBuilder
+
 // New acquires a pooled [Request] builder bound to the provided client engine or [aoni.Client].
 // If no doer argument is provided, the shared default client is used.
-//
-// The returned [Request] is borrowed from a global object pool and is not thread-safe.
-// Callers must finalize the request by invoking one of its execution methods (such as [Request.Execute],
-// [Request.Get], [Request.Post]), or explicitly release it back to the pool using [Request.Release].
 func New(doer ...any) *Request {
 	if len(doer) == 0 {
-		return acquireRequest(nil)
+		return aoni.R()
 	}
 
-	return acquireRequest(doer[0])
+	if c, ok := doer[0].(*aoni.Client); ok {
+		return c.R()
+	}
+
+	if d, ok := doer[0].(aoni.HTTPRequester); ok {
+		return aoni.NewClient(d).R()
+	}
+
+	return aoni.R()
 }
 
 // R is a convenient shorthand alias for [New].
-// If no doer argument is provided, the shared default client is used.
-//
-// Callers must finalize the borrowed request with an execution method or [Request.Release].
 func R(doer ...any) *Request {
-	if len(doer) == 0 {
-		return acquireRequest(nil)
-	}
-
-	return acquireRequest(doer[0])
+	return New(doer...)
 }
 
-// FetchTo executes a request with method, path, and optional [aoni.RequestModifier] options, unmarshaling the 2xx response into T.
+// FetchTo executes a request with method, path, and optional modifiers, unmarshaling the 2xx response into T.
 func FetchTo[T any](
 	ctx context.Context,
 	c any,
 	method, path string,
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).
-		SetContext(ctx).
-		SetResult(&target).
-		Apply(mods...).
-		Execute(method, path)
-
-	return target, resp, err
+	return aoni.FetchTo[T](ctx, c, method, path, mods...)
 }
 
 // GetTo dispatches a GET request and unmarshals the 2xx response payload directly into T.
@@ -66,107 +58,21 @@ func GetTo[T any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
-	return FetchTo[T](ctx, c, http.MethodGet, path, mods...)
-}
-
-// FetchScoped executes a request with method, path, and optional modifiers, passing the decoded response
-// into fn within an active [borrow.Scope].
-func FetchScoped[T any](
-	ctx context.Context,
-	c any,
-	method, path string,
-	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
-	mods ...aoni.RequestModifier,
-) error {
 	var target T
+	var doer aoni.HTTPRequester
+	if d, ok := c.(aoni.HTTPRequester); ok {
+		doer = d
+	} else if c == nil {
+		doer = aoni.DefaultClient
+	}
 
-	resp, err := R(c).
+	resp, err := R(doer).
 		SetContext(ctx).
 		SetResult(&target).
 		Apply(mods...).
-		Execute(method, path)
-	if err != nil {
-		return err
-	}
+		Get(path)
 
-	if resp != nil && resp.Body != nil {
-		defer func() {
-			_ = resp.Body.Close()
-		}()
-	}
-
-	scope := borrow.AcquireScope()
-	defer scope.Release()
-
-	return fn(scope, target, resp)
-}
-
-// GetScoped dispatches a GET request and passes the decoded response T to fn within an active [borrow.Scope].
-func GetScoped[T any](
-	ctx context.Context,
-	c any,
-	path string,
-	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
-	mods ...aoni.RequestModifier,
-) error {
-	return FetchScoped[T](ctx, c, http.MethodGet, path, fn, mods...)
-}
-
-// BatchFetchTo dispatches multiple requests concurrently and unmarshals each 2xx response payload into a slice of T.
-func BatchFetchTo[T any](
-	ctx context.Context,
-	c any,
-	method string,
-	paths []string,
-	mods ...aoni.RequestModifier,
-) ([]T, error) {
-	if len(paths) == 0 {
-		return nil, nil
-	}
-
-	results := make([]T, len(paths))
-
-	type fetchResult struct {
-		idx int
-		err error
-	}
-
-	resCh := make(chan fetchResult, len(paths))
-
-	for i, path := range paths {
-		go func(idx int, p string) {
-			val, resp, err := FetchTo[T](ctx, c, method, p, mods...)
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-
-			if err == nil {
-				results[idx] = val
-			}
-
-			resCh <- fetchResult{idx: idx, err: err}
-		}(i, path)
-	}
-
-	var firstErr error
-	for range paths {
-		res := <-resCh
-		if res.err != nil && firstErr == nil {
-			firstErr = res.err
-		}
-	}
-
-	return results, firstErr
-}
-
-// BatchGetTo dispatches multiple GET requests concurrently and unmarshals each 2xx response payload into a slice of T.
-func BatchGetTo[T any](
-	ctx context.Context,
-	c any,
-	paths []string,
-	mods ...aoni.RequestModifier,
-) ([]T, error) {
-	return BatchFetchTo[T](ctx, c, http.MethodGet, paths, mods...)
+	return target, resp, err
 }
 
 // PostTo dispatches a POST request with payload body and unmarshals the 2xx response into T.
@@ -178,8 +84,14 @@ func PostTo[T any](
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
 	var target T
+	var doer aoni.HTTPRequester
+	if d, ok := c.(aoni.HTTPRequester); ok {
+		doer = d
+	} else if c == nil {
+		doer = aoni.DefaultClient
+	}
 
-	resp, err := R(c).
+	resp, err := R(doer).
 		SetContext(ctx).
 		SetBody(body).
 		SetResult(&target).
@@ -198,8 +110,14 @@ func PutTo[T any](
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
 	var target T
+	var doer aoni.HTTPRequester
+	if d, ok := c.(aoni.HTTPRequester); ok {
+		doer = d
+	} else if c == nil {
+		doer = aoni.DefaultClient
+	}
 
-	resp, err := R(c).
+	resp, err := R(doer).
 		SetContext(ctx).
 		SetBody(body).
 		SetResult(&target).
@@ -218,8 +136,14 @@ func PatchTo[T any](
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
 	var target T
+	var doer aoni.HTTPRequester
+	if d, ok := c.(aoni.HTTPRequester); ok {
+		doer = d
+	} else if c == nil {
+		doer = aoni.DefaultClient
+	}
 
-	resp, err := R(c).
+	resp, err := R(doer).
 		SetContext(ctx).
 		SetBody(body).
 		SetResult(&target).
@@ -239,26 +163,67 @@ func DeleteTo[T any](
 	return FetchTo[T](ctx, c, http.MethodDelete, path, mods...)
 }
 
+// BatchFetchTo dispatches multiple requests concurrently and unmarshals each 2xx response payload into a slice of T.
+func BatchFetchTo[T any](
+	ctx context.Context,
+	c any,
+	method string,
+	paths []string,
+	mods ...aoni.RequestModifier,
+) ([]T, error) {
+	return aoni.BatchFetchTo[T](ctx, c, method, paths, mods...)
+}
+
+// BatchGetTo dispatches multiple GET requests concurrently and unmarshals each 2xx response payload into a slice of T.
+func BatchGetTo[T any](
+	ctx context.Context,
+	c any,
+	paths []string,
+	mods ...aoni.RequestModifier,
+) ([]T, error) {
+	return aoni.BatchGetTo[T](ctx, c, paths, mods...)
+}
+
+// FetchScoped executes a request with method, path, and optional modifiers, passing the decoded response
+// into fn within an active [borrow.Scope].
+func FetchScoped[T any](
+	ctx context.Context,
+	c any,
+	method, path string,
+	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
+	mods ...aoni.RequestModifier,
+) error {
+	return aoni.FetchScoped[T](ctx, c, method, path, fn, mods...)
+}
+
+// GetScoped dispatches a GET request and passes the decoded response T to fn within an active [borrow.Scope].
+func GetScoped[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
+	mods ...aoni.RequestModifier,
+) error {
+	return aoni.GetScoped[T](ctx, c, path, fn, mods...)
+}
+
 // ExecuteTo executes the borrowed Request with method and path, unmarshaling the response into T.
 func ExecuteTo[T any](r *Request, method, path string) (T, *http.Response, error) {
-	var target T
 	if r == nil {
-		return target, nil, ErrNilRequest
+		var zero T
+		return zero, nil, aoni.ErrNilRequest
 	}
 
-	resp, err := r.SetResult(&target).Execute(method, path)
-
-	return target, resp, err
+	return r.ExecuteTo[T](method, path)
 }
 
 // ExecuteResult executes the borrowed Request and returns a Swift-inspired [generic.Result].
 func ExecuteResult[T any](r *Request, method, path string) (generic.Result[T], *http.Response) {
-	val, resp, err := ExecuteTo[T](r, method, path)
-	if err != nil {
-		return generic.Failure[T](err), resp
+	if r == nil {
+		return generic.Failure[T](aoni.ErrNilRequest), nil
 	}
 
-	return generic.Success(val), resp
+	return r.ExecuteResult[T](method, path)
 }
 
 // FetchResult executes a request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response or error.

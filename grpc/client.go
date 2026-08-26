@@ -19,13 +19,12 @@ import (
 	"time"
 
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/pathkit"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // Metadata represents Custom-Metadata key-value headers per PROTOCOL-HTTP2.md.
@@ -42,10 +41,10 @@ type Metadata map[string]string
 //   - Resp must be a pointer or struct type implementing [proto.Message].
 func Invoke[Resp any](
 	ctx context.Context,
-	doer aoni.RequestDoer,
+	doer core.HTTPRequester,
 	fullMethod string,
 	reqMsg proto.Message,
-	mods ...aoni.RequestModifier,
+	mods ...core.RequestModifier,
 ) (*Resp, error) {
 	ctx = asyncctx.Wrap(ctx)
 
@@ -57,9 +56,7 @@ func Invoke[Resp any](
 	path := normalizeMethodPath(fullMethod)
 	grpcMods := prepareGRPCModifiers(ctx, frameBytes, false, mods)
 
-	requester := request.AsRequester(doer)
-
-	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)
+	resp, err := doer.Request(ctx, http.MethodPost, path, grpcMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,58 +84,40 @@ func Invoke[Resp any](
 	return result, nil
 }
 
-// InvokeFast executes a high-performance gRPC unary call using the fast client engine without allocating *http.Response.
-//
-// Preconditions:
-//   - ctx, fastClient, and reqMsg must be non-nil.
-func InvokeFast[Resp any](
+// InvokeInto executes a native unary gRPC call and unmarshals the response frame directly into target message without allocation.
+func InvokeInto(
 	ctx context.Context,
-	fastClient *fast.Client,
+	doer core.HTTPRequester,
 	fullMethod string,
 	reqMsg proto.Message,
-	mods ...aoni.RequestModifier,
-) (*Resp, error) {
+	target proto.Message,
+	mods ...core.RequestModifier,
+) error {
 	ctx = asyncctx.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	path := normalizeMethodPath(fullMethod)
+	grpcMods := prepareGRPCModifiers(ctx, frameBytes, false, mods)
 
-	req := fast.NewRequest(nil)
-	defer req.Release()
-
-	req.SetContext(ctx)
-	req.SetMethod(http.MethodPost)
-	req.SetURL(path)
-	req.SetHeader("Content-Type", "application/grpc")
-	req.SetHeader("TE", "trailers")
-	req.SetBodyBytes(frameBytes)
-
-	for _, m := range mods {
-		m.Apply(req)
-	}
-
-	resp, err := fastClient.Do(req)
+	resp, err := doer.Request(ctx, http.MethodPost, path, grpcMods...)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer resp.Close()
+	defer resp.Body.Close()
 
-	result := new(Resp)
-
-	msg, ok := any(result).(proto.Message)
-	if !ok {
-		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
+	if err := validateInitialHeaders(resp); err != nil {
+		return err
 	}
 
-	if err := unmarshalFastGRPCFrame(resp, msg); err != nil {
-		return nil, err
+	if _, err := UnmarshalFrame(resp.Body, target); err != nil {
+		return err
 	}
 
-	return result, nil
+	return validateResponseTrailers(resp)
 }
 
 // normalizeMethodPath guarantees that the gRPC method path starts with a leading slash.
@@ -155,22 +134,22 @@ func prepareGRPCModifiers(
 	ctx context.Context,
 	frameBytes []byte,
 	isStreaming bool,
-	mods []aoni.RequestModifier,
-) []aoni.RequestModifier {
-	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
+	mods []core.RequestModifier,
+) []core.RequestModifier {
+	grpcMods := make([]core.RequestModifier, 0, len(mods)+5)
 	grpcMods = append(grpcMods,
-		mod.WithContentType("application/grpc"),
-		mod.WithHeader("te", "trailers"),
-		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
+		mod.WithContentType(fheader.MIMEApplicationGRPC),
+		mod.WithHeader(fheader.TE, fheader.ValueTrailers),
+		mod.WithHeader(fheader.UserAgent, "grpc-aoni/1.0"),
 		mod.WithBody(bytes.NewReader(frameBytes)),
 	)
 
 	if isStreaming {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-accept-encoding", "gzip, identity"))
+		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity))
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCTimeout, formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -183,7 +162,7 @@ func prepareGRPCModifiers(
 }
 
 // unmarshalFastGRPCFrame decodes Protobuf payload bytes from a fast client response.
-func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
+func unmarshalFastGRPCFrame(resp core.Response, msg proto.Message) error {
 	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
 		_, err := UnmarshalFrame(stream, msg)
 		return err
@@ -203,13 +182,13 @@ func validateInitialHeaders(resp *http.Response) error {
 		}
 	}
 
-	ct := resp.Header.Get("Content-Type")
-	if ct != "" && !strings.HasPrefix(ct, "application/grpc") {
+	ct := resp.Header.Get(fheader.ContentType)
+	if ct != "" && !strings.HasPrefix(ct, fheader.MIMEApplicationGRPC) {
 		return fmt.Errorf("%w: %s", ErrInvalidContentType, ct)
 	}
 
 	// Check "Trailers-Only" response case (when error status is delivered directly in initial response headers)
-	if statusCode := resp.Header.Get("grpc-status"); statusCode != "" && statusCode != "0" {
+	if statusCode := resp.Header.Get(fheader.GRPCStatus); statusCode != "" && statusCode != "0" {
 		return parseGRPCStatus(resp.Header)
 	}
 
@@ -223,7 +202,7 @@ func validateResponseTrailers(resp *http.Response) error {
 		trailers = resp.Header
 	}
 
-	statusCode := trailers.Get("grpc-status")
+	statusCode := trailers.Get(fheader.GRPCStatus)
 	if statusCode == "" {
 		return ErrMissingGRPCStatus
 	}
@@ -254,19 +233,19 @@ func DecodeBinaryHeader(val string) ([]byte, error) {
 func prepareGRPCStreamModifiers(
 	ctx context.Context,
 	bodyReader io.Reader,
-	mods []aoni.RequestModifier,
-) []aoni.RequestModifier {
-	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
+	mods []core.RequestModifier,
+) []core.RequestModifier {
+	grpcMods := make([]core.RequestModifier, 0, len(mods)+5)
 	grpcMods = append(grpcMods,
-		mod.WithContentType("application/grpc"),
-		mod.WithHeader("te", "trailers"),
-		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
-		mod.WithHeader("grpc-accept-encoding", "gzip, identity"),
+		mod.WithContentType(fheader.MIMEApplicationGRPC),
+		mod.WithHeader(fheader.TE, fheader.ValueTrailers),
+		mod.WithHeader(fheader.UserAgent, "grpc-aoni/1.0"),
+		mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity),
 		mod.WithBody(bodyReader),
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCTimeout, formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -345,10 +324,10 @@ func (s *StreamResponse[Resp]) Close() error {
 // allowing the client to receive multiple Protobuf responses over time.
 func ServerStream[Resp any](
 	ctx context.Context,
-	doer aoni.RequestDoer,
+	doer core.HTTPRequester,
 	fullMethod string,
 	reqMsg proto.Message,
-	mods ...aoni.RequestModifier,
+	mods ...core.RequestModifier,
 ) (*StreamResponse[Resp], error) {
 	ctx = asyncctx.Wrap(ctx)
 
@@ -360,9 +339,7 @@ func ServerStream[Resp any](
 	path := normalizeMethodPath(fullMethod)
 	grpcMods := prepareGRPCModifiers(ctx, frameBytes, true, mods)
 
-	requester := request.AsRequester(doer)
-
-	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)
+	resp, err := doer.Request(ctx, http.MethodPost, path, grpcMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -552,9 +529,9 @@ func (s *BidiStreamClient[Req, Resp]) Close() error {
 // BidiStream initiates a full-duplex bidirectional gRPC streaming session.
 func BidiStream[Req proto.Message, Resp any](
 	ctx context.Context,
-	doer aoni.RequestDoer,
+	doer core.HTTPRequester,
 	fullMethod string,
-	mods ...aoni.RequestModifier,
+	mods ...core.RequestModifier,
 ) (*BidiStreamClient[Req, Resp], error) {
 	ctx = asyncctx.Wrap(ctx)
 	streamCtx, cancel := context.WithCancel(ctx) //nolint:gosec
@@ -563,11 +540,9 @@ func BidiStream[Req proto.Message, Resp any](
 	path := normalizeMethodPath(fullMethod)
 	grpcMods := prepareGRPCStreamModifiers(streamCtx, pipeReader, mods)
 
-	requester := request.AsRequester(doer)
-
 	connectResCh := make(chan connectResult, 1)
 	go func() {
-		resp, err := requester.Request(streamCtx, http.MethodPost, path, grpcMods...) //nolint:bodyclose
+		resp, err := doer.Request(streamCtx, http.MethodPost, path, grpcMods...) //nolint:bodyclose
 		connectResCh <- connectResult{resp: resp, err: err}
 	}()
 
@@ -615,9 +590,9 @@ func (s *ClientStreamClient[Req, Resp]) Close() error {
 // ClientStream initiates a client-streaming gRPC call.
 func ClientStream[Req proto.Message, Resp any](
 	ctx context.Context,
-	doer aoni.RequestDoer,
+	doer core.HTTPRequester,
 	fullMethod string,
-	mods ...aoni.RequestModifier,
+	mods ...core.RequestModifier,
 ) (*ClientStreamClient[Req, Resp], error) {
 	bidi, err := BidiStream[Req, Resp](ctx, doer, fullMethod, mods...)
 	if err != nil {

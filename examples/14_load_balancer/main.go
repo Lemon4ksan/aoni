@@ -14,11 +14,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
-
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
 )
 
 type Response struct {
@@ -52,7 +50,7 @@ func main() {
 
 	// Requests will be distributed across backends
 	for i := range 6 {
-		res, err := request.GetTo[Response](ctx, client, "/ip")
+		res, err := client.Get[Response](ctx, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

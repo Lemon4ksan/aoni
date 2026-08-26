@@ -22,7 +22,6 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 type fastBenchUser struct {
@@ -307,7 +306,7 @@ func BenchmarkGET_JSON_StdClient(b *testing.B) {
 
 	for b.Loop() {
 		var user fastBenchUser
-		err := request.GetInto(ctx, client, "/", &user)
+		err := client.GetInto(ctx, "/", &user)
 		if err != nil {
 			b.Fatalf("std request failed: %v", err)
 		}
@@ -430,7 +429,7 @@ func BenchmarkGET_JSON_Aoni_FastBridged(b *testing.B) {
 
 	for b.Loop() {
 		var user fastBenchUser
-		err := request.GetInto(ctx, aoniClient, "/user", &user)
+		err := aoniClient.GetInto(ctx, "/user", &user)
 		if err != nil {
 			b.Fatalf("aoni fast bridged request failed: %v", err)
 		}

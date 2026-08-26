@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
@@ -479,18 +481,18 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			m.Headers = append(m.Headers, ir.HeaderIR{Key: "X-Requested-With", StaticValue: "XMLHttpRequest"})
 			m.Headers = append(
 				m.Headers,
-				ir.HeaderIR{Key: "Accept", StaticValue: "application/json, text/javascript, */*; q=0.01"},
+				ir.HeaderIR{Key: fheader.Accept, StaticValue: "application/json, text/javascript, */*; q=0.01"},
 			)
 
 		case "cors":
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Dest", StaticValue: "empty"})
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Mode", StaticValue: "cors"})
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Site", StaticValue: "same-origin"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchDest, StaticValue: "empty"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchMode, StaticValue: "cors"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchSite, StaticValue: "same-origin"})
 		case "navigate":
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Dest", StaticValue: "document"})
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Mode", StaticValue: "navigate"})
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Site", StaticValue: "none"})
-			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-User", StaticValue: "?1"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchDest, StaticValue: "document"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchMode, StaticValue: "navigate"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchSite, StaticValue: "none"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: fheader.SecFetchUser, StaticValue: "?1"})
 		}
 
 	case "inject":
@@ -663,7 +665,7 @@ func parseEnvelopeDirective(d *Directive) *ir.EnvelopeIR {
 func parseAuthDirective(d *Directive) *ir.AuthStrategyIR {
 	auth := &ir.AuthStrategyIR{
 		Kind:        ir.AuthBearer,
-		HeaderName:  "Authorization",
+		HeaderName:  fheader.Authorization,
 		ValuePrefix: "Bearer ",
 	}
 

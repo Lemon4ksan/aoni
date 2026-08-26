@@ -31,7 +31,7 @@ func BenchmarkFastClient_Get(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			resp, err := client.Get(ctx, url)
+			resp, err := client.Raw().Get(ctx, url)
 			if err != nil {
 				b.Fatal(err)
 			}

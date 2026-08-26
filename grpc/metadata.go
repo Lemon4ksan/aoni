@@ -9,19 +9,20 @@ import (
 	"strings"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
 // metadataContextKey is a private context key for carrying gRPC metadata.
 type metadataContextKey struct{}
 
-// WithMetadata produces an [aoni.RequestModifier] that injects gRPC metadata headers.
+// WithMetadata produces an [core.RequestModifier] that injects gRPC metadata headers.
 // Keys ending in "-bin" are automatically encoded using Base64 per PROTOCOL-HTTP2.md.
-func WithMetadata(md Metadata) aoni.RequestModifier {
-	return mod.Custom(func(req aoni.Request) {
+func WithMetadata(md Metadata) core.RequestModifier {
+	return mod.Custom(func(req core.Request) {
 		for k, v := range md {
 			if strings.HasSuffix(strings.ToLower(k), "-bin") {
 				req.SetHeader(k, EncodeBinaryHeader(bytesconv.S2B(v)))
@@ -32,8 +33,8 @@ func WithMetadata(md Metadata) aoni.RequestModifier {
 	})
 }
 
-// WithBinaryHeader produces an [aoni.RequestModifier] that encodes raw binary bytes as a Base64 gRPC header.
-func WithBinaryHeader(key string, val []byte) aoni.RequestModifier {
+// WithBinaryHeader produces a [core.RequestModifier] that encodes raw binary bytes as a Base64 gRPC header.
+func WithBinaryHeader(key string, val []byte) core.RequestModifier {
 	if !strings.HasSuffix(strings.ToLower(key), "-bin") {
 		key += "-bin"
 	}
@@ -43,9 +44,9 @@ func WithBinaryHeader(key string, val []byte) aoni.RequestModifier {
 	return mod.WithHeader(key, encoded)
 }
 
-// WithTimeout produces an [aoni.RequestModifier] setting the gRPC-Timeout header.
-func WithTimeout(d time.Duration) aoni.RequestModifier {
-	return mod.WithHeader("grpc-timeout", formatTimeout(d))
+// WithTimeout produces a [core.RequestModifier] setting the gRPC-Timeout header.
+func WithTimeout(d time.Duration) core.RequestModifier {
+	return mod.WithHeader(fheader.GRPCTimeout, formatTimeout(d))
 }
 
 // NewContext returns a new context carrying gRPC metadata.

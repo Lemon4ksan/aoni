@@ -17,7 +17,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
@@ -82,7 +81,7 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := request.GetTo[Response](t.Context(), client, "/")
+	res, err := client.Get[Response](t.Context(), "/")
 	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
@@ -149,7 +148,7 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := request.GetTo[Response](t.Context(), client, "/")
+	res, err := client.Get[Response](t.Context(), "/")
 	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)

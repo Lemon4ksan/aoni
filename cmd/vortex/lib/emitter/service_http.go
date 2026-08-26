@@ -137,13 +137,12 @@ func emitStrictService(
 	tracker.Add("errors")
 	tracker.Add("github.com/lemon4ksan/aoni")
 	tracker.Add("github.com/lemon4ksan/aoni/option")
-	tracker.Add("github.com/lemon4ksan/aoni/request")
 
 	// 1. Client Struct
 	fmt.Fprintf(buf, "type %s struct {\n", clientStructName)
 
 	for _, sub := range svc.SubRequesters {
-		fmt.Fprintf(buf, "\t%s request.Requester\n", sub.FieldName)
+		fmt.Fprintf(buf, "\t%s *aoni.Client\n", sub.FieldName)
 	}
 
 	buf.WriteString("}\n\n")
@@ -183,7 +182,7 @@ func emitStrictService(
 	// Target requester resolution
 	fmt.Fprintf(
 		buf,
-		"\ttargetReq := request.Configure(client, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
+		"\ttargetReq := aoni.NewClient(client, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
 		svc.BaseURL,
 	)
 
@@ -215,8 +214,8 @@ func emitStrictService(
 	buf.WriteString("\treturn api\n}\n\n")
 
 	// Underlying requester getter
-	fmt.Fprintf(buf, "// R returns the underlying request.Requester used by the client.\n")
-	fmt.Fprintf(buf, "func (c *%s) R() request.Requester {\n\treturn c.r\n}\n\n", clientStructName)
+	fmt.Fprintf(buf, "// R returns the underlying *aoni.Client used by the client.\n")
+	fmt.Fprintf(buf, "func (c *%s) R() *aoni.Client {\n\treturn c.r\n}\n\n", clientStructName)
 
 	// Methods
 	for _, m := range svc.Methods {
@@ -233,13 +232,12 @@ func emitStandardService(
 ) {
 	tracker.Add("github.com/lemon4ksan/aoni")
 	tracker.Add("github.com/lemon4ksan/aoni/option")
-	tracker.Add("github.com/lemon4ksan/aoni/request")
 
 	// 1. Client Struct
 	fmt.Fprintf(buf, "type %s struct {\n", clientStructName)
 
 	for _, sub := range svc.SubRequesters {
-		fmt.Fprintf(buf, "\t%s request.Requester\n", sub.FieldName)
+		fmt.Fprintf(buf, "\t%s *aoni.Client\n", sub.FieldName)
 	}
 
 	buf.WriteString("}\n\n")
@@ -268,7 +266,7 @@ func emitStandardService(
 	// Target requester resolution
 	fmt.Fprintf(
 		buf,
-		"\ttargetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
+		"\ttargetReq := aoni.NewClient(doer, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
 		svc.BaseURL,
 	)
 
@@ -287,7 +285,7 @@ func emitStandardService(
 			tracker.Add("github.com/lemon4ksan/aoni/fast")
 			fmt.Fprintf(
 				buf,
-				"\t\t%s: request.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...),\n",
+				"\t\t%s: aoni.NewClient(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...),\n",
 				sub.FieldName,
 				baseURL,
 			)
@@ -320,8 +318,8 @@ func emitStandardService(
 	}
 
 	// Underlying requester getter
-	fmt.Fprintf(buf, "// R returns the underlying request.Requester used by the client.\n")
-	fmt.Fprintf(buf, "func (c *%s) R() request.Requester {\n\treturn c.r\n}\n\n", clientStructName)
+	fmt.Fprintf(buf, "// R returns the underlying *aoni.Client used by the client.\n")
+	fmt.Fprintf(buf, "func (c *%s) R() *aoni.Client {\n\treturn c.r\n}\n\n", clientStructName)
 
 	// 3. Methods
 	for _, m := range svc.Methods {

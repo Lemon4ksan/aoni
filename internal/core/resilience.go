@@ -5,8 +5,12 @@
 package core
 
 import (
+	"net/http"
 	"time"
 )
+
+// SoftErrorDetector inspects the response status, headers, and initial peeked body bytes for soft errors.
+type SoftErrorDetector func(resp *http.Response, peek []byte) error
 
 // RetryCondition evaluates whether a failed transaction attempt should trigger a retry.
 type RetryCondition func(resp Response, err error) bool

@@ -16,11 +16,11 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fingerprint"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type Response struct {
@@ -34,7 +34,7 @@ func main() {
 
 	// Start a local test server to demonstrate without external network dependency
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(fheader.ContentType, fheader.MIMEApplicationJSON)
 		fmt.Fprintf(w, `{"headers": {"User-Agent": %q}}`, r.UserAgent())
 	}))
 	defer server.Close()
@@ -47,7 +47,7 @@ func main() {
 		option.WithPersonaStruct(fingerprint.PersonaChrome120Windows),
 	)
 
-	res, err := request.GetTo[Response](ctx, chromeClient, "/headers")
+	res, err := chromeClient.Get[Response](ctx, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {
@@ -63,7 +63,7 @@ func main() {
 		option.WithPersonaStruct(fingerprint.PersonaFirefox120Windows),
 	)
 
-	res, err = request.GetTo[Response](ctx, firefoxClient, "/headers")
+	res, err = firefoxClient.Get[Response](ctx, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {

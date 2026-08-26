@@ -1,6 +1,6 @@
 module github.com/lemon4ksan/aoni/x
 
-go 1.25.4
+go 1.27.0
 
 require (
 	github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54

@@ -61,6 +61,6 @@ func TestCallDirective(t *testing.T) {
 	// 3. Verify customPkg.StreamData dispatch for io.ReadCloser
 	require.Contains(t, codeStr, "customPkg.StreamData(ctx, c.r, \"data/stream\", allMods...)")
 
-	// 4. Verify standard method uses request.GetTo
-	require.Contains(t, codeStr, "request.GetTo[CustomData](ctx, c.r, \"data/standard\", allMods...)")
+	// 4. Verify standard method uses c.r.Get
+	require.Contains(t, codeStr, "c.r.Get[CustomData](ctx, \"data/standard\", allMods...)")
 }

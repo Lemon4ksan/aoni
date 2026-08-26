@@ -40,47 +40,47 @@ func TestFastClient_HTTPVerbParity(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. GET
-	resp, err := client.Get(ctx, "/get-endpoint")
+	resp, err := client.Raw().Get(ctx, "/get-endpoint")
 	require.NoError(t, err)
 	assert.Equal(t, "GET", resp.Header("X-Echo-Method"))
 	assert.Equal(t, "/get-endpoint", resp.Header("X-Echo-Path"))
 	resp.Close()
 
 	// 2. POST
-	resp, err = client.Post(ctx, "/post-endpoint", mod.WithJSON(map[string]string{"foo": "bar"}))
+	resp, err = client.Raw().Post(ctx, "/post-endpoint", mod.WithJSON(map[string]string{"foo": "bar"}))
 	require.NoError(t, err)
 	assert.Equal(t, "POST", resp.Header("X-Echo-Method"))
 	assert.JSONEq(t, `{"foo":"bar"}`, string(resp.BodyBytes()))
 	resp.Close()
 
 	// 3. PUT
-	resp, err = client.Put(ctx, "/put-endpoint", mod.WithSmartBody("hello-put"))
+	resp, err = client.Raw().Put(ctx, "/put-endpoint", mod.WithSmartBody("hello-put"))
 	require.NoError(t, err)
 	assert.Equal(t, "PUT", resp.Header("X-Echo-Method"))
 	assert.Equal(t, "hello-put", string(resp.BodyBytes()))
 	resp.Close()
 
 	// 4. PATCH
-	resp, err = client.Patch(ctx, "/patch-endpoint", mod.WithSmartBody("hello-patch"))
+	resp, err = client.Raw().Patch(ctx, "/patch-endpoint", mod.WithSmartBody("hello-patch"))
 	require.NoError(t, err)
 	assert.Equal(t, "PATCH", resp.Header("X-Echo-Method"))
 	assert.Equal(t, "hello-patch", string(resp.BodyBytes()))
 	resp.Close()
 
 	// 5. DELETE
-	resp, err = client.Delete(ctx, "/delete-endpoint")
+	resp, err = client.Raw().Delete(ctx, "/delete-endpoint")
 	require.NoError(t, err)
 	assert.Equal(t, "DELETE", resp.Header("X-Echo-Method"))
 	resp.Close()
 
 	// 6. HEAD
-	resp, err = client.Head(ctx, "/head-endpoint")
+	resp, err = client.Raw().Head(ctx, "/head-endpoint")
 	require.NoError(t, err)
 	assert.Equal(t, "HEAD", resp.Header("X-Echo-Method"))
 	resp.Close()
 
 	// 7. OPTIONS
-	resp, err = client.Options(ctx, "/options-endpoint")
+	resp, err = client.Raw().Options(ctx, "/options-endpoint")
 	require.NoError(t, err)
 	assert.Equal(t, "OPTIONS", resp.Header("X-Echo-Method"))
 	resp.Close()

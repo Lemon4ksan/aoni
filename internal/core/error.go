@@ -107,6 +107,8 @@ type Error struct {
 	Op string
 	// Path specifies the request path or URI associated with the error.
 	Path string
+	// Code holds the HTTP status code or discrete error code if applicable.
+	Code int
 	// Target identifies the remote target host or address.
 	Target string
 	// URL specifies the complete target URL if available.

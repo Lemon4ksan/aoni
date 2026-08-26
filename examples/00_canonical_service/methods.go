@@ -12,12 +12,11 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // GetUser retrieves a single user by ID using type-safe JSON decoding.
 func (s *UserService) GetUser(ctx context.Context, id string, mods ...aoni.RequestModifier) (*UserDTO, error) {
-	user, err := request.GetTo[UserDTO](ctx, s.req, "users/"+url.PathEscape(id), mods...)
+	user, err := s.client.Get[UserDTO](ctx, "users/"+url.PathEscape(id), mods...)
 	if err != nil {
 		switch {
 		case aoni.IsNotFound(err):
@@ -36,7 +35,7 @@ func (s *UserService) GetUser(ctx context.Context, id string, mods ...aoni.Reque
 
 // CreateUser creates a new user sending a typed JSON body.
 func (s *UserService) CreateUser(ctx context.Context, req CreateUserRequest, mods ...aoni.RequestModifier) (*UserDTO, error) {
-	created, err := request.PostTo[UserDTO](ctx, s.req, "users", req, mods...)
+	created, err := s.client.Post[UserDTO](ctx, "users", req, mods...)
 	if err != nil {
 		if aoni.IsForbidden(err) {
 			return nil, fmt.Errorf("insufficient permissions to create user: %w", err)
@@ -55,7 +54,7 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*Lo
 		"password": {password},
 	}
 
-	loginResp, err := request.PostTo[LoginResponse](ctx, s.req, "auth/login", nil, mod.WithFormValues(form))
+	loginResp, err := s.client.Post[LoginResponse](ctx, "auth/login", nil, mod.WithFormValues(form))
 	if err != nil {
 		if aoni.IsUnauthorized(err) {
 			return nil, fmt.Errorf("invalid username or password: %w", err)
@@ -76,7 +75,7 @@ func (s *UserService) ListUsers(ctx context.Context, page, limit int, mods ...ao
 
 	allMods := append(queryMods, mods...)
 
-	users, err := request.GetTo[[]UserDTO](ctx, s.req, "users", allMods...)
+	users, err := s.client.Get[[]UserDTO](ctx, "users", allMods...)
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}

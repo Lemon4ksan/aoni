@@ -15,12 +15,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type HTTPBinResponse struct {
@@ -38,7 +36,7 @@ func main() {
 	// Trace with full timing breakdown
 	var info telemetry.TraceInfo
 
-	_, err := request.GetTo[HTTPBinResponse](ctx, client, "/ip",
+	_, err := client.Get[HTTPBinResponse](ctx, "/ip",
 		mod.WithTrace(&info),
 	)
 	if err != nil {
@@ -58,7 +56,7 @@ func main() {
 	// WithCurlDump + CaptureResponse: capture the raw response for curl generation
 	var resp *http.Response
 
-	_, err = request.GetTo[HTTPBinResponse](ctx, client, "/ip",
+	_, err = client.Get[HTTPBinResponse](ctx, "/ip",
 		mod.WithCurlDump(),
 		mod.WithCaptureResponse(&resp),
 	)

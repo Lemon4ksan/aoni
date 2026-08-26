@@ -27,7 +27,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -276,7 +275,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	)
 
 	info := &telemetry.TraceInfo{}
-	result, err := request.GetTo[testPayload](t.Context(), client, "/", mod.WithTrace(info), mod.WithTraceJA4(info))
+	result, err := client.Get[testPayload](t.Context(), "/", mod.WithTrace(info), mod.WithTraceJA4(info))
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", result.Message)
@@ -287,7 +286,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	assert.NotEmpty(t, info.RemoteAddr)
 	assert.Greater(t, info.Total, 0*time.Second)
 
-	resultCached, err := request.GetTo[testPayload](t.Context(), client, "/")
+	resultCached, err := client.Get[testPayload](t.Context(), "/")
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", resultCached.Message)

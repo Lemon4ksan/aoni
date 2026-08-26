@@ -8,9 +8,16 @@ package mod
 import (
 	"errors"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+)
+
+type (
+	// Request is an alias for core.Request.
+	Request = core.Request
+
+	// RequestModifier is an alias for core.RequestModifier.
+	RequestModifier = core.RequestModifier
 )
 
 var getOrInitRequestConfig = pipeline.GetOrInitRequestConfig
@@ -18,26 +25,26 @@ var getOrInitRequestConfig = pipeline.GetOrInitRequestConfig
 // ErrInvalidPairCount is returned when WithVars receives an odd number of key-value arguments.
 var ErrInvalidPairCount = errors.New("aoni/mod: WithVars requires an even number of key-value pairs")
 
-// Apply executes a slice of [aoni.RequestModifier] options sequentially on req.
-func Apply(req aoni.Request, mods ...aoni.RequestModifier) {
+// Apply executes a slice of [RequestModifier] options sequentially on req.
+func Apply(req Request, mods ...RequestModifier) {
 	for _, m := range mods {
 		m.Apply(req)
 	}
 }
 
-// WithAutoDecode constructs an [aoni.RequestModifier] enabling content-type header detection for response parsing.
-func WithAutoDecode() aoni.RequestModifier {
-	return aoni.RequestModifier{
+// WithAutoDecode constructs an [RequestModifier] enabling content-type header detection for response parsing.
+func WithAutoDecode() RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			getOrInitRequestConfig(req).AutoDecode = true
 		},
 	}
 }
 
-// Custom constructs a custom [aoni.RequestModifier] wrapping an arbitrary closure function.
-func Custom(fn func(aoni.Request)) aoni.RequestModifier {
-	return aoni.RequestModifier{
+// Custom constructs a custom [RequestModifier] wrapping an arbitrary closure function.
+func Custom(fn func(Request)) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
 		Fn:   fn,
 	}

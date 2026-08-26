@@ -14,10 +14,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type Post struct {
@@ -34,7 +32,7 @@ func main() {
 		option.WithBaseURL("https://jsonplaceholder.typicode.com"),
 	)
 
-	post, err := request.GetTo[Post](ctx, client, "/posts/1")
+	post, err := client.Get[Post](ctx, "/posts/1")
 	if err != nil {
 		log.Fatal(err)
 	}

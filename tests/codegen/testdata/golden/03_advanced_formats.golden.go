@@ -16,11 +16,10 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 type billingAPIClient struct {
-	r request.Requester
+	r *aoni.Client
 }
 
 func newBillingAPI(doer any, opts ...aoni.ClientOption) *billingAPIClient {
@@ -31,7 +30,7 @@ func newBillingAPI(doer any, opts ...aoni.ClientOption) *billingAPIClient {
 	var baseOpts []aoni.ClientOption
 	baseOpts = append(baseOpts, opts...)
 
-	targetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL("https://api.fintech.com/v1")}, baseOpts...)...)
+	targetReq := aoni.NewClient(doer, append([]aoni.ClientOption{option.WithBaseURL("https://api.fintech.com/v1")}, baseOpts...)...)
 
 	return &billingAPIClient{
 		r: targetReq,
@@ -43,8 +42,8 @@ func NewBillingAPI(doer any, opts ...aoni.ClientOption) BillingAPI {
 	return newBillingAPI(doer, opts...)
 }
 
-// R returns the underlying request.Requester used by the client.
-func (c *billingAPIClient) R() request.Requester {
+// R returns the underlying *aoni.Client used by the client.
+func (c *billingAPIClient) R() *aoni.Client {
 	return c.r
 }
 
@@ -93,7 +92,7 @@ func (c *billingAPIClient) GetTransactions(ctx context.Context, from time.Time, 
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := request.GetTo[TransactionList](ctx, c.r, "transactions", allMods...)
+	resp, err := c.r.Get[TransactionList](ctx, "transactions", allMods...)
 	if err != nil {
 		return nil, err
 	}

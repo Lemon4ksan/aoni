@@ -72,10 +72,6 @@ func EmitMock(root *ir.RootIR) ([]byte, error) {
 
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
 
-	if strings.Contains(bodyCode, "request.") {
-		buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
-	}
-
 	for _, imp := range root.Imports {
 		if imp.Path == "context" || imp.Path == "fmt" ||
 			imp.Path == "encoding/json" || imp.Path == "net/http" ||
@@ -83,8 +79,7 @@ func EmitMock(root *ir.RootIR) ([]byte, error) {
 			imp.Path == "strconv" || imp.Path == "sync" || imp.Path == "testing" ||
 			imp.Path == "time" ||
 			imp.Path == "github.com/lemon4ksan/aoni" || imp.Path == "github.com/lemon4ksan/aoni/option" ||
-			imp.Path == "github.com/lemon4ksan/aoni/fast" ||
-			imp.Path == "github.com/lemon4ksan/aoni/request" {
+			imp.Path == "github.com/lemon4ksan/aoni/fast" {
 			continue
 		}
 
@@ -176,9 +171,9 @@ func emitServiceMock(buf *bytes.Buffer, svc *ir.ServiceIR) error {
 	)
 	fmt.Fprintf(buf, "func (m *%s) Client(opts ...aoni.ClientOption) %s {\n", mockServerName, svc.Name)
 	buf.WriteString("\tallOpts := append([]aoni.ClientOption{option.WithBaseURL(m.URL())}, opts...)\n")
-	buf.WriteString("\tc := aoni.Configure(fast.NewClient(), allOpts...)\n")
+	buf.WriteString("\tc := aoni.NewClient(fast.NewClient(), allOpts...)\n")
 	fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
-	buf.WriteString("\t\tr: request.AsRequester(c),\n")
+	buf.WriteString("\t\tr: c,\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
 

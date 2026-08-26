@@ -15,7 +15,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // DefaultPort is the default local HTTP port for oracle sidecar bridges.
@@ -83,7 +82,7 @@ func (c *Client) BaseURL() string {
 
 // Status checks if the sidecar bridge is healthy and ready.
 func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
-	resp, err := request.GetTo[StatusResponse](ctx, c.client, c.baseURL+"/status")
+	resp, err := c.client.Get[StatusResponse](ctx, c.baseURL+"/status")
 	if err != nil {
 		return nil, fmt.Errorf("checking oracle status: %w", err)
 	}
@@ -95,7 +94,7 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 func (c *Client) Init(ctx context.Context, cookies string) error {
 	req := InitRequest{Cookies: cookies}
 
-	resp, err := request.PostTo[InitResponse](ctx, c.client, c.baseURL+"/init", req)
+	resp, err := c.client.Post[InitResponse](ctx, c.baseURL+"/init", req)
 	if err != nil {
 		return fmt.Errorf("initializing oracle browser: %w", err)
 	}
@@ -119,7 +118,7 @@ func (c *Client) GetTokenWithFlow(ctx context.Context, flow, content string) (*T
 		Content: content,
 	}
 
-	resp, err := request.PostTo[TokenResponse](ctx, c.client, c.baseURL+"/token", req)
+	resp, err := c.client.Post[TokenResponse](ctx, c.baseURL+"/token", req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching oracle token: %w", err)
 	}

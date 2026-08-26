@@ -14,11 +14,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type User struct {
@@ -55,7 +53,7 @@ func main() {
 	)
 
 	// 1. Path variable: fetch user /users/{id}
-	user, err := request.GetTo[User](ctx, client,
+	user, err := client.Get[User](ctx,
 		"/users/{id}",
 		mod.WithVar("id", 1),
 	)
@@ -71,7 +69,7 @@ func main() {
 		PostID int `query:"postId"`
 	}{PostID: 1}
 
-	comments, err := request.GetTo[[]Comment](ctx, client,
+	comments, err := client.Get[[]Comment](ctx,
 		"/posts/{id}/comments",
 		mod.WithVar("id", 1),
 		mod.WithQuery(params),
@@ -85,7 +83,7 @@ func main() {
 	// 3. Automated Defaults: fetch filtered posts /posts?userId=1&_limit=3&_sort=id
 	// By passing an empty filter, aoni detects that fields are zero-valued
 	// and automatically applies the values defined in 'default' tags.
-	posts, err := request.GetTo[[]Post](ctx, client,
+	posts, err := client.Get[[]Post](ctx,
 		"/posts",
 		mod.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
 	)

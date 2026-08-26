@@ -23,6 +23,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
@@ -32,7 +33,6 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // ErrTargetNotProtoMessage is returned when a target output variable does not implement [proto.Message].
@@ -49,7 +49,7 @@ type Stream struct {
 //   - Callers must close the returned [Stream] via [Stream.Close] when reading is complete.
 func Get(
 	ctx context.Context,
-	r request.Requester,
+	r aoni.HTTPRequester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Stream, error) {
@@ -69,7 +69,7 @@ func Get(
 // WithBody performs an HTTP request with body payload and yields the response stream as a [Stream].
 func WithBody(
 	ctx context.Context,
-	r request.Requester,
+	r aoni.HTTPRequester,
 	method, path string,
 	body io.Reader,
 	mods ...aoni.RequestModifier,
@@ -104,7 +104,7 @@ func (s *Stream) ContentLength() int64 {
 
 // ContentType returns Content-Type response header value.
 func (s *Stream) ContentType() string {
-	return s.resp.Header.Get("Content-Type")
+	return s.resp.Header.Get(fheader.ContentType)
 }
 
 // StatusCode returns HTTP status code.
@@ -411,7 +411,7 @@ type SSEReconnectOptions struct {
 // ResumableSSE opens an auto-reconnecting Server-Sent Event stream sending standard Last-Event-ID headers on recovery.
 func ResumableSSE[T any](
 	ctx context.Context,
-	c request.Requester,
+	c aoni.HTTPRequester,
 	path string,
 	opts SSEReconnectOptions,
 	mods ...aoni.RequestModifier,
@@ -486,12 +486,12 @@ func buildSSERequestModifiers(
 
 	total := baseCount + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithHeader("Accept", "text/event-stream")
-		stackBuf[1] = mod.WithHeader("Cache-Control", "no-cache")
+		stackBuf[0] = mod.WithHeader(fheader.Accept, fheader.MIMETextEventStream)
+		stackBuf[1] = mod.WithHeader(fheader.CacheControl, fheader.ValueNoCache)
 
-		stackBuf[2] = mod.WithHeader("Connection", "keep-alive")
+		stackBuf[2] = mod.WithHeader(fheader.Connection, fheader.ValueKeepAlive)
 		if lastEventID != "" {
-			stackBuf[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+			stackBuf[3] = mod.WithHeader(fheader.LastEventID, lastEventID)
 		}
 
 		copy(stackBuf[baseCount:], mods)
@@ -500,12 +500,12 @@ func buildSSERequestModifiers(
 	}
 
 	res := make([]aoni.RequestModifier, total)
-	res[0] = mod.WithHeader("Accept", "text/event-stream")
-	res[1] = mod.WithHeader("Cache-Control", "no-cache")
+	res[0] = mod.WithHeader(fheader.Accept, fheader.MIMETextEventStream)
+	res[1] = mod.WithHeader(fheader.CacheControl, fheader.ValueNoCache)
 
-	res[2] = mod.WithHeader("Connection", "keep-alive")
+	res[2] = mod.WithHeader(fheader.Connection, fheader.ValueKeepAlive)
 	if lastEventID != "" {
-		res[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+		res[3] = mod.WithHeader(fheader.LastEventID, lastEventID)
 	}
 
 	copy(res[baseCount:], mods)
@@ -569,7 +569,7 @@ func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) 
 // SSE opens a Server-Sent Event stream on path and returns event channels.
 func SSE[T any](
 	ctx context.Context,
-	c request.Requester,
+	c aoni.HTTPRequester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {
@@ -901,7 +901,7 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 // GetResult performs a GET request through r and yields the live response stream as a [generic.Result].
 func GetResult(
 	ctx context.Context,
-	r request.Requester,
+	r aoni.HTTPRequester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) generic.Result[*Stream] {

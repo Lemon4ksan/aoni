@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/std"
@@ -50,7 +52,7 @@ func newSyntheticResponse(
 	req aoni.Request,
 ) aoni.Response {
 	header := make(http.Header)
-	header.Set("Content-Type", contentType)
+	header.Set(fheader.ContentType, contentType)
 
 	var httpReq *http.Request
 	if req != nil {
@@ -71,7 +73,7 @@ func FallbackString(statusCode int, body string) core.FallbackFunc {
 	return func(req aoni.Request, _ error) (aoni.Response, error) {
 		return newSyntheticResponse(
 			statusCode,
-			"text/plain; charset=utf-8",
+			fheader.MIMETextPlainCharsetUTF8,
 			strings.NewReader(body),
 			int64(len(body)),
 			req,
@@ -89,7 +91,7 @@ func FallbackJSON(statusCode int, payload any) core.FallbackFunc {
 
 		return newSyntheticResponse(
 			statusCode,
-			"application/json",
+			fheader.MIMEApplicationJSON,
 			bytes.NewReader(data),
 			int64(len(data)),
 			req,

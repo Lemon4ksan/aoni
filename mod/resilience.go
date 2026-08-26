@@ -8,44 +8,43 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-// WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
-func WithRetryPolicy(override core.RetryOverride) aoni.RequestModifier {
+// WithRetryPolicy constructs an [RequestModifier] assigning custom retry parameters to the request.
+func WithRetryPolicy(override core.RetryOverride) RequestModifier {
 	policy := override
 	if policy.MaxAttempts < 1 {
 		policy.MaxAttempts = 1
 	}
 
-	return Custom(func(req aoni.Request) {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).RetryPolicy = &policy
 	})
 }
 
-// WithRetry constructs an [aoni.RequestModifier] that sets the maximum retry attempts for the request.
-func WithRetry(attempts int) aoni.RequestModifier {
+// WithRetry constructs an [RequestModifier] that sets the maximum retry attempts for the request.
+func WithRetry(attempts int) RequestModifier {
 	return WithRetryPolicy(core.RetryOverride{MaxAttempts: attempts})
 }
 
-// WithAllowNonReadOnlyHedging constructs an [aoni.RequestModifier] permitting request hedging for non-idempotent HTTP methods.
-func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithAllowNonReadOnlyHedging constructs an [RequestModifier] permitting request hedging for non-idempotent HTTP methods.
+func WithAllowNonReadOnlyHedging(allow bool) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).AllowNonReadOnlyHedging = allow
 	})
 }
 
-// WithFallback constructs an [aoni.RequestModifier] registering an alternative response fallback generator.
-func WithFallback(f core.FallbackFunc) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithFallback constructs an [RequestModifier] registering an alternative response fallback generator.
+func WithFallback(f core.FallbackFunc) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Fallback = f
 	})
 }
 
-// WithResponseValidator constructs an [aoni.RequestModifier] attaching custom response validation predicates.
-func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithResponseValidator constructs an [RequestModifier] attaching custom response validation predicates.
+func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier {
+	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
 
 		existing := cfg.ResponseValidator
@@ -65,11 +64,11 @@ func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModif
 	})
 }
 
-// WithSoftErrorDetector constructs an [aoni.RequestModifier] attaching soft error detection callbacks.
+// WithSoftErrorDetector constructs an [RequestModifier] attaching soft error detection callbacks.
 //
 //nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
-func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+func WithSoftErrorDetector(detectors ...core.SoftErrorDetector) RequestModifier {
+	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
 		for _, det := range detectors {
 			if det != nil {
@@ -79,39 +78,39 @@ func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.RequestModi
 	})
 }
 
-// WithMultiReadThreshold constructs an [aoni.RequestModifier] configuring RAM buffering bounds for replayable reads.
-func WithMultiReadThreshold(threshold int64) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithMultiReadThreshold constructs an [RequestModifier] configuring RAM buffering bounds for replayable reads.
+func WithMultiReadThreshold(threshold int64) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).MultiReadThreshold = threshold
 	})
 }
 
-// WithMultiReadDisableDisk constructs an [aoni.RequestModifier] disabling temporary file disk backing on buffer overflows.
-func WithMultiReadDisableDisk(disable bool) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithMultiReadDisableDisk constructs an [RequestModifier] disabling temporary file disk backing on buffer overflows.
+func WithMultiReadDisableDisk(disable bool) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
 	})
 }
 
-// WithCacheTTL constructs an [aoni.RequestModifier] configuring custom response caching TTL for the request.
-func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithCacheTTL constructs an [RequestModifier] configuring custom response caching TTL for the request.
+func WithCacheTTL(ttl time.Duration) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).CacheTTL = ttl
 	})
 }
 
-// WithCoalesce constructs an [aoni.RequestModifier] enabling Singleflight Request Coalescing
+// WithCoalesce constructs an [RequestModifier] enabling Singleflight Request Coalescing
 // for concurrent identical in-flight operations to prevent upstream thundering herd load.
-func WithCoalesce() aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+func WithCoalesce() RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Coalesce = true
 	})
 }
 
-// WithETag constructs an [aoni.RequestModifier] enabling automated RFC 9111 conditional caching
+// WithETag constructs an [RequestModifier] enabling automated RFC 9111 conditional caching
 // and 304 Not Modified body reconstruction.
-func WithETag() aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+func WithETag() RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).ETagAutomaton = true
 	})
 }

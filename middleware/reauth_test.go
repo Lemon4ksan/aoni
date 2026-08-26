@@ -86,7 +86,7 @@ func TestReAuthMiddleware_SingleflightConcurrent(t *testing.T) {
 
 			<-startGate
 
-			resp, err := client.Get(t.Context(), "/")
+			resp, err := client.Raw().Get(t.Context(), "/")
 			if err != nil {
 				errs[idx] = err
 				return
@@ -134,7 +134,7 @@ func TestReAuthMiddleware_RefreshFailure(t *testing.T) {
 		option.WithMiddleware(reauthMid),
 	)
 
-	_, err := client.Get(t.Context(), "/")
+	_, err := client.Raw().Get(t.Context(), "/")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, middleware.ErrReAuthFailed)
 }

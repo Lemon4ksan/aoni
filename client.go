@@ -15,6 +15,7 @@ import (
 	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	furl "github.com/lemon4ksan/foundation/net/url"
 
 	"github.com/lemon4ksan/aoni/cookie"
@@ -271,6 +272,10 @@ func (c *Client) doPipeline(
 		m.ApplyStd(req)
 	}
 
+	if cfg := pipeline.GetRequestConfig(req.Context()); cfg != nil && cfg.BodyError != nil {
+		return nil, cfg.BodyError
+	}
+
 	resp, err := c.execute(req, c.resolvePipeline(req))
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
@@ -343,38 +348,6 @@ func (c *Client) PostScoped(
 	return c.RequestScoped(ctx, http.MethodPost, path, fn, mods...)
 }
 
-// Get executes an HTTP GET request against path with optional per-request modifiers.
-// Resolves path against BaseURL and returns the raw [*http.Response].
-// Caller MUST close resp.Body.
-func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return c.Request(ctx, http.MethodGet, path, mods...)
-}
-
-// Post executes an HTTP POST request against path with optional per-request modifiers.
-// Modifiers can provide payload bodies via [mod.WithJSONBody], [mod.WithBody], etc.
-// Caller MUST close resp.Body.
-func (c *Client) Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return c.Request(ctx, http.MethodPost, path, mods...)
-}
-
-// Put executes an HTTP PUT request against path with optional per-request modifiers.
-// Caller MUST close resp.Body.
-func (c *Client) Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return c.Request(ctx, http.MethodPut, path, mods...)
-}
-
-// Patch executes an HTTP PATCH request against path with optional per-request modifiers.
-// Caller MUST close resp.Body.
-func (c *Client) Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return c.Request(ctx, http.MethodPatch, path, mods...)
-}
-
-// Delete executes an HTTP DELETE request against path with optional per-request modifiers.
-// Caller MUST close resp.Body.
-func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return c.Request(ctx, http.MethodDelete, path, mods...)
-}
-
 // Head executes an HTTP HEAD request against path to inspect headers without fetching the body.
 // Caller MUST close resp.Body.
 func (c *Client) Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
@@ -431,6 +404,9 @@ func (c *Client) Do(req Request) (Response, error) {
 
 	if httpReq != nil && httpReq.URL != nil {
 		cfg := pipeline.GetOrInitRequestConfig(httpReq.Context())
+		if cfg.BodyError != nil {
+			return nil, cfg.BodyError
+		}
 		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
 			cfg.TargetHost = httpReq.URL.Hostname()
 		}
@@ -484,11 +460,11 @@ func (c *Client) Defaults() ClientDefaults {
 
 // BaseResponse invokes the configured [BaseResponse] factory function if declared.
 func (c *Client) BaseResponse() BaseResponse {
-	if c.cfg.Defaults.BaseResponse != nil {
-		return c.cfg.Defaults.BaseResponse()
+	if c == nil || c.cfg.Defaults.BaseResponse == nil {
+		return nil
 	}
 
-	return nil
+	return c.cfg.Defaults.BaseResponse()
 }
 
 // Network retrieves a clone DTO of active network transport configurations.
@@ -681,8 +657,8 @@ func (c *Client) ensureUserAgent() {
 		c.cfg.Defaults.Headers = make(http.Header)
 	}
 
-	if c.cfg.Defaults.Headers.Get("User-Agent") == "" {
-		c.cfg.Defaults.Headers.Set("User-Agent", DefaultUserAgent)
+	if c.cfg.Defaults.Headers.Get(fheader.UserAgent) == "" {
+		c.cfg.Defaults.Headers.Set(fheader.UserAgent, DefaultUserAgent)
 	}
 }
 
@@ -756,5 +732,6 @@ func (c *Client) applyDefaultHTTPHeader() http.Header {
 
 var (
 	_ RequestDoer           = (*Client)(nil)
+	_ HTTPRequester         = (*Client)(nil)
 	_ Configurable[*Client] = (*Client)(nil)
 )

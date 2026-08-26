@@ -13,12 +13,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type Response struct {
@@ -41,7 +39,7 @@ func main() {
 		option.WithUserAgent(chrome.UserAgentWindows),
 	)
 
-	res, err := request.GetTo[Response](ctx, chromeClient, "/ip")
+	res, err := chromeClient.Get[Response](ctx, "/ip")
 	if err != nil {
 		fmt.Printf("Chrome request failed: %v\n", err)
 	} else {
@@ -63,7 +61,7 @@ func main() {
 		option.WithUserAgent(firefox.UserAgentFirefoxWindows),
 	)
 
-	res, err = request.GetTo[Response](ctx, firefoxClient, "/ip")
+	res, err = firefoxClient.Get[Response](ctx, "/ip")
 	if err != nil {
 		fmt.Printf("Firefox request failed: %v\n", err)
 	} else {

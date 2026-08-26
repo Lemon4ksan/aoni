@@ -16,6 +16,7 @@ import (
 
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
@@ -180,7 +181,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader("Accept", DoHMediaType)
+	req.SetHeader(fheader.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -188,12 +189,12 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader("Content-Type", DoHMediaType)
+		req.SetHeader(fheader.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader("Host", r.Host)
+		req.SetHeader(fheader.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)
@@ -226,7 +227,7 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader("Accept", DoHMediaType)
+	req.SetHeader(fheader.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -234,12 +235,12 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader("Content-Type", DoHMediaType)
+		req.SetHeader(fheader.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader("Host", r.Host)
+		req.SetHeader(fheader.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)

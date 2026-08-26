@@ -13,6 +13,7 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
@@ -181,11 +182,11 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 		keyStr := bytesconv.B2S(keyBytes)
 
 		switch {
-		case bytesconv.EqualFoldASCII(keyStr, "grpc-status"):
+		case bytesconv.EqualFoldASCII(keyStr, fheader.GRPCStatus):
 			statusCode = bytesconv.B2S(valBytes)
-		case bytesconv.EqualFoldASCII(keyStr, "grpc-message"):
+		case bytesconv.EqualFoldASCII(keyStr, fheader.GRPCMessage):
 			statusMsg = bytesconv.B2S(valBytes)
-		case bytesconv.EqualFoldASCII(keyStr, "grpc-status-details-bin"):
+		case bytesconv.EqualFoldASCII(keyStr, fheader.GRPCStatusDetailsBin):
 			valStr := bytesconv.B2S(valBytes)
 			if decoded, err := base64.RawStdEncoding.DecodeString(valStr); err == nil {
 				statusDetails = decoded

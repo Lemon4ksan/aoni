@@ -8,17 +8,16 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
 )
 
-// WithHTTPSignature constructs an [aoni.RequestModifier] signing request components per RFC 9421.
+// WithHTTPSignature constructs an [RequestModifier] signing request components per RFC 9421.
 // Injects the "Signature-Input" and "Signature" HTTP headers.
-func WithHTTPSignature(cfg httpsig.SignConfig) aoni.RequestModifier {
-	return aoni.RequestModifier{
+func WithHTTPSignature(cfg httpsig.SignConfig) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			if cfg.Signer == nil {
 				return
 			}
@@ -66,9 +65,9 @@ func WithHTTPSignature(cfg httpsig.SignConfig) aoni.RequestModifier {
 	}
 }
 
-// WithHTTPSigner constructs an [aoni.RequestModifier] applying an RFC 9421 HTTP Message Signature
+// WithHTTPSigner constructs an [RequestModifier] applying an RFC 9421 HTTP Message Signature
 // using the provided [httpsig.Signer].
-func WithHTTPSigner(signer httpsig.Signer, components ...string) aoni.RequestModifier {
+func WithHTTPSigner(signer httpsig.Signer, components ...string) RequestModifier {
 	cfg := httpsig.SignConfig{
 		Signer:     signer,
 		Components: components,
@@ -77,23 +76,23 @@ func WithHTTPSigner(signer httpsig.Signer, components ...string) aoni.RequestMod
 	return WithHTTPSignature(cfg)
 }
 
-// WithHTTPSignatureKey constructs an [aoni.RequestModifier] signing the request using an asymmetric
+// WithHTTPSignatureKey constructs an [RequestModifier] signing the request using an asymmetric
 // private key (Ed25519, ECDSA, RSA) or HMAC shared secret with automatic algorithm detection.
-func WithHTTPSignatureKey(keyID string, privKey any, components ...string) aoni.RequestModifier {
+func WithHTTPSignatureKey(keyID string, privKey any, components ...string) RequestModifier {
 	signer, err := httpsig.NewSignerFromKey(keyID, privKey)
 	if err != nil {
-		return aoni.RequestModifier{}
+		return RequestModifier{}
 	}
 
 	return WithHTTPSigner(signer, components...)
 }
 
-// WithContentDigest constructs an [aoni.RequestModifier] calculating and injecting an RFC 9530
+// WithContentDigest constructs an [RequestModifier] calculating and injecting an RFC 9530
 // "Content-Digest" header (e.g. "sha-256=:...:") over the request body payload.
-func WithContentDigest(algs ...string) aoni.RequestModifier {
-	return aoni.RequestModifier{
+func WithContentDigest(algs ...string) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			body := req.BodyBytes()
 			digestVal := httpsig.ComputeContentDigest(body, algs...)
 			req.SetHeader(httpsig.HeaderContentDigest, digestVal)

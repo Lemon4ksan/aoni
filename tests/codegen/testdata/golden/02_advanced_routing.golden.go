@@ -12,11 +12,10 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 type paymentAPIClient struct {
-	r request.Requester
+	r *aoni.Client
 }
 
 func newPaymentAPI(doer any, opts ...aoni.ClientOption) *paymentAPIClient {
@@ -27,7 +26,7 @@ func newPaymentAPI(doer any, opts ...aoni.ClientOption) *paymentAPIClient {
 	var baseOpts []aoni.ClientOption
 	baseOpts = append(baseOpts, opts...)
 
-	targetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...)
+	targetReq := aoni.NewClient(doer, append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...)
 
 	return &paymentAPIClient{
 		r: targetReq,
@@ -39,8 +38,8 @@ func NewPaymentAPI(doer any, opts ...aoni.ClientOption) PaymentAPI {
 	return newPaymentAPI(doer, opts...)
 }
 
-// R returns the underlying request.Requester used by the client.
-func (c *paymentAPIClient) R() request.Requester {
+// R returns the underlying *aoni.Client used by the client.
+func (c *paymentAPIClient) R() *aoni.Client {
 	return c.r
 }
 
@@ -54,7 +53,7 @@ func (c *paymentAPIClient) GetInvoice(ctx context.Context, invoice_id string, mo
 	}
 
 	allMods = append(allMods, mod.WithCoalesce())
-	resp, err := request.GetTo[InvoiceDTO](ctx, c.r, "invoices/{invoice_id}", allMods...)
+	resp, err := c.r.Get[InvoiceDTO](ctx, "invoices/{invoice_id}", allMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,7 @@ func (c *paymentAPIClient) CreateCheckout(ctx context.Context, req CheckoutReq, 
 	}
 
 	allMods = append(allMods, mod.WithIdempotencyKey())
-	resp, err := request.PostTo[CheckoutSession](ctx, c.r, "checkout", req, allMods...)
+	resp, err := c.r.Post[CheckoutSession](ctx, "checkout", req, allMods...)
 	if err != nil {
 		return nil, err
 	}

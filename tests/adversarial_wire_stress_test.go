@@ -63,7 +63,7 @@ func TestBrokenWire_PrematureCloseMidHeaders(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	_, err := client.Get(ctx, "http://"+ln.Addr().String()+"/test")
+	_, err := client.Raw().Get(ctx, "http://"+ln.Addr().String()+"/test")
 	assert.Error(t, err)
 }
 
@@ -84,7 +84,7 @@ func TestBrokenWire_PrematureCloseMidChunkBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	resp, err := client.Get(ctx, "http://"+ln.Addr().String()+"/chunk-fail")
+	resp, err := client.Raw().Get(ctx, "http://"+ln.Addr().String()+"/chunk-fail")
 	if err == nil && resp != nil {
 		// If headers parsed, reading body must fail cleanly without hanging
 		_ = resp.Close()
@@ -110,7 +110,7 @@ func TestBrokenWire_CorruptedGzipPayload(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	resp, err := client.Get(ctx, ts.URL)
+	resp, err := client.Raw().Get(ctx, ts.URL)
 	assert.NoError(t, err)
 	defer resp.Close()
 
@@ -140,7 +140,7 @@ func TestBrokenWire_DripFeedSlowBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	resp, err := client.Get(ctx, "http://"+ln.Addr().String()+"/drip")
+	resp, err := client.Raw().Get(ctx, "http://"+ln.Addr().String()+"/drip")
 	assert.NoError(t, err)
 	defer resp.Close()
 
@@ -165,7 +165,7 @@ func TestBrokenWire_PipelinedMassiveRequests(t *testing.T) {
 	// 500 rapid consecutive requests across connection pool
 	for i := 0; i < 500; i++ {
 		path := fmt.Sprintf("/user/%d", i)
-		resp, err := client.Get(ctx, ts.URL+path)
+		resp, err := client.Raw().Get(ctx, ts.URL+path)
 		assert.NoError(t, err)
 		expected := fmt.Sprintf("echo:%s", path)
 		assert.Equal(t, expected, string(resp.BodyBytes()))

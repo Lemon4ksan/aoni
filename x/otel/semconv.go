@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni"
 )
 
@@ -103,7 +105,7 @@ func HTTPClientRequestAttributes(req aoni.Request) []Attribute {
 	// HTTP Method
 	method := req.Method()
 	if method == "" {
-		method = "GET"
+		method = fheader.MethodGet
 	}
 	attrs = append(attrs, StringAttr(KeyHTTPRequestMethod, method))
 
@@ -145,7 +147,7 @@ func HTTPClientRequestAttributes(req aoni.Request) []Attribute {
 	}
 
 	// User-Agent Header
-	if ua := req.Header("User-Agent"); ua != "" {
+	if ua := req.Header(fheader.UserAgent); ua != "" {
 		attrs = append(attrs, StringAttr(KeyUserAgentOriginal, ua))
 	}
 

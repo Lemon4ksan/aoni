@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -22,7 +24,7 @@ import (
 func main() {
 	// 1. Spin up a test server simulating a REST microservice
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(fheader.ContentType, fheader.MIMEApplicationJSON)
 
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/auth/login":

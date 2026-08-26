@@ -13,6 +13,7 @@ import (
 	"net/url"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/netutil"
@@ -60,14 +61,14 @@ func (m RequestModifier) Apply(req Request) {
 	case ModQuery, ModQueryAdd:
 		req.AddQueryParam(m.Key, m.Value)
 	case ModBearer:
-		req.SetHeader("Authorization", netutil.FormatBearerAuth(m.Value))
+		req.SetHeader(fheader.Authorization, netutil.FormatBearerAuth(m.Value))
 	case ModBasicAuth:
-		req.SetHeader("Authorization", netutil.FormatBasicAuth(m.Key, m.Value))
+		req.SetHeader(fheader.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
 	case ModBodyBytes:
 		req.SetBodyBytes(m.Bytes)
 
 		if m.ContentType != "" {
-			req.SetHeader("Content-Type", m.ContentType)
+			req.SetHeader(fheader.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -81,7 +82,7 @@ func (m RequestModifier) Apply(req Request) {
 		req.SetBodyStream(m.Stream, lenVal)
 
 		if m.ContentType != "" {
-			req.SetHeader("Content-Type", m.ContentType)
+			req.SetHeader(fheader.ContentType, m.ContentType)
 		}
 
 	case ModCustom:
@@ -127,14 +128,14 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set("Authorization", netutil.FormatBearerAuth(m.Value))
+		req.Header.Set(fheader.Authorization, netutil.FormatBearerAuth(m.Value))
 
 	case ModBasicAuth:
 		if req.Header == nil {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set("Authorization", netutil.FormatBasicAuth(m.Key, m.Value))
+		req.Header.Set(fheader.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
 
 	case ModBodyBytes:
 		buf := m.Bytes
@@ -149,7 +150,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set("Content-Type", m.ContentType)
+			req.Header.Set(fheader.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -171,7 +172,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set("Content-Type", m.ContentType)
+			req.Header.Set(fheader.ContentType, m.ContentType)
 		}
 
 	case ModCustom:

@@ -556,21 +556,21 @@ func TestFluent_Download_HTTPStatusError(t *testing.T) {
 	var flErr *fluent.Error
 	require.True(t, errors.As(err, &flErr))
 	assert.Equal(t, 404, flErr.Code)
-	assert.Contains(t, flErr.Error(), "aoni/fluent: download")
+	assert.Contains(t, flErr.Error(), "download")
 }
 
 func TestFluent_Error_Formatting(t *testing.T) {
 	t.Parallel()
 
 	e1 := &fluent.Error{Op: "download", Path: "/file", Code: 404, Err: fluent.ErrDownloadFailed}
-	assert.Equal(t, "aoni/fluent: download /file status 404: aoni/fluent: download HTTP status error", e1.Error())
+	assert.Equal(t, "aoni: download: /file: aoni: download failed", e1.Error())
 	assert.True(t, errors.Is(e1, fluent.ErrDownloadFailed))
 
 	e2 := &fluent.Error{Op: "create_file", Path: "/tmp/test.txt", Err: os.ErrPermission}
-	assert.Equal(t, "aoni/fluent: create_file /tmp/test.txt: permission denied", e2.Error())
+	assert.Equal(t, "aoni: create_file: /tmp/test.txt: permission denied", e2.Error())
 
 	e3 := &fluent.Error{Op: "generic_op", Err: errors.New("simple error")}
-	assert.Equal(t, "aoni/fluent: generic_op: simple error", e3.Error())
+	assert.Equal(t, "aoni: generic_op: simple error", e3.Error())
 
 	var nilErr *fluent.Error
 	assert.Equal(t, "<nil>", nilErr.Error())

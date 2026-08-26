@@ -14,11 +14,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type CreatePostRequest struct {
@@ -53,8 +51,8 @@ func main() {
 		UserID: 1,
 	}
 
-	result, err := request.PostTo[PostResponse](
-		ctx, client, "/posts", payload,
+	result, err := client.Post[PostResponse](
+		ctx, "/posts", payload,
 		mod.WithErrorModel(&ErrorResponse{}),
 	)
 	if err != nil {

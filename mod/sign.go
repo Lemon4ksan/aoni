@@ -17,7 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
@@ -41,12 +40,12 @@ type SignHMACConfig struct {
 
 	// PayloadBuilder is an optional custom function to construct the bytes to be signed.
 	// If nil, standard format is used: "<timestamp><METHOD><PATH><QUERY><BODY>".
-	PayloadBuilder func(req aoni.Request, timestamp string) []byte
+	PayloadBuilder func(req Request, timestamp string) []byte
 }
 
-// WithSignHMAC constructs an [aoni.RequestModifier] injecting an HMAC-SHA256 signature
+// WithSignHMAC constructs an [RequestModifier] injecting an HMAC-SHA256 signature
 // into the "X-Signature" header and current Unix timestamp into "X-Timestamp".
-func WithSignHMAC(secret string) aoni.RequestModifier {
+func WithSignHMAC(secret string) RequestModifier {
 	return WithSignHMACConfig(SignHMACConfig{
 		Secret:          secret,
 		HeaderName:      "X-Signature",
@@ -54,13 +53,13 @@ func WithSignHMAC(secret string) aoni.RequestModifier {
 	})
 }
 
-// WithSignHMACConfig constructs an [aoni.RequestModifier] applying custom HMAC request signing.
-func WithSignHMACConfig(cfg SignHMACConfig) aoni.RequestModifier {
+// WithSignHMACConfig constructs an [RequestModifier] applying custom HMAC request signing.
+func WithSignHMACConfig(cfg SignHMACConfig) RequestModifier {
 	headerName := generic.Coalesce(cfg.HeaderName, "X-Signature")
 
-	return aoni.RequestModifier{
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			var tsStr string
 			if cfg.TimestampHeader != "" {
 				ts := time.Now().UnixMilli()

@@ -18,6 +18,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -167,44 +168,59 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	return cloned
 }
 
-// ApplyOptions applies functional options to the client and returns a configured [aoni.RequestDoer].
+// ApplyOptions implements the optionApplier interface, allowing aoni.Configure to clone and configure *Client.
 func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
 	return c.With(opts...)
 }
 
-// Get executes an HTTP GET request along the high-performance fasthttp pipeline.
-func (c *Client) Get(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodGet, path, mods...)
+// RawClient provides direct access to fast raw protocol operations returning [aoni.Response].
+type RawClient struct {
+	client *Client
 }
 
-// Post executes an HTTP POST request along the high-performance fasthttp pipeline.
-func (c *Client) Post(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodPost, path, mods...)
+// Raw yields the raw sub-client bound to this fast client.
+func (c *Client) Raw() *RawClient {
+	return &RawClient{client: c}
 }
 
-// Put executes an HTTP PUT request along the high-performance fasthttp pipeline.
-func (c *Client) Put(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodPut, path, mods...)
+// Get executes a raw HTTP GET request along the high-performance fasthttp pipeline.
+func (r *RawClient) Get(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodGet, path, mods...)
 }
 
-// Patch executes an HTTP PATCH request along the high-performance fasthttp pipeline.
-func (c *Client) Patch(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodPatch, path, mods...)
+// Post executes a raw HTTP POST request along the high-performance fasthttp pipeline.
+func (r *RawClient) Post(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// Delete executes an HTTP DELETE request along the high-performance fasthttp pipeline.
-func (c *Client) Delete(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodDelete, path, mods...)
+// Put executes a raw HTTP PUT request along the high-performance fasthttp pipeline.
+func (r *RawClient) Put(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodPut, path, mods...)
 }
 
-// Head executes an HTTP HEAD request along the high-performance fasthttp pipeline.
-func (c *Client) Head(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodHead, path, mods...)
+// Patch executes a raw HTTP PATCH request along the high-performance fasthttp pipeline.
+func (r *RawClient) Patch(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodPatch, path, mods...)
 }
 
-// Options executes an HTTP OPTIONS request along the high-performance fasthttp pipeline.
-func (c *Client) Options(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
-	return c.Request(ctx, http.MethodOptions, path, mods...)
+// Delete executes a raw HTTP DELETE request along the high-performance fasthttp pipeline.
+func (r *RawClient) Delete(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Head executes a raw HTTP HEAD request along the high-performance fasthttp pipeline.
+func (r *RawClient) Head(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodHead, path, mods...)
+}
+
+// Options executes a raw HTTP OPTIONS request along the high-performance fasthttp pipeline.
+func (r *RawClient) Options(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, http.MethodOptions, path, mods...)
+}
+
+// Request executes a raw HTTP request along the high-performance fasthttp pipeline.
+func (r *RawClient) Request(ctx context.Context, method, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return r.client.Request(ctx, method, path, mods...)
 }
 
 // DoBaremetal executes a fast-path request bypassing middleware and pipeline layers.
@@ -612,7 +628,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			pipeline.GlobalBufferPool.Put(buf)
 		}
 
-		if ct := req.Header.Get("Content-Type"); ct != "" {
+		if ct := req.Header.Get(fheader.ContentType); ct != "" {
 			fastReq.Header.SetContentType(ct)
 		}
 
@@ -627,7 +643,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			return nil, err
 		}
 
-		hadEncoding := len(fastResp.Header.Peek("Content-Encoding")) > 0
+		hadEncoding := len(fastResp.Header.Peek(fheader.ContentEncoding)) > 0
 		uncompressed := decompressFastResponse(fastResp) || hadEncoding
 
 		bodyRC := &fastBodyReadCloser{

@@ -36,7 +36,7 @@ func TestChromium_MultipleContentLength_SmugglingDefense(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	resp, err := client.Get(ctx, "http://"+lnMatching.Addr().String()+"/matching-cl")
+	resp, err := client.Raw().Get(ctx, "http://"+lnMatching.Addr().String()+"/matching-cl")
 	assert.NoError(t, err)
 	assert.Equal(t, "HELLO", string(resp.BodyBytes()))
 	_ = resp.Close()
@@ -49,7 +49,7 @@ func TestChromium_MultipleContentLength_SmugglingDefense(t *testing.T) {
 	})
 	defer cleanup()
 
-	respConflicting, err := client.Get(ctx, "http://"+ln.Addr().String()+"/conflicting-cl")
+	respConflicting, err := client.Raw().Get(ctx, "http://"+ln.Addr().String()+"/conflicting-cl")
 	if err == nil && respConflicting != nil {
 		_ = respConflicting.Close()
 	}
@@ -85,7 +85,7 @@ func TestChromium_StatusLine_Variations(t *testing.T) {
 			})
 			defer cleanup()
 
-			resp, err := client.Get(ctx, "http://"+ln.Addr().String()+"/status")
+			resp, err := client.Raw().Get(ctx, "http://"+ln.Addr().String()+"/status")
 			assert.NoError(t, err)
 			assert.Equal(t, tv.code, resp.StatusCode())
 			_ = resp.Close()

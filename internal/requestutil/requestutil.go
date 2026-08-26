@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -169,9 +170,9 @@ func IsStreamingResponse(resp *http.Response) bool {
 		return false
 	}
 
-	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	contentType := strings.ToLower(resp.Header.Get(fheader.ContentType))
 	streamingTypes := [...]string{
-		"text/event-stream",
+		fheader.MIMETextEventStream,
 		"application/stream",
 		"application/x-ndjson",
 		"application/x-stream",
@@ -184,7 +185,7 @@ func IsStreamingResponse(resp *http.Response) bool {
 		}
 	}
 
-	chunked := strings.Contains(strings.ToLower(resp.Header.Get("Transfer-Encoding")), "chunked")
+	chunked := strings.Contains(strings.ToLower(resp.Header.Get(fheader.TransferEncoding)), "chunked")
 
 	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
 }
@@ -295,37 +296,37 @@ func CanonicalHeaderKey(s string) string {
 
 	switch s {
 	case "Content-Type", "content-type", "CONTENT-TYPE":
-		return "Content-Type"
+		return fheader.ContentType
 	case "Content-Length", "content-length", "CONTENT-LENGTH":
-		return "Content-Length"
+		return fheader.ContentLength
 	case "Server", "server", "SERVER":
-		return "Server"
+		return fheader.Server
 	case "Date", "date", "DATE":
-		return "Date"
+		return fheader.Date
 	case "Set-Cookie", "set-cookie", "SET-COOKIE":
-		return "Set-Cookie"
+		return fheader.SetCookie
 	case "Location", "location", "LOCATION":
-		return "Location"
+		return fheader.Location
 	case "Connection", "connection", "CONNECTION":
-		return "Connection"
+		return fheader.Connection
 	case "Cache-Control", "cache-control", "CACHE-CONTROL":
-		return "Cache-Control"
+		return fheader.CacheControl
 	case "Accept", "accept", "ACCEPT":
-		return "Accept"
+		return fheader.Accept
 	case "Accept-Encoding", "accept-encoding", "ACCEPT-ENCODING":
-		return "Accept-Encoding"
+		return fheader.AcceptEncoding
 	case "Authorization", "authorization", "AUTHORIZATION":
-		return "Authorization"
+		return fheader.Authorization
 	case "User-Agent", "user-agent", "USER-AGENT":
-		return "User-Agent"
+		return fheader.UserAgent
 	case "Transfer-Encoding", "transfer-encoding", "TRANSFER-ENCODING":
-		return "Transfer-Encoding"
+		return fheader.TransferEncoding
 	case "Keep-Alive", "keep-alive", "KEEP-ALIVE":
 		return "Keep-Alive"
 	case "ETag", "etag", "ETAG":
-		return "ETag"
+		return fheader.ETag
 	case "Host", "host", "HOST":
-		return "Host"
+		return fheader.Host
 	}
 
 	b := CanonicalHeaderKeyBytes(bytesconv.S2B(s))

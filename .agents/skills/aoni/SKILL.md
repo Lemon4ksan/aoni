@@ -39,16 +39,15 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // Service encapsulates API operations.
 type Service struct {
-	req request.Requester
+	client *aoni.Client
 }
 
 // NewService constructs a new API client with canonical fallback and default options.
-func NewService(doer aoni.RequestDoer, opts ...option.Option) *Service {
+func NewService(doer any, opts ...option.Option) *Service {
 	if doer == nil {
 		// Default to zero-alloc high-performance engine
 		doer = fast.NewClient()
@@ -61,7 +60,7 @@ func NewService(doer aoni.RequestDoer, opts ...option.Option) *Service {
 	}
 
 	return &Service{
-		req: request.Configure(doer, append(defaultOpts, opts...)...),
+		client: aoni.NewClient(doer, append(defaultOpts, opts...)...),
 	}
 }
 ```
@@ -70,15 +69,15 @@ func NewService(doer aoni.RequestDoer, opts ...option.Option) *Service {
 
 1. **NO DIRECT `net/http` CLIENTS**:
    - ❌ **NEVER** write `&http.Client{}` or `http.DefaultClient`.
-   - ✅ **ALWAYS** use `aoni.NewClient()`, `fast.NewClient()`, or accept `aoni.RequestDoer`.
+   - ✅ **ALWAYS** use `aoni.NewClient()`, `fast.NewClient()`, or accept `any` (`aoni.RequestDoer` / `aoni.HTTPRequester`).
 2. **USE TYPE-SAFE GENERICS**:
    - ❌ **NEVER** unmarshal JSON responses manually with `json.Unmarshal(body, &v)`.
-   - ✅ **ALWAYS** use `request.GetTo[T]()`, `request.PostTo[T]()`, or `fluent.FetchTo[T]()`.
+   - ✅ **ALWAYS** use `client.Get[T]()`, `client.Post[T]()`, or `client.R().FetchTo[T]()`.
 3. **USE IDIOMATIC ERROR CHECKING**:
    - ❌ **NEVER** inspect status codes manually with `if resp.StatusCode == 404`.
    - ✅ **ALWAYS** use `aoni.IsNotFound(err)`, `aoni.IsUnauthorized(err)`, `aoni.IsRateLimited(err)`.
 4. **ALWAYS CLOSE RESPONSE BODIES**:
-   - When handling raw `*http.Response`, always write `defer resp.Body.Close()`.
+   - When handling raw `*http.Response`, always write `defer aoni.CloseResponse(resp)`.
 
 ## 4. Request Modifiers & Payloads Cheatsheet
 
@@ -86,13 +85,13 @@ Import: `"github.com/lemon4ksan/aoni/mod"`
 
 Operation | Idiomatic Code
 :--- | :---
-**GET JSON into DTO** | `user, err := request.GetTo[UserDTO](ctx, s.req, "users/"+id, mods...)`
-**POST JSON payload** | `created, err := request.PostTo[UserDTO](ctx, s.req, "users", payload, mods...)`
-**POST Form URL-Encoded** | `err := request.Post(ctx, s.req, "auth/login", nil, mod.WithFormValues(url.Values{"user": {"alice"}, "pass": {"secret"}}))`
-**Query Parameters** | `request.GetTo[ListDTO](ctx, s.req, "items", mod.WithQuery("limit", "50"), mod.WithQuery("page", "2"))`
-**Headers & Bearer Token** | `request.Get(ctx, s.req, "profile", mod.WithHeader("X-Tenant", id), mod.WithBearer(token))`
-**Per-Request Timeout** | `request.Get(ctx, s.req, "health", mod.WithTimeout(2*time.Second))`
-**Multipart File Upload** | `request.Post(ctx, s.req, "upload", nil, mod.WithMultipartFile("avatar", "pic.png", reader))`
+**GET JSON into DTO** | `user, err := s.client.Get[UserDTO](ctx, "users/"+id, mods...)`
+**POST JSON payload** | `created, err := s.client.Post[UserDTO](ctx, "users", payload, mods...)`
+**POST Form URL-Encoded** | `login, err := s.client.Post[LoginDTO](ctx, "auth/login", nil, mod.WithFormValues(url.Values{"user": {"alice"}, "pass": {"secret"}}))`
+**Query Parameters** | `items, err := s.client.Get[ListDTO](ctx, "items", mod.WithQuery("limit", "50"), mod.WithQuery("page", "2"))`
+**Headers & Bearer Token** | `profile, err := s.client.Get[ProfileDTO](ctx, "profile", mod.WithHeader("X-Tenant", id), mod.WithBearer(token))`
+**Per-Request Timeout** | `health, err := s.client.Get[HealthDTO](ctx, "health", mod.WithTimeout(2*time.Second))`
+**Multipart File Upload** | `upload, err := s.client.Post[UploadDTO](ctx, "upload", nil, mod.WithMultipartFile("avatar", "pic.png", reader))`
 
 ## 5. Idiomatic Error Classification
 

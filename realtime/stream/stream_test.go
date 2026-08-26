@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -284,21 +285,32 @@ func TestResumableSSE_LastEventID(t *testing.T) {
 	t.Parallel()
 
 	var (
+		mu             sync.Mutex
 		receivedLastID string
 		attempts       int
 	)
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		attempts++
-		receivedLastID = r.Header.Get("Last-Event-ID")
+		currentAttempt := attempts
+		if currentAttempt == 2 {
+			receivedLastID = r.Header.Get("Last-Event-ID")
+		}
+		mu.Unlock()
+
 		w.Header().Set("Content-Type", "text/event-stream")
 
-		if attempts == 1 {
+		if currentAttempt == 1 {
 			_, _ = w.Write([]byte("id: 42\ndata: event1\nretry: 10\n\n"))
 			return
 		}
 
 		_, _ = w.Write([]byte("id: 43\ndata: event2\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
 	})
 
 	ctx, cancel := context.WithCancel(t.Context())

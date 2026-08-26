@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
@@ -103,9 +104,9 @@ func DialIPProxy(
 		return nil, nil, err
 	}
 
-	req.Header.Set("Host", parsed.Host)
-	req.Header.Set("Upgrade", ConnectIPUpgradeToken)
-	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set(fheader.Host, parsed.Host)
+	req.Header.Set(fheader.Upgrade, ConnectIPUpgradeToken)
+	req.Header.Set(fheader.Connection, fheader.Upgrade)
 
 	for _, m := range mods {
 		m.ApplyStd(req)
@@ -147,8 +148,8 @@ func performCONNECTIPHandshake(
 	}
 
 	if resp.StatusCode == http.StatusSwitchingProtocols {
-		if !tokenContainsValue(resp.Header, "Upgrade", ConnectIPUpgradeToken) ||
-			!tokenContainsValue(resp.Header, "Connection", "upgrade") {
+		if !tokenContainsValue(resp.Header, fheader.Upgrade, ConnectIPUpgradeToken) ||
+			!tokenContainsValue(resp.Header, fheader.Connection, "upgrade") {
 			return resp, ErrHandshakeFailed
 		}
 	}

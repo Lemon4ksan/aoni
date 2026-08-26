@@ -16,12 +16,10 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type IPResponse struct {
@@ -73,7 +71,7 @@ func main() {
 
 	// Make requests that will be load-balanced across proxies
 	for i := range 3 {
-		res, err := request.GetTo[IPResponse](ctx, client, "/ip")
+		res, err := client.Get[IPResponse](ctx, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

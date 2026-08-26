@@ -15,11 +15,12 @@ import (
 	"log"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/dns"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 type Response struct {
@@ -54,22 +55,22 @@ func main() {
 	)
 
 	// Make a request with forced HTTP/1.1 and ordered headers
-	res, err := request.GetTo[Response](ctx, client, "/ip",
+	res, err := client.Get[Response](ctx, "/ip",
 		mod.WithForceHTTP1(),
 		mod.WithOrderedHeaders([]string{
-			"Host",
-			"Connection",
-			"Cache-Control",
-			"Upgrade-Insecure-Requests",
-			"User-Agent",
-			"Accept",
-			"Sec-Fetch-Site",
-			"Sec-Fetch-Mode",
-			"Sec-Fetch-User",
-			"Sec-Fetch-Dest",
-			"Accept-Encoding",
-			"Accept-Language",
-			"Cookie",
+			fheader.Host,
+			fheader.Connection,
+			fheader.CacheControl,
+			fheader.UpgradeInsecureRequests,
+			fheader.UserAgent,
+			fheader.Accept,
+			fheader.SecFetchSite,
+			fheader.SecFetchMode,
+			fheader.SecFetchUser,
+			fheader.SecFetchDest,
+			fheader.AcceptEncoding,
+			fheader.AcceptLanguage,
+			fheader.Cookie,
 		}),
 	)
 	if err != nil {
@@ -79,7 +80,7 @@ func main() {
 	fmt.Printf("TLS evasion request successful: %s\n", res.Origin)
 
 	// Alternatively, force HTTP/2 for multiplexing
-	_, _ = request.GetTo[Response](ctx, client, "/ip",
+	_, _ = client.Get[Response](ctx, "/ip",
 		mod.WithForceHTTP2(),
 		mod.WithALPN(aoni.AlpnH2, aoni.AlpnHTTP),
 	)

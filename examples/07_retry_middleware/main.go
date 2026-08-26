@@ -14,11 +14,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type Response struct {
@@ -80,7 +78,7 @@ func main() {
 		option.WithBaseURL("https://httpbin.org"),
 	)
 
-	res, err := request.GetTo[Response](ctx, retryClient, "/status/200")
+	res, err := retryClient.Get[Response](ctx, "/status/200")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -92,7 +90,7 @@ func main() {
 		option.WithBaseURL("https://httpbin.org"),
 	)
 
-	_, _ = request.GetTo[Response](ctx, customClient, "/status/429")
+	_, _ = customClient.Get[Response](ctx, "/status/429")
 
 	// Use retryOnTransient client for unreliable endpoints
 	_ = retryOnTransient

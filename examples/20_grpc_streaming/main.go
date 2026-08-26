@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
@@ -141,8 +142,8 @@ func startGRPCTestServer() *httptest.Server {
 		rc := http.NewResponseController(w)
 		_ = rc.EnableFullDuplex()
 
-		w.Header().Set("Content-Type", "application/grpc")
-		w.Header().Set("Trailer", "grpc-status, grpc-message")
+		w.Header().Set(fheader.ContentType, fheader.MIMEApplicationGRPC)
+		w.Header().Set(fheader.Trailer, fheader.GRPCStatus+", "+fheader.GRPCMessage)
 		w.WriteHeader(http.StatusOK)
 
 		flusher, _ := w.(http.Flusher)
@@ -189,7 +190,7 @@ func startGRPCTestServer() *httptest.Server {
 			}
 		}
 
-		w.Header().Set("grpc-status", "0")
-		w.Header().Set("grpc-message", "OK")
+		w.Header().Set(fheader.GRPCStatus, "0")
+		w.Header().Set(fheader.GRPCMessage, "OK")
 	}))
 }

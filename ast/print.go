@@ -194,6 +194,11 @@ func renderField(w io.Writer, f *Field, maxLen int) {
 	}
 
 	tagParts := []string{}
+	if f.QueryName != "" {
+		omit := generic.Ternary(f.Required, "", ",omitempty")
+		tagParts = append(tagParts, fmt.Sprintf("query:%q", f.QueryName+omit))
+	}
+
 	if f.JSONName != "" {
 		omit := generic.Ternary(f.Required, "", ",omitempty")
 		tagParts = append(tagParts, fmt.Sprintf("json:%q", f.JSONName+omit))

@@ -10,20 +10,18 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // UserService represents the canonical service wrapper for managing user accounts.
 type UserService struct {
-	req  request.Requester
-	doer aoni.RequestDoer
+	client *aoni.Client
 }
 
 // NewUserService constructs a new UserService following Aoni's golden rules:
-//  1. Accepts an aoni.RequestDoer interface (not concrete &http.Client).
+//  1. Accepts an any (aoni.RequestDoer / aoni.HTTPRequester / nil).
 //  2. Defaults to fast.NewClient() when doer is nil (zero-alloc engine).
-//  3. Configures default baseURL, timeout, and options via request.Configure.
-func NewUserService(doer aoni.RequestDoer, baseURL string, opts ...option.Option) *UserService {
+//  3. Configures default baseURL, timeout, and options via aoni.NewClient.
+func NewUserService(doer any, baseURL string, opts ...option.Option) *UserService {
 	if doer == nil {
 		// Zero-allocation line speed engine by default
 		doer = fast.NewClient()
@@ -37,7 +35,6 @@ func NewUserService(doer aoni.RequestDoer, baseURL string, opts ...option.Option
 	allOpts := append(defaultOpts, opts...)
 
 	return &UserService{
-		req:  request.Configure(doer, allOpts...),
-		doer: doer,
+		client: aoni.NewClient(doer, allOpts...),
 	}
 }

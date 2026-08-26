@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/grpc"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // DynamicInvoker provides dynamic gRPC invocation using Protobuf descriptors
@@ -48,7 +47,7 @@ func New() *DynamicInvoker {
 // guided by input and output Protobuf MessageDescriptors.
 func (d *DynamicInvoker) InvokeJSON(
 	ctx context.Context,
-	doer aoni.RequestDoer,
+	doer any,
 	fullMethod string,
 	reqJSON string,
 	inputDesc protoreflect.MessageDescriptor,
@@ -89,9 +88,17 @@ func (d *DynamicInvoker) InvokeJSON(
 	}
 
 	grpcMods = append(grpcMods, mods...)
-	requester := request.AsRequester(doer)
 
-	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)
+	var client *aoni.Client
+	if c, ok := doer.(*aoni.Client); ok {
+		client = c
+	} else if req, ok := doer.(aoni.HTTPRequester); ok {
+		client = aoni.NewClient(req)
+	} else {
+		client = aoni.DefaultClient
+	}
+
+	resp, err := client.Raw().Request(ctx, http.MethodPost, path, grpcMods...)
 	if err != nil {
 		return "", err
 	}

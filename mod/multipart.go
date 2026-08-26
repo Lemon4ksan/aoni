@@ -16,18 +16,18 @@ import (
 	"strings"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-// WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body
+// WithMultipart constructs an [RequestModifier] building an in-memory multipart/form-data request body
 // conforming to RFC 7578 §4.1 (Boundary) and §4.2 (Content-Disposition: form-data).
-func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
-	return aoni.RequestModifier{
+func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
 			var (
@@ -76,7 +76,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.Re
 			}
 
 			req.SetBodyBytes(getBytes())
-			req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -91,10 +91,10 @@ type MultipartField struct {
 }
 
 // WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 §4.3 & §5.2).
-func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
-	return aoni.RequestModifier{
+func WithMultipartFields(fields []MultipartField) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
 			var (
@@ -121,7 +121,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 				if f.Reader != nil || f.Filename != "" {
 					ct := f.ContentType
 					if ct == "" {
-						ct = "application/octet-stream"
+						ct = fheader.MIMEApplicationOctetStream
 					}
 
 					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
@@ -150,16 +150,16 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 			}
 
 			req.SetBodyBytes(getBytes())
-			req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
 		},
 	}
 }
 
-// WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering (RFC 7578 §4.1–§4.4).
-func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
-	return aoni.RequestModifier{
+// WithStreamingMultipart constructs an [RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering (RFC 7578 §4.1–§4.4).
+func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			pr, pw := io.Pipe()
 
 			writer := multipart.NewWriter(pw)
@@ -171,7 +171,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 			go streamMultipartPayload(ctx, pw, writer, fields, files)
 
 			req.SetBodyStream(pr, -1)
-			req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -226,23 +226,23 @@ func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
 	}
 
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return "application/octet-stream", r
+		return fheader.MIMEApplicationOctetStream, r
 	}
 
-	return "application/octet-stream", r
+	return fheader.MIMEApplicationOctetStream, r
 }
 
 // createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type (RFC 7578 §4.2 & §4.4).
 // Per RFC 7578 §4.2, filename* (RFC 5987/8187) MUST NOT be used in multipart/form-data.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
 	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition",
+	h.Set(fheader.ContentDisposition,
 		"form-data; name=\""+escapeQuotes(fieldname)+"\"; filename=\""+escapeQuotes(filename)+"\"")
 
 	if contentType != "" {
-		h.Set("Content-Type", contentType)
+		h.Set(fheader.ContentType, contentType)
 	} else {
-		h.Set("Content-Type", "application/octet-stream")
+		h.Set(fheader.ContentType, fheader.MIMEApplicationOctetStream)
 	}
 
 	return w.CreatePart(h)

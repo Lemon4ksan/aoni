@@ -33,6 +33,9 @@ type (
 	// It is implemented by [*Client], [*fast.Client], middleware decorators, load balancers, and transport bridges.
 	RequestDoer = core.RequestDoer
 
+	// HTTPRequester specifies an execution contract capable of executing parameterized HTTP requests.
+	HTTPRequester = core.HTTPRequester
+
 	// DoerFunc is an adapter allowing ordinary functions to satisfy the [RequestDoer] execution contract.
 	DoerFunc = core.DoerFunc
 

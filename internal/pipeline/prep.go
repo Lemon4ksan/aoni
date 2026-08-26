@@ -21,6 +21,7 @@ import (
 	"time"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/cookie"
@@ -118,10 +119,10 @@ func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 	}
 
 	// RFC 9842 §6.1: Accept-Encoding
-	ae := req.Header.Get("Accept-Encoding")
+	ae := req.Header.Get(fheader.AcceptEncoding)
 	if ae != "" {
 		if !strings.Contains(strings.ToLower(ae), dict.ContentEncodingDCZ) {
-			req.Header.Set("Accept-Encoding", ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
+			req.Header.Set(fheader.AcceptEncoding, ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
 		}
 	}
 
@@ -430,7 +431,7 @@ func (p *Pipeline[Req, Resp]) rotateUserAgentAndHints(req *http.Request) {
 	idx := atomic.AddUint32(&p.counter, 1) - 1
 	prof := profiles[idx%uint32(len(profiles))] //nolint:gosec
 
-	req.Header.Set("User-Agent", prof.UserAgent)
+	req.Header.Set(fheader.UserAgent, prof.UserAgent)
 
 	for k, v := range prof.ClientHints {
 		req.Header.Set(k, v)
@@ -473,12 +474,12 @@ func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 		req.Header = make(http.Header)
 	}
 
-	if req.Header.Get("Referer") != "" || p.defaults.RefererState == nil {
+	if req.Header.Get(fheader.Referer) != "" || p.defaults.RefererState == nil {
 		return
 	}
 
 	if lastURL := p.defaults.RefererState.LastURL.Get(); lastURL != "" {
-		req.Header.Set("Referer", lastURL)
+		req.Header.Set(fheader.Referer, lastURL)
 	}
 }
 
@@ -525,7 +526,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 				stdReq.Header.Add(string(k), string(v))
 			}
 
-			if host := bytesconv.B2S(fastReq.Header.Peek("Host")); host != "" {
+			if host := bytesconv.B2S(fastReq.Header.Peek(fheader.Host)); host != "" {
 				stdReq.Host = host
 			}
 		}

@@ -116,6 +116,7 @@ type Struct struct {
 type Field struct {
 	Name       string
 	Type       string // Go type name (e.g. "int64", "string", "*Chat", "[]*MessageEntity")
+	QueryName  string
 	JSONName   string
 	URLName    string
 	FormName   string

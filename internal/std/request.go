@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
@@ -230,7 +231,7 @@ func (s *Request) SetHeader(key, value string) {
 		s.req.Header = make(http.Header)
 	}
 
-	if strings.EqualFold(key, "Host") {
+	if strings.EqualFold(key, fheader.Host) {
 		s.req.Host = value
 	}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/net/headkit"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -110,25 +111,25 @@ func LookupDecoder(contentType string) Decoder {
 	norm := headkit.BaseMediaType(contentType)
 
 	switch {
-	case bytesconv.EqualFoldASCII(norm, "application/json"),
+	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationJSON),
 		bytesconv.EqualFoldASCII(norm, "text/json"),
 		strings.HasSuffix(norm, "+json"):
 		return JSONDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/grpc-web+proto"),
-		bytesconv.EqualFoldASCII(norm, "application/grpc-web"),
-		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"),
-		strings.HasPrefix(norm, "application/grpc-web"):
+	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWebProto),
+		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWeb),
+		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWebText),
+		strings.HasPrefix(norm, fheader.MIMEApplicationGRPCWeb):
 		return GRPCWebDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
+	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationProtobuf),
 		bytesconv.EqualFoldASCII(norm, "application/protobuf"),
 		strings.HasSuffix(norm, "+proto"):
 		return ProtoDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/xml"),
+	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationXML),
 		bytesconv.EqualFoldASCII(norm, "text/xml"),
 		strings.HasSuffix(norm, "+xml"):
 		return XMLDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
-		bytesconv.EqualFoldASCII(norm, "application/yaml"),
+		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationYAML),
 		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
 		bytesconv.EqualFoldASCII(norm, "text/yaml"),
 		strings.HasSuffix(norm, "+yaml"):

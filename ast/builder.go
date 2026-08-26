@@ -173,6 +173,12 @@ func (s *Struct) NewField(name, fieldType string) *Field {
 	return f
 }
 
+// WithQuery sets the URL query parameter serialization field name.
+func (f *Field) WithQuery(queryName string) *Field {
+	f.QueryName = queryName
+	return f
+}
+
 // WithJSON sets the JSON serialization field name.
 func (f *Field) WithJSON(jsonName string) *Field {
 	f.JSONName = jsonName

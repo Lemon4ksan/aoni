@@ -7,10 +7,10 @@ package mod
 import (
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/rand"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
@@ -18,25 +18,25 @@ import (
 const HeaderIdempotencyKey = "Idempotency-Key"
 
 // HeaderRequestID is the standard distributed tracing request identifier header.
-const HeaderRequestID = "X-Request-ID"
+const HeaderRequestID = fheader.XRequestID
 
-// WithIdempotencyKey constructs an [aoni.RequestModifier] injecting a unique time-ordered
+// WithIdempotencyKey constructs an [RequestModifier] injecting a unique time-ordered
 // UUIDv7 into the "Idempotency-Key" header (RFC 9562) if the header is not already set.
 // It executes on stack memory with zero heap allocations.
-func WithIdempotencyKey() aoni.RequestModifier {
+func WithIdempotencyKey() RequestModifier {
 	return WithIdempotencyKeyHeader(HeaderIdempotencyKey)
 }
 
-// WithIdempotencyKeyHeader constructs an [aoni.RequestModifier] injecting a unique time-ordered
+// WithIdempotencyKeyHeader constructs an [RequestModifier] injecting a unique time-ordered
 // UUIDv7 into the specified header name if the header is not already set.
-func WithIdempotencyKeyHeader(headerName string) aoni.RequestModifier {
+func WithIdempotencyKeyHeader(headerName string) RequestModifier {
 	if headerName == "" {
 		headerName = HeaderIdempotencyKey
 	}
 
-	return aoni.RequestModifier{
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			if req.Header(headerName) == "" {
 				var buf [36]byte
 
@@ -47,22 +47,22 @@ func WithIdempotencyKeyHeader(headerName string) aoni.RequestModifier {
 	}
 }
 
-// WithRequestID constructs an [aoni.RequestModifier] injecting a unique time-ordered
+// WithRequestID constructs an [RequestModifier] injecting a unique time-ordered
 // UUIDv7 into the "X-Request-ID" header if the header is not already set.
-func WithRequestID() aoni.RequestModifier {
+func WithRequestID() RequestModifier {
 	return WithRequestIDHeader(HeaderRequestID)
 }
 
-// WithRequestIDHeader constructs an [aoni.RequestModifier] injecting a unique time-ordered
+// WithRequestIDHeader constructs an [RequestModifier] injecting a unique time-ordered
 // UUIDv7 into the specified header name if the header is not already set.
-func WithRequestIDHeader(headerName string) aoni.RequestModifier {
+func WithRequestIDHeader(headerName string) RequestModifier {
 	if headerName == "" {
 		headerName = HeaderRequestID
 	}
 
-	return aoni.RequestModifier{
+	return RequestModifier{
 		Kind: core.ModCustom,
-		Fn: func(req aoni.Request) {
+		Fn: func(req Request) {
 			if req.Header(headerName) == "" {
 				var buf [36]byte
 

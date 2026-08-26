@@ -13,7 +13,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // Instantiate a health-checked proxy pool with automatic failover
@@ -32,7 +31,7 @@ stickyRotator := rotator.WithStickySessions(proxy.StickyKeyFromCookie("sessionid
 client := aoni.NewClient(stickyRotator)
 
 // Requests carrying the same 'sessionid' will consistently route to the same proxy exit node
-user, err := request.GetTo[User](ctx, client, "/profile")
+user, err := client.Get[User](ctx, "/profile")
 ```
 
 ## 2. Per-Request Transport Overrides
@@ -45,10 +44,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
-resp, err := client.Request(ctx, http.MethodGet, "/vip-endpoint",
+resp, err := client.Raw().Request(ctx, http.MethodGet, "/vip-endpoint",
 	mod.WithProxyOverride("http://premium-proxy.local:9090"),
 	mod.WithInsecureSkipVerify(),
 	mod.WithTCPDelay(100*time.Millisecond, 500*time.Millisecond),
@@ -65,7 +63,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 // Static 150ms hedging delay
@@ -74,7 +71,7 @@ client := aoni.NewClient(nil, option.WithHedging(150*time.Millisecond))
 // Dynamic Hedging: automatically calculates delay threshold based on EWMA P95 RTT
 clientDynamic := aoni.NewClient(nil, option.WithDynamicHedging(nil))
 
-user, err := request.GetTo[User](ctx, client, "/fast-path")
+user, err := client.Get[User](ctx, "/fast-path")
 ```
 
 ## 4. Automatic Legacy Charset Transcoding
@@ -82,7 +79,7 @@ user, err := request.GetTo[User](ctx, client, "/fast-path")
 Legacy APIs and regional services frequently return responses in non-UTF-8 character sets (such as Windows-1251, Shift-JIS, or ISO-8859-1), resulting in corrupt Unicode strings during JSON or XML unmarshaling. `aoni` inspects incoming `Content-Type` charset parameters on the fly and transparently transcodes the payload into valid UTF-8 before decoding.
 
 ```go
-manifest, err := request.GetTo[Manifest](ctx, client, "/legacy-manifest",
+manifest, err := client.Get[Manifest](ctx, "/legacy-manifest",
 	mod.WithDownloadProgress(func(current, total int64) {
 		fmt.Printf("Downloaded %d of %d bytes\n", current, total)
 	}),
@@ -99,8 +96,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -113,9 +110,9 @@ client := aoni.NewClient(nil,
 	}),
 )
 
-user, err := request.GetTo[User](ctx, client, "/profile",
-	aoni.Trace(info),
-	aoni.TraceJA4(info),
+user, err := client.Get[User](ctx, "/profile",
+	mod.WithTrace(info),
+	mod.WithTraceJA4(info),
 )
 
 fmt.Println("TLS Fingerprint (JA4): ", info.JA4.JA4)  // "t13d1516h2_8daaf6152771_e5627efa2ab1"
@@ -159,9 +156,9 @@ Diagnosing connection bottlenecks across complex proxy chains requires detailed 
 ```go
 var trace telemetry.TraceInfo
 
-user, err := request.GetTo[User](ctx, client, "/debug",
-	aoni.Trace(&trace),    // Detailed DNS, TCP, TLS, and TTFB latency metrics
-	mod.WithCurlDump(),    // Prints executable 'curl -X GET ...' command to stderr
+user, err := client.Get[User](ctx, "/debug",
+	mod.WithTrace(&trace),    // Detailed DNS, TCP, TLS, and TTFB latency metrics
+	mod.WithCurlDump(),       // Prints executable 'curl -X GET ...' command to stderr
 )
 
 fmt.Printf("DNS: %s | TCP: %s | TLS: %s | TTFB: %s\n",
@@ -206,7 +203,7 @@ client := aoni.NewClient(nil,
 )
 
 // Unmarshals inner 'data' directly into User struct
-user, err := request.GetTo[User](ctx, client, "/users/1")
+user, err := client.Get[User](ctx, "/users/1")
 ```
 
 ### 💡 BaseURL & Path Resolution Rules (RFC 3986 vs. Fast Normalization)
@@ -280,7 +277,7 @@ func TestUserAPI(t *testing.T) {
 
 ## 11. Zero-Allocation Protobuf Services with `vtprotobuf`
 
-Standard `protoc-gen-go` generates reflection-based serialization routines that allocate heap memory on every message encode and decode. Compiling `.proto` schemas with `vortex proto` generates optimized `vtprotobuf` zero-allocation codecs that integrate with `request.PostProtoTo[T]`.
+Standard `protoc-gen-go` generates reflection-based serialization routines that allocate heap memory on every message encode and decode. Compiling `.proto` schemas with `vortex proto` generates optimized `vtprotobuf` zero-allocation codecs that integrate with `client.PostProto[T]`.
 
 ```bash
 vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
@@ -288,12 +285,11 @@ vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
 
 ```go
 import (
-	"github.com/lemon4ksan/aoni/request"
 	pb "github.com/my/project/pkg/pb"
 )
 
 // Zero-allocation binary protobuf request and response decoding
-resp, err := request.PostProtoTo[pb.TradeResponse](ctx, client, "https://api.steam.com/trade", reqProto)
+resp, err := client.PostProto[pb.TradeResponse](ctx, "https://api.steam.com/trade", reqProto)
 ```
 
 ## 12. Streaming Server-Sent Events (SSE) & NDJSON Processing
@@ -326,7 +322,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/dns"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 client := aoni.NewClient(nil,
@@ -338,7 +333,7 @@ client := aoni.NewClient(nil,
 	option.WithChrome(),
 )
 
-resp, err := request.GetTo[map[string]any](ctx, client, "https://crypto.cloudflare.com/cdn-cgi/trace")
+resp, err := client.Get[map[string]any](ctx, "https://crypto.cloudflare.com/cdn-cgi/trace")
 ```
 
 ## 14. IPv6 Subnet Rotation (/64 Prefix Pool)
@@ -353,7 +348,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 rotator, err := ip.NewIPv6SubnetRotator("2001:db8:1234:5678::/64")
@@ -364,7 +358,7 @@ if err != nil {
 client := aoni.NewClient(nil, option.WithDialer(rotator.Dialer()))
 
 // Every request originates from a unique randomized IPv6 address
-user, err := request.GetTo[User](ctx, client, "https://ipv6.api.example.com/profile")
+user, err := client.Get[User](ctx, "https://ipv6.api.example.com/profile")
 ```
 
 ## 15. Chromium-Grade Network Resilience (421 Recovery & Happy Eyeballs v3)
@@ -406,7 +400,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/tunnel/ssh"
 )
 
@@ -431,7 +424,7 @@ if err != nil {
 client := aoni.NewClient(nil, option.WithDialer(internalSSH))
 
 // Outbound request executes through the SSH encrypted tunnel
-resp, err := request.GetTo[User](ctx, client, "http://internal-api.service.local/v1/data")
+resp, err := client.Get[User](ctx, "http://internal-api.service.local/v1/data")
 ```
 
 ## 18. Reverse SSH Tunnel Gateway with TLS SNI Routing

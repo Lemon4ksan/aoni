@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	fip "github.com/lemon4ksan/foundation/net/ip"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	utls "github.com/refraction-networking/utls"
@@ -193,8 +194,8 @@ type DialConfig = transport.DialConfig
 // automatically scrubbed during cross-origin HTTP redirects (RFC 9110 §15.4)
 // to prevent security token leakage to untrusted third-party origins.
 var DefaultSensitiveHeaders = []string{
-	"Authorization",
-	"Cookie",
+	fheader.Authorization,
+	fheader.Cookie,
 	"X-Session-ID",
 	"X-Access-Token",
 	"X-Access-Key",

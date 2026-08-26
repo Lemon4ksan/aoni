@@ -13,6 +13,7 @@ import (
 	"net/url"
 
 	impl "github.com/lemon4ksan/foundation/net/cookie"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -44,7 +45,7 @@ func (c *Client) applyCookies(ctx context.Context, req *h1engine.Request) {
 		return
 	}
 
-	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
+	if existing := req.Header.Peek(fheader.Cookie); len(existing) > 0 {
 		var stackBuf [512]byte
 
 		needed := len(existing) + 2 + len(cookieHeader)
@@ -59,9 +60,9 @@ func (c *Client) applyCookies(ctx context.Context, req *h1engine.Request) {
 		buf = append(buf, existing...)
 		buf = append(buf, ';', ' ')
 		buf = append(buf, cookieHeader...)
-		req.Header.SetBytesKV(bytesconv.S2B("Cookie"), buf)
+		req.Header.SetBytesKV(bytesconv.S2B(fheader.Cookie), buf)
 	} else {
-		req.Header.Set("Cookie", cookieHeader)
+		req.Header.Set(fheader.Cookie, cookieHeader)
 	}
 }
 
@@ -131,7 +132,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 
 // extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
 func extractUserInfoAndSetAuth(req *h1engine.Request) {
-	if len(req.Header.Peek("Authorization")) > 0 {
+	if len(req.Header.Peek(fheader.Authorization)) > 0 {
 		return
 	}
 
@@ -139,7 +140,7 @@ func extractUserInfoAndSetAuth(req *h1engine.Request) {
 	if len(uBytes) > 0 {
 		user := bytesconv.B2S(uBytes)
 		pass := bytesconv.B2S(req.URI().Password())
-		req.Header.Set("Authorization", netutil.FormatBasicAuth(user, pass))
+		req.Header.Set(fheader.Authorization, netutil.FormatBasicAuth(user, pass))
 		req.URI().SetUsernameBytes(nil)
 		req.URI().SetPasswordBytes(nil)
 
@@ -155,7 +156,7 @@ func extractUserInfoAndSetAuth(req *h1engine.Request) {
 	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
 		user := parsed.User.Username()
 		pass, _ := parsed.User.Password()
-		req.Header.Set("Authorization", netutil.FormatBasicAuth(user, pass))
+		req.Header.Set(fheader.Authorization, netutil.FormatBasicAuth(user, pass))
 	}
 
 	req.URI().SetUsername("")
@@ -164,10 +165,10 @@ func extractUserInfoAndSetAuth(req *h1engine.Request) {
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *h1engine.Request, currentURI, nextURI *h1engine.URI) {
-	req.Header.Del("Authorization")
-	req.Header.Del("Proxy-Authorization")
-	req.Header.Del("Proxy-Authenticate")
-	req.Header.Del("WWW-Authenticate")
+	req.Header.Del(fheader.Authorization)
+	req.Header.Del(fheader.ProxyAuthorization)
+	req.Header.Del(fheader.ProxyAuthenticate)
+	req.Header.Del(fheader.WWWAuthenticate)
 	req.Header.Del("Cookie2")
 	req.Header.Del("X-Api-Key")
 	req.Header.Del("X-Auth-Token")
@@ -180,7 +181,7 @@ func scrubSensitiveHeaders(req *h1engine.Request, currentURI, nextURI *h1engine.
 	req.Header.Del("Private-Key")
 
 	if !isSameDomainOrSubdomain(bytesconv.B2S(currentURI.Host()), bytesconv.B2S(nextURI.Host())) {
-		req.Header.Del("Cookie")
+		req.Header.Del(fheader.Cookie)
 	}
 }
 

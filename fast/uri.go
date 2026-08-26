@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -107,8 +108,8 @@ func applyUserinfoAuth(req aoni.Request, targetURL string) {
 		username := parsed.User.Username()
 		password, _ := parsed.User.Password()
 
-		if req.Header("Authorization") == "" {
-			req.SetHeader("Authorization", netutil.FormatBasicAuth(username, password))
+		if req.Header(fheader.Authorization) == "" {
+			req.SetHeader(fheader.Authorization, netutil.FormatBasicAuth(username, password))
 		}
 	}
 }

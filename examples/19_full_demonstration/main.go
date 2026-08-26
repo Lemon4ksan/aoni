@@ -15,18 +15,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni/codec/values"
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-	"github.com/lemon4ksan/aoni/resiliency/cache"
-	"github.com/lemon4ksan/aoni/telemetry"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/dns"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/resiliency/cache"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // ProtectedUserData describes the target data structure using custom aoni values.
@@ -51,7 +51,7 @@ func (s *HeadlessWAFSolver) Solve(ctx context.Context, err error, req *http.Requ
 		Header:     make(http.Header),
 		Request:    req,
 	}
-	mockResponse.Header.Set("Content-Type", "application/json")
+	mockResponse.Header.Set(fheader.ContentType, fheader.MIMEApplicationJSON)
 	return mockResponse, nil
 }
 
@@ -151,8 +151,8 @@ func main() {
 		return nil
 	})
 
-	userData, rawResp, err := request.GetToEx[ProtectedUserData](
-		ctx, client, "/v1/users/profile",
+	userData, rawResp, err := client.FetchEx[ProtectedUserData](
+		ctx, http.MethodGet, "/v1/users/profile", nil,
 		antiBotValidator,
 		mod.WithHeader("X-Client-Build", "release-v2.0"),
 	)

@@ -29,7 +29,7 @@ func emitExecution(
 		methodVerb = "GET"
 	}
 
-	genericType := "request.NoResponse"
+	genericType := "aoni.NoResponse"
 	if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" {
 		genericType = strings.TrimPrefix(m.Return.SuccessType.Name, "*")
 	}
@@ -102,8 +102,6 @@ func emitStandardHTTPMethodCall(
 	m *ir.MethodIR,
 	targetReq, rawPath, methodVerb, genericType, bodyArg string,
 ) {
-	tracker.Add("github.com/lemon4ksan/aoni/request")
-
 	isPointer := strings.HasPrefix(m.Return.SuccessType.Name, "*")
 	zeroVal := zeroValueOf(m.Return)
 
@@ -132,9 +130,9 @@ func emitGetExecution(
 	case m.Return.IsVoid:
 		fmt.Fprintf(
 			buf,
-			"\t_, err := request.GetTo[%s](ctx, %s, %q, allMods...)\n",
-			genericType,
+			"\t_, err := %s.Get[%s](ctx, %q, allMods...)\n",
 			targetReq,
+			genericType,
 			rawPath,
 		)
 		buf.WriteString("\treturn err\n")
@@ -157,9 +155,9 @@ func emitGetExecution(
 	default:
 		fmt.Fprintf(
 			buf,
-			"\tresp, err := request.GetTo[%s](ctx, %s, %q, allMods...)\n",
-			genericType,
+			"\tresp, err := %s.Get[%s](ctx, %q, allMods...)\n",
 			targetReq,
+			genericType,
 			rawPath,
 		)
 		fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
@@ -180,30 +178,62 @@ func emitBodyVerbExecution(
 	targetReq, rawPath, helperFn, bodyArg, genericType, zeroVal string,
 	isPointer bool,
 ) {
+	methodName := helperFn
+	switch helperFn {
+	case "PostTo":
+		methodName = "Post"
+	case "PutTo":
+		methodName = "Put"
+	case "PatchTo":
+		methodName = "Patch"
+	case "DeleteTo":
+		methodName = "Delete"
+	}
+
 	if m.Return.IsVoid {
-		fmt.Fprintf(
-			buf,
-			"\t_, err := request.%s[%s](ctx, %s, %q, %s, allMods...)\n",
-			helperFn,
-			genericType,
-			targetReq,
-			rawPath,
-			bodyArg,
-		)
+		if methodName == "Delete" && (bodyArg == "nil" || bodyArg == "") {
+			fmt.Fprintf(
+				buf,
+				"\t_, err := %s.Delete[%s](ctx, %q, allMods...)\n",
+				targetReq,
+				genericType,
+				rawPath,
+			)
+		} else {
+			fmt.Fprintf(
+				buf,
+				"\t_, err := %s.%s[%s](ctx, %q, %s, allMods...)\n",
+				targetReq,
+				methodName,
+				genericType,
+				rawPath,
+				bodyArg,
+			)
+		}
 		buf.WriteString("\treturn err\n")
 
 		return
 	}
 
-	fmt.Fprintf(
-		buf,
-		"\tresp, err := request.%s[%s](ctx, %s, %q, %s, allMods...)\n",
-		helperFn,
-		genericType,
-		targetReq,
-		rawPath,
-		bodyArg,
-	)
+	if methodName == "Delete" && (bodyArg == "nil" || bodyArg == "") {
+		fmt.Fprintf(
+			buf,
+			"\tresp, err := %s.Delete[%s](ctx, %q, allMods...)\n",
+			targetReq,
+			genericType,
+			rawPath,
+		)
+	} else {
+		fmt.Fprintf(
+			buf,
+			"\tresp, err := %s.%s[%s](ctx, %q, %s, allMods...)\n",
+			targetReq,
+			methodName,
+			genericType,
+			rawPath,
+			bodyArg,
+		)
+	}
 	fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 	emitChecks(buf, tracker, m)
 
@@ -373,7 +403,6 @@ func emitEnvelopeUnwrap(
 	bodyParam *ir.ParamIR,
 ) {
 	tracker.Add("errors")
-	tracker.Add("github.com/lemon4ksan/aoni/request")
 
 	successType := m.Return.SuccessType.Name
 	fieldName := strings.ToUpper(m.UnwrapField[:1]) + m.UnwrapField[1:]
@@ -392,13 +421,13 @@ func emitEnvelopeUnwrap(
 
 		fmt.Fprintf(
 			buf,
-			"\tresp, err := request.PostTo[envelope](ctx, %s, %q, %s, allMods...)\n",
+			"\tresp, err := %s.Post[envelope](ctx, %q, %s, allMods...)\n",
 			targetReq,
 			rawPath,
 			bodyArg,
 		)
 	} else {
-		fmt.Fprintf(buf, "\tresp, err := request.GetTo[envelope](ctx, %s, %q, allMods...)\n", targetReq, rawPath)
+		fmt.Fprintf(buf, "\tresp, err := %s.Get[envelope](ctx, %q, allMods...)\n", targetReq, rawPath)
 	}
 
 	zeroVal := zeroValueOf(m.Return)

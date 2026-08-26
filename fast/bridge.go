@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strconv"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/option"
@@ -79,7 +81,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	fastReq.SetURL(req.URL.String())
 
 	if req.Host != "" {
-		fastReq.SetHeader("Host", req.Host)
+		fastReq.SetHeader(fheader.Host, req.Host)
 	}
 
 	copyHeaders(fastReq, req.Header)
@@ -99,8 +101,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	if ct := req.Header.Get("Content-Type"); ct != "" {
-		fastReq.SetHeader("Content-Type", ct)
+	if ct := req.Header.Get(fheader.ContentType); ct != "" {
+		fastReq.SetHeader(fheader.ContentType, ct)
 	}
 
 	resp, err := t.noRedirectClient.Do(fastReq)
@@ -170,7 +172,7 @@ func copyHeaders(dst aoni.Request, src http.Header) {
 
 // resolveContentLength parses Content-Length from response headers or returns -1 if absent/invalid.
 func resolveContentLength(resp aoni.Response) int64 {
-	clStr := resp.Header("Content-Length")
+	clStr := resp.Header(fheader.ContentLength)
 	if clStr == "" {
 		return -1
 	}

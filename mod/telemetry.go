@@ -12,33 +12,33 @@ import (
 	"os"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// WithCorrelationID constructs an [aoni.RequestModifier] setting an end-to-end tracing correlation ID header ("X-Correlation-ID").
-func WithCorrelationID(id string) aoni.RequestModifier {
+// WithCorrelationID constructs an [RequestModifier] setting an end-to-end tracing correlation ID header ("X-Correlation-ID").
+func WithCorrelationID(id string) RequestModifier {
 	activeID := id
 	if activeID == "" {
 		activeID = telemetry.GenerateCorrelationID()
 	}
 
-	return Custom(func(req aoni.Request) {
+	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
 		if cfg.TraceInfo != nil {
 			cfg.TraceInfo.CorrelationID = activeID
 		}
 
-		req.SetHeader("X-Correlation-ID", activeID)
+		req.SetHeader(fheader.XCorrelationID, activeID)
 	})
 }
 
-// WithLabel constructs an [aoni.RequestModifier] assigning a route or metric label to the request context.
-func WithLabel(label string) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithLabel constructs an [RequestModifier] assigning a route or metric label to the request context.
+func WithLabel(label string) RequestModifier {
+	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
 		cfg.Label = label
 
@@ -48,16 +48,16 @@ func WithLabel(label string) aoni.RequestModifier {
 	})
 }
 
-// WithDebug constructs an [aoni.RequestModifier] marking the request for verbose diagnostic logging.
-func WithDebug() aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithDebug constructs an [RequestModifier] marking the request for verbose diagnostic logging.
+func WithDebug() RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Debug = true
 	})
 }
 
-// WithCurlDump constructs an [aoni.RequestModifier] printing an equivalent shell-escaped cURL command to stderr.
-func WithCurlDump() aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithCurlDump constructs an [RequestModifier] printing an equivalent shell-escaped cURL command to stderr.
+func WithCurlDump() RequestModifier {
+	return Custom(func(req Request) {
 		stdReq := req.HTTPRequest()
 		if stdReq != nil {
 			dumpStdRequest(stdReq)
@@ -83,8 +83,8 @@ func dumpStdRequest(stdReq *http.Request) {
 	fmt.Fprintf(os.Stderr, "%s\n", curl)
 }
 
-// dumpGenericRequest prints a curl-equivalent command for an [aoni.Request] to stderr.
-func dumpGenericRequest(req aoni.Request) {
+// dumpGenericRequest prints a curl-equivalent command for an [Request] to stderr.
+func dumpGenericRequest(req Request) {
 	body := req.BodyBytes()
 
 	dummyReq, _ := http.NewRequest(req.Method(), req.URL(), bytes.NewReader(body)) //nolint:noctx
@@ -94,16 +94,16 @@ func dumpGenericRequest(req aoni.Request) {
 	}
 }
 
-// WithTrace constructs an [aoni.RequestModifier] assigning a connection tracer container to capture connection metrics.
-func WithTrace(target *telemetry.TraceInfo) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithTrace constructs an [RequestModifier] assigning a connection tracer container to capture connection metrics.
+func WithTrace(target *telemetry.TraceInfo) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).TraceInfo = target
 	})
 }
 
-// WithTraceJA4 constructs an [aoni.RequestModifier] enabling JA4/JA4H client fingerprint telemetry.
-func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithTraceJA4 constructs an [RequestModifier] enabling JA4/JA4H client fingerprint telemetry.
+func WithTraceJA4(target *telemetry.TraceInfo) RequestModifier {
+	return Custom(func(req Request) {
 		if target.JA4 == nil {
 			target.JA4 = &ja4.Report{}
 		}
@@ -117,18 +117,18 @@ func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 	})
 }
 
-// WithTraceContext constructs an [aoni.RequestModifier] attaching a new [telemetry.TraceInfo] container to the request context.
-func WithTraceContext() aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithTraceContext constructs an [RequestModifier] attaching a new [telemetry.TraceInfo] container to the request context.
+func WithTraceContext() RequestModifier {
+	return Custom(func(req Request) {
 		info := &telemetry.TraceInfo{}
 		getOrInitRequestConfig(req).TraceInfo = info
 		WithTraceJA4(info).Apply(req)
 	})
 }
 
-// WithJA4Callback constructs an [aoni.RequestModifier] setting a callback executed with the computed [ja4.Report] after TLS handshakes.
-func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
-	return Custom(func(req aoni.Request) {
+// WithJA4Callback constructs an [RequestModifier] setting a callback executed with the computed [ja4.Report] after TLS handshakes.
+func WithJA4Callback(fn func(ja4.Report)) RequestModifier {
+	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).JA4Callback = fn
 	})
 }

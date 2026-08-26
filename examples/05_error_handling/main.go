@@ -14,12 +14,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type NotFoundResponse struct {
@@ -35,7 +33,7 @@ func main() {
 	)
 
 	// Example 1: Check for aoni.APIError with a custom error model
-	_, err := request.GetTo[any](ctx, client,
+	_, err := client.Get[any](ctx,
 		"/posts/99999",
 		mod.WithErrorModel(&NotFoundResponse{}),
 	)
@@ -53,7 +51,7 @@ func main() {
 	}
 
 	// Example 2: Check for Cloudflare challenge
-	_, err = request.GetTo[any](ctx, client, "/challenge-protected-page")
+	_, err = client.Get[any](ctx, "/challenge-protected-page")
 	if err != nil {
 		if errors.Is(err, challenge.ErrCloudflareDetected) {
 			fmt.Println("Cloudflare challenge detected, need browser-level solving")
@@ -61,7 +59,7 @@ func main() {
 	}
 
 	// Example 3: Check for response too large
-	_, err = request.GetTo[any](ctx, client, "/large-payload")
+	_, err = client.Get[any](ctx, "/large-payload")
 	if err != nil {
 		if errors.Is(err, aoni.ErrResponseTooLarge) {
 			fmt.Println("Response exceeded configured size limit")

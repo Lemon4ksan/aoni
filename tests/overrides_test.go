@@ -27,7 +27,6 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency"
 )
 
@@ -391,7 +390,7 @@ func TestResponseValidator(t *testing.T) {
 
 		c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-		resp, err := request.Get(t.Context(), c, "/",
+		resp, err := c.Raw().Get(t.Context(), "/",
 			mod.WithResponseValidator(func(resp *http.Response) error {
 				if resp.Header.Get("X-Status") != "ok" {
 					return errors.New("missing X-Status")
@@ -416,7 +415,7 @@ func TestResponseValidator(t *testing.T) {
 
 		c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-		resp, err := request.Get(t.Context(), c, "/",
+		resp, err := c.Raw().Get(t.Context(), "/",
 			mod.WithResponseValidator(func(resp *http.Response) error {
 				body, _ := io.ReadAll(resp.Body)
 
@@ -629,7 +628,7 @@ func TestResponseTrace(t *testing.T) {
 
 	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-	resp, err := request.Get(t.Context(), c, "/", mod.WithTraceContext())
+	resp, err := c.Raw().Get(t.Context(), "/", mod.WithTraceContext())
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

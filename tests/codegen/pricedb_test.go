@@ -82,8 +82,8 @@ type EffectInfo struct {
 
 	codeStr := string(code)
 	require.Contains(t, codeStr, "type priceDBClient struct")
-	require.Contains(t, codeStr, "r   request.Requester")
-	require.Contains(t, codeStr, "sku request.Requester")
+	require.Contains(t, codeStr, "r   *aoni.Client")
+	require.Contains(t, codeStr, "sku *aoni.Client")
 	require.Contains(t, codeStr, "func NewPriceDB(doer any, opts ...aoni.ClientOption) PriceDB")
 	require.Contains(t, codeStr, "qBytes = append(qBytes, url.QueryEscape(q)...)")
 	require.Contains(t, codeStr, "qBytes = strconv.AppendInt(qBytes, int64(limit), 10)")

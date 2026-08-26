@@ -72,7 +72,7 @@ func TestScoped(t *testing.T) {
 	defer ts.Close()
 
 	status, err := Scoped(nil, func(c *Client) (int, error) {
-		resp, reqErr := c.Get(context.Background(), ts.URL)
+		resp, reqErr := c.Raw().Get(context.Background(), ts.URL)
 		if reqErr != nil {
 			return 0, reqErr
 		}

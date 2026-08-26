@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
@@ -58,7 +59,7 @@ func (c *Client) executeWithRedirects(
 			return trailers, nil, false
 		}
 
-		location := fastResp.Header.Peek("Location")
+		location := fastResp.Header.Peek(fheader.Location)
 		if len(location) == 0 {
 			return trailers, nil, false
 		}
@@ -94,9 +95,9 @@ func (c *Client) executeWithRedirects(
 		}
 
 		if isHTTPSDowngrade(currentURI, nextURI) {
-			fastReq.Header.Del("Referer")
+			fastReq.Header.Del(fheader.Referer)
 		} else {
-			fastReq.Header.SetBytesKV(bytesconv.S2B("Referer"), currentURI.FullURI())
+			fastReq.Header.SetBytesKV(bytesconv.S2B(fheader.Referer), currentURI.FullURI())
 		}
 
 		if c.referer != nil {
@@ -133,12 +134,12 @@ func applyRedirectMethodAndBody(statusCode int, req *h1engine.Request) {
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)
-			req.Header.Del("Content-Type")
-			req.Header.Del("Content-Length")
-			req.Header.Del("Content-Encoding")
-			req.Header.Del("Content-Language")
-			req.Header.Del("Content-Location")
-			req.Header.Del("Digest")
+			req.Header.Del(fheader.ContentType)
+			req.Header.Del(fheader.ContentLength)
+			req.Header.Del(fheader.ContentEncoding)
+			req.Header.Del(fheader.ContentLanguage)
+			req.Header.Del(fheader.ContentLocation)
+			req.Header.Del(fheader.Digest)
 		}
 	}
 }

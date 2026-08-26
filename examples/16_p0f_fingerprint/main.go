@@ -11,11 +11,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
-
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type IPResponse struct {
@@ -31,7 +29,7 @@ func main() {
 		option.WithP0fSignature(p0f.Linux311),
 	)
 
-	resp, err := request.GetTo[IPResponse](ctx, client, "/ip")
+	resp, err := client.Get[IPResponse](ctx, "/ip")
 	if err != nil {
 		log.Fatal(err)
 	}

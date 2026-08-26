@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/net/hpack"
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // EncodeConnectHeaders encodes HTTP/2 Extended CONNECT pseudo-headers and request headers into HPACK block bytes.
@@ -24,11 +25,11 @@ func EncodeConnectHeaders(
 	encoder := hpack.NewEncoder(&buf)
 
 	pseudoHeaders := []hpack.HeaderField{
-		{Name: ":method", Value: "CONNECT"},
-		{Name: ":protocol", Value: "websocket"},
-		{Name: ":scheme", Value: scheme},
-		{Name: ":path", Value: path},
-		{Name: ":authority", Value: host},
+		{Name: fheader.PseudoMethod, Value: fheader.MethodConnect},
+		{Name: fheader.PseudoProtocol, Value: fheader.ValueWebSocket},
+		{Name: fheader.PseudoScheme, Value: scheme},
+		{Name: fheader.PseudoPath, Value: path},
+		{Name: fheader.PseudoAuthority, Value: host},
 	}
 
 	for _, h := range pseudoHeaders {

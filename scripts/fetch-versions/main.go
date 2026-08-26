@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 )
 
 type Release struct {
@@ -51,7 +53,7 @@ func main() {
 
 func fetchChromeVersion(client *http.Client, platform string) string {
 	req, err := http.NewRequest( //nolint:noctx
-		"GET",
+		fheader.MethodGet,
 		"https://chromiumdash.appspot.com/fetch_releases?platform="+platform+"&channel=Stable&num=1",
 		nil,
 	)
@@ -59,7 +61,7 @@ func fetchChromeVersion(client *http.Client, platform string) string {
 		return ""
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set(fheader.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {

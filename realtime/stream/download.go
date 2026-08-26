@@ -15,10 +15,11 @@ import (
 	"path/filepath"
 	"time"
 
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/request"
 )
 
 var (
@@ -44,7 +45,7 @@ type CheckpointState struct {
 
 // DownloadTask coordinates resilient, resumable chunked downloads with checkpoint persistence.
 type DownloadTask struct {
-	requester       request.Requester
+	requester       aoni.HTTPRequester
 	url             string
 	destinationPath string
 	checkpointPath  string
@@ -56,7 +57,7 @@ type DownloadTask struct {
 }
 
 // NewDownload creates a new fluent [DownloadTask] for downloading targetURL.
-func NewDownload(requester request.Requester, targetURL string) *DownloadTask {
+func NewDownload(requester aoni.HTTPRequester, targetURL string) *DownloadTask {
 	return &DownloadTask{
 		requester:   requester,
 		url:         targetURL,
@@ -126,7 +127,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 	probeResp, err := t.executeRequest(ctx, http.MethodHead, t.url, 0)
 	if err != nil {
 		// If HEAD is disallowed, fallback to GET probe with Range: bytes=0-0
-		probeResp, err = t.executeRequest(ctx, http.MethodGet, t.url, 0, mod.WithHeader("Range", "bytes=0-0"))
+		probeResp, err = t.executeRequest(ctx, http.MethodGet, t.url, 0, mod.WithHeader(fheader.Range, fheader.ValueBytes+"=0-0"))
 		if err != nil {
 			return err
 		}
@@ -138,9 +139,9 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	etag := probeResp.Header.Get("ETag")
-	lastModified := probeResp.Header.Get("Last-Modified")
-	acceptRanges := probeResp.Header.Get("Accept-Ranges")
+	etag := probeResp.Header.Get(fheader.ETag)
+	lastModified := probeResp.Header.Get(fheader.LastModified)
+	acceptRanges := probeResp.Header.Get(fheader.AcceptRanges)
 	totalBytes := probeResp.ContentLength
 
 	var downloadedBytes int64
@@ -179,7 +180,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	supportsRanges := acceptRanges == "bytes" || probeResp.StatusCode == http.StatusPartialContent
+	supportsRanges := acceptRanges == fheader.ValueBytes || probeResp.StatusCode == http.StatusPartialContent
 	if !supportsRanges || t.concurrency <= 1 {
 		return t.downloadSequential(ctx, file, downloadedBytes, totalBytes, etag, lastModified)
 	}
@@ -196,9 +197,9 @@ func (t *DownloadTask) downloadSequential(
 	mods := append([]aoni.RequestModifier(nil), t.modifiers...)
 
 	if startBytes > 0 {
-		mods = append(mods, mod.WithHeader("Range", fmt.Sprintf("bytes=%d-", startBytes)))
+		mods = append(mods, mod.WithHeader(fheader.Range, fmt.Sprintf(fheader.ValueBytes+"=%d-", startBytes)))
 		if etag != "" {
-			mods = append(mods, mod.WithHeader("If-Range", etag))
+			mods = append(mods, mod.WithHeader(fheader.IfRange, etag))
 		}
 	}
 

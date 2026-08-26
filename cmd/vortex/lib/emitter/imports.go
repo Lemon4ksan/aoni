@@ -119,13 +119,7 @@ func (t *ImportTracker) RegisterRootImports(root *ir.RootIR, bodyCode string) {
 		return
 	}
 
-	hasHTTP := false
-	hasFastClient := false
-	hasSocket := false
-	hasProto := false
-	hasDecode := false
-	hasCodec := false
-	hasRequest := false
+	var hasSocket, hasHTTP, hasDecode, hasCodec, hasProto, hasFastClient bool
 
 	for _, svc := range root.Services {
 		if svc.Protocol == ir.ProtocolSocket {
@@ -137,8 +131,6 @@ func (t *ImportTracker) RegisterRootImports(root *ir.RootIR, bodyCode string) {
 			if !isStrict && svc.Engine != ir.EngineNetHTTP && svc.Engine != ir.EngineCustom {
 				hasFastClient = true
 			}
-
-			hasRequest = true
 		}
 
 		for _, m := range svc.Methods {
@@ -204,10 +196,6 @@ func (t *ImportTracker) RegisterRootImports(root *ir.RootIR, bodyCode string) {
 		if hasFastClient {
 			t.Add("github.com/lemon4ksan/aoni/fast")
 		}
-	}
-
-	if hasRequest {
-		t.Add("github.com/lemon4ksan/aoni/request")
 	}
 
 	if hasDecode {

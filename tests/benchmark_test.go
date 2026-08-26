@@ -29,7 +29,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/request"
 	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
 )
 
@@ -204,13 +203,12 @@ func BenchmarkGET_Generic_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		res, err := request.GetTo[benchPayload](ctx, client, "/")
+		res, err := client.Get[benchPayload](ctx, "/")
 		if err != nil {
 			b.Fatal(err)
 		}
-
-		if res.ID != 100 {
-			b.Fatal("invalid id")
+		if res.ID != 1001 {
+			b.Fatalf("unexpected id: %d", res.ID)
 		}
 	}
 }
@@ -560,7 +558,7 @@ func BenchmarkGET_JSON_Aoni_Minimal(b *testing.B) {
 	for b.Loop() {
 		var payload benchPayload
 
-		err := request.GetInto(ctx, client, "/", &payload)
+		err := client.GetInto(ctx, "/", &payload)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -598,7 +596,7 @@ func BenchmarkGET_JSON_Aoni_UnsafeDisableFlags(b *testing.B) {
 	for b.Loop() {
 		var payload benchPayload
 
-		err := request.GetInto(ctx, client, "/", &payload)
+		err := client.GetInto(ctx, "/", &payload)
 		if err != nil {
 			b.Fatal(err)
 		}

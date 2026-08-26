@@ -10,6 +10,8 @@ package privacypass
 import (
 	"errors"
 	"time"
+
+	fheader "github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // Standard HTTP Header field names and authentication schemes (RFC 9577 & W3C).
@@ -21,10 +23,10 @@ const (
 	HeaderSecPrivateStateToken = "Sec-Private-State-Token"
 
 	// HeaderWWWAuthenticate specifies standard HTTP challenge header (RFC 9110 §11.6.1).
-	HeaderWWWAuthenticate = "WWW-Authenticate"
+	HeaderWWWAuthenticate = fheader.WWWAuthenticate
 
 	// HeaderAuthorization specifies standard HTTP authorization header (RFC 9110 §11.6.2).
-	HeaderAuthorization = "Authorization"
+	HeaderAuthorization = fheader.Authorization
 )
 
 // Common errors returned by Privacy Pass operations.
