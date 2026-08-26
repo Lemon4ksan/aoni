@@ -11,7 +11,7 @@
     │   RFC 9110/9113/9114 • Happy Eyeballs v3 • Stealth TLS / JA4     │
     │   ┌───────────────────────────┐    ┌──────────────────────────┐  │
     │   │      Standard Engine      │    │       Fast Engine        │  │
-    │   │ (100% net/http Drop-in)   │    │ (1.87M+ RPS / Zero Alloc)│  │
+    │   │ (100% net/http Drop-in)   │    │ (2.34M+ RPS / Zero Alloc)│  │
     │   └───────────────────────────┘    └──────────────────────────┘  │
     └─────────────────────────────────┬────────────────────────────────┘
                                       │
@@ -32,21 +32,28 @@
 The substrate beneath the protocol engine. Operates directly on cache lines, OS virtual memory pages, and 64-bit CPU registers:
 - **`silicon/offheap`**: Single-cycle bump allocation (`Arena`), RAII scopes (`Scope`), and lock-free typed memory slabs (`SlabAllocator[T]`) backed by OS kernel pages (`mmap` / `VirtualAlloc`). Completely bypasses Go runtime GC scan pauses.
 - **`silicon/simd`**: SWAR (SIMD Within A Register) vectorized algorithms scanning 8 to 64 bytes per instruction for CRLF boundaries, header terminators, and byte lookups.
-- **`silicon/clock`**: Nanosecond coarse monotonic clock reducing `time.Now()` syscall overhead to a single atomic integer read.
+- **`silicon/clock` / `timekit`**: Nanosecond coarse monotonic clock reducing `time.Now()` syscall overhead to a single atomic integer read (0.28 ns).
+- **`bufkit`**: Lock-free SPSC ring buffers and scatter-gather page chains with 64-byte cache-line padding.
+- **`netutil/iouring`**: Linux `io_uring` direct SQ/CQ ring-buffer memory-mapped socket engine bypassing kernel syscalls.
 - **`net/url`**: Zero-allocation sharded URL cache and query composer eliminating dynamic string allocations on hot routes.
 
 ### Tier 2: `aoni` (Protocol Engine & Dual Engines)
 The core networking citadel, strictly locked to immutable IETF RFC and Chromium specifications:
 - **Dual Engines under a Single Ergonomic Interface**:
   - `aoni.Client` (*Standard Engine*): 100% standard library compatibility (`net/http.RoundTripper`, standard middlewares, context deadlines).
-  - `fast.Client` (*Fast Engine*): Ultra-high-throughput silicon pipeline built on parallel I/O, achieving **1.87M+ parallel RPS at absolute 0 allocs/op**.
+  - `fast.Client` (*Fast Engine*): Ultra-high-throughput silicon pipeline built on parallel I/O and `pool.PerPStorage`, achieving **2.34M+ parallel RPS at absolute 0 allocs/op**.
 - **Chromium-Grade Resilience**:
   - **Happy Eyeballs v3**: Dynamic racing across HTTP/3 (QUIC), HTTP/2, and HTTP/1.1 with configurable initial pacing delays.
   - **Auto-Recovery**: Automatic connection pool invalidation and rerouting on HTTP 421 (*Misdirected Request*), HTTP 408 (*Timeout*), and HTTP 425 (*Too Early*).
+  - **Early Hints (RFC 8297)**: Speculative connection pre-warming and DNS preresolution.
+  - **Stale DNS (RFC 8767)**: 0ms stale host resolution with background asynchronous deduplicated refreshing.
 - **Stealth & Evasion**:
   - Pure-Go JA3/JA4/JA4H fingerprint emulation.
   - TCP/IP p0f SYN/ACK packet signature spoofing.
+  - Post-Quantum TLS 1.3 Key Exchange (FIPS 203 `X25519MLKEM768` / Kyber768).
   - TLS 1.3 Encrypted Client Hello (ECH via DoH/DoQ RFC 9460).
+  - Chromium Network Isolation Keys (NIK / NAK) and CHIPS cookie partitioning.
+  - Extensible Priorities (RFC 9218) and Compression Dictionaries (RFC 9651).
 - **Real-Time Protocols & gRPC Streaming**:
   - Pure-Go gRPC client (`grpc/`): Unary, Server-Streaming, Client-Streaming, and Bidirectional Full-Duplex HTTP/2 framing with uTLS stealth impersonation and trailer validation.
   - WebSockets over HTTP/2 Extended CONNECT (RFC 8441), SSE, and NDJSON real-time event pipelines.

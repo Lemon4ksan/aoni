@@ -163,6 +163,31 @@ Here is how `aoni` aligns all layers.
   * **Proxy-Isolated Cookie Jar (`cookie/jar.go`):** `ProxyIsolatedJar` maintains an isolated `http.CookieJar` instance for each proxy address key stored in the request context.
   * **Proxy-Aware Session Cache (`netutil/proxy/session.go`):** `SessionCache` wraps the uTLS session ticket manager and automatically invalidates or isolates cached TLS connection tickets whenever the target proxy changes. This guarantees zero session leakage across exit nodes.
 
+### 6. The Post-Quantum Shift: Hybrid ML-KEM-768 (`fingerprint/profiles`)
+* **The Problem:** Modern Chromium (Chrome 124+) sends hybrid Post-Quantum key exchange mechanisms (`X25519MLKEM768` per FIPS 203 / Kyber768) in its ClientHello `key_shares` extension. Advanced WAFs (Cloudflare / Akamai) flag clients claiming to be "Chrome 134+" that only offer classical X25519 curves as emulators.
+* **The "Voodoo":** Injecting post-quantum key shares and Zstandard compressed certificates natively.
+* **The Physics:**
+  * `HelloChrome_134_PQ` injects the `X25519MLKEM768` curve identifier (`0x11ec`) into the Supported Groups and Key Share extensions, generating full 1184-byte Kyber ciphertext key exchange payloads identical to real Chrome browser instances.
+
+### 7. The Invisible Domain: Encrypted Client Hello (ECH / RFC 9460)
+* **The Problem:** Even with TLS 1.3, Server Name Indication (SNI) is broadcast in plaintext in the initial ClientHello, allowing ISPs, middleboxes, and DPI firewalls to block connections based on the destination hostname.
+* **The "Voodoo":** Encrypting the entire inner ClientHello inside an outer decoy ClientHello.
+* **The Physics:**
+  * `aoni` queries DNS Type 65 (`HTTPS` / `SVCB`) records via DoH/DoQ to extract `ech` parameter blocks.
+  * Encrypts the `ClientHelloInner` containing the true target SNI using HPKE (RFC 9180), presenting only the unencrypted `ClientHelloOuter` (decoy SNI) to middlebox sniffers.
+
+### 8. Chromium Network Isolation Keys (NIK / NAK) & CHIPS (`netutil/nik`)
+* **The Problem:** Modern browser architectures double-key network connection pools, DNS caches, and HTTP caches using compound keys `(TopFrameSite, FrameSite, CrossSite)` to prevent cross-site timing attacks and fingerprinting. Standard Go HTTP clients share a flat connection pool, exposing cross-origin side channels.
+* **The "Voodoo":** Partitioning transport connection pools and cookies by compound NIK context.
+* **The Physics:**
+  * `netutil/nik` calculates deterministic NIK tokens for every outbound request context, partitioning TCP/TLS socket pools and RFC 6265bis CHIPS (`Partitioned` cookies) per origin context.
+
+### 9. Modern L7 Framing: RFC 9218 Priorities & RFC 9651 Compression Dictionaries
+* **The Problem:** Real browsers send structured stream priorities (`Priority: u=0..7, i`) per RFC 9218 and advertise compression dictionary capabilities (`sec-available-dictionary: <hash>`). A client missing these headers while sending Chrome User-Agents is trivial to detect.
+* **The "Voodoo":** Synthesizing exact browser priority trees and dictionary-compressed response decompression (`dcb`, `dcz`).
+* **The Physics:**
+  * `netutil/priority` maps resource urgency levels directly into RFC 9218 HTTP/2 and HTTP/3 headers, while `netutil/dict` handles shared dictionary transport.
+
 ## 📦 Domain Modules & Their Mechanics
 
 ### 1. `realtime/ws` (WebSocket Transport)
