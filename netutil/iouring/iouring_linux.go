@@ -39,10 +39,8 @@ type sqRing struct {
 	array        []uint32
 	sqes         []SQE
 	sqeTail      uint32
-	ringPtr      uintptr
-	ringSize     uintptr
-	sqesPtr      uintptr
-	sqesSize     uintptr
+	ringMmap     []byte
+	sqesMmap     []byte
 }
 
 type cqRing struct {
@@ -52,8 +50,7 @@ type cqRing struct {
 	kringEntries *uint32
 	koverflow    *uint32
 	cqes         []CQE
-	ringPtr      uintptr
-	ringSize     uintptr
+	ringMmap     []byte
 }
 
 // Ring encapsulates a Linux io_uring instance.
@@ -126,9 +123,8 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 		return fmt.Errorf("mmap SQ ring: %w", err)
 	}
 
+	r.sq.ringMmap = sqPtr
 	basePtr := unsafe.Pointer(&sqPtr[0])
-	r.sq.ringPtr = uintptr(basePtr)
-	r.sq.ringSize = sqSize
 
 	r.sq.khead = (*uint32)(unsafe.Add(basePtr, p.sqOff.head))
 	r.sq.ktail = (*uint32)(unsafe.Add(basePtr, p.sqOff.tail))
@@ -142,6 +138,7 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 
 	// Map SQEs
 	sqesSize := uintptr(p.sqEntries) * unsafe.Sizeof(SQE{})
+
 	sqesPtr, err := unix.Mmap(
 		r.fd,
 		IORING_OFF_SQES,
@@ -154,9 +151,8 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 		return fmt.Errorf("mmap SQEs: %w", err)
 	}
 
+	r.sq.sqesMmap = sqesPtr
 	sqesBase := unsafe.Pointer(&sqesPtr[0])
-	r.sq.sqesPtr = uintptr(sqesBase)
-	r.sq.sqesSize = sqesSize
 	r.sq.sqes = unsafe.Slice((*SQE)(sqesBase), p.sqEntries)
 
 	// Map CQ ring
@@ -166,8 +162,6 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 	)
 
 	if p.features&1 != 0 {
-		r.cq.ringPtr = r.sq.ringPtr
-		r.cq.ringSize = r.sq.ringSize
 		cqBasePtr = basePtr
 	} else {
 		cqPtr, err = unix.Mmap(
@@ -183,9 +177,8 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 			return fmt.Errorf("mmap CQ ring: %w", err)
 		}
 
+		r.cq.ringMmap = cqPtr
 		cqBasePtr = unsafe.Pointer(&cqPtr[0])
-		r.cq.ringPtr = uintptr(cqBasePtr)
-		r.cq.ringSize = cqSize
 	}
 
 	r.cq.khead = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.head))
@@ -298,16 +291,19 @@ func (r *Ring) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.sq.sqesPtr != 0 {
-		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.sq.sqesPtr)), r.sq.sqesSize))
+	if len(r.sq.sqesMmap) > 0 {
+		_ = unix.Munmap(r.sq.sqesMmap)
+		r.sq.sqesMmap = nil
 	}
 
-	if r.sq.ringPtr != 0 {
-		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.sq.ringPtr)), r.sq.ringSize))
+	if len(r.sq.ringMmap) > 0 {
+		_ = unix.Munmap(r.sq.ringMmap)
+		r.sq.ringMmap = nil
 	}
 
-	if r.cq.ringPtr != 0 && r.cq.ringPtr != r.sq.ringPtr {
-		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.cq.ringPtr)), r.cq.ringSize))
+	if len(r.cq.ringMmap) > 0 {
+		_ = unix.Munmap(r.cq.ringMmap)
+		r.cq.ringMmap = nil
 	}
 
 	return unix.Close(r.fd)

@@ -585,6 +585,18 @@ func testConnectionUnpackFailureFatal(t *testing.T, unpackErr error) error {
 		connectionOptHandshakeConfirmed(),
 	)
 
+	var pn protocol.PacketNumber
+	tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *packetBuffer, _ protocol.ByteCount, _ monotime.Time, _ protocol.Version) (shortHeaderPacket, error) {
+			pn++
+			return shortHeaderPacket{PacketNumber: pn, Length: 10}, nil
+		},
+	).AnyTimes()
+	tc.packer.EXPECT().
+		PackAckOnlyPacket(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(shortHeaderPacket{}, nil, nil).
+		AnyTimes()
+
 	tc.connRunner.EXPECT().ReplaceWithClosed(gomock.Any(), gomock.Any(), gomock.Any())
 	unpacker.EXPECT().
 		UnpackShortHeader(gomock.Any(), gomock.Any()).
