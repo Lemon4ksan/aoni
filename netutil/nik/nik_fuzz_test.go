@@ -29,6 +29,7 @@ func FuzzNetworkIsolationKey(f *testing.F) {
 		_ = k.String()
 
 		ctx := nik.WithNIK(context.Background(), k)
+
 		extracted, ok := nik.FromContext(ctx)
 		if ok && extracted.IsEmpty() {
 			t.Fatalf("extracted NIK reported ok but is empty")

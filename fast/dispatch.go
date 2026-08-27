@@ -36,6 +36,7 @@ func (c *Client) dispatchSingleRequest(
 	if method != h1engine.MethodGet && method != h1engine.MethodHead && method != h1engine.MethodOptions {
 		reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 		reqCfg.Disable0RTT = true
+
 		fastReq.Header.Del(h1engine.HeaderEarlyData)
 	}
 

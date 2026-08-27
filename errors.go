@@ -363,6 +363,7 @@ func IsTimeout(err error) bool {
 	}
 
 	apiErr, ok := errors.AsType[*APIError](err)
+
 	return ok && apiErr.IsTimeout()
 }
 

@@ -27,5 +27,5 @@
 //
 //	// Outgoing requests will automatically generate client spans, inject W3C traceparent,
 //	// record DNS/TLS/Connect phases, and stream trace data to the OTel collector.
-//	user, resp, err := fluent.FetchTo[User](ctx, client, "GET", "https://api.example.com/users/42")
+//	user, err := client.Get[User](ctx, "https://api.example.com/users/42")
 package otel

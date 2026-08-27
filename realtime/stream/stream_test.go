@@ -293,10 +293,12 @@ func TestResumableSSE_LastEventID(t *testing.T) {
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		attempts++
+
 		currentAttempt := attempts
 		if currentAttempt == 2 {
 			receivedLastID = r.Header.Get("Last-Event-ID")
 		}
+
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -310,6 +312,7 @@ func TestResumableSSE_LastEventID(t *testing.T) {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
+
 		<-r.Context().Done()
 	})
 

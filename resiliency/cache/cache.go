@@ -316,7 +316,9 @@ func (s *LRUStore[K, V]) Get(_ context.Context, key K) (V, error) {
 		if ok {
 			s.lru.Delete(key)
 		}
+
 		var zero V
+
 		return zero, ErrCacheMiss
 	}
 
@@ -338,6 +340,7 @@ func (s *LRUStore[K, V]) Set(_ context.Context, key K, val V, ttl time.Duration)
 		value:     storedVal,
 		expiresAt: timekit.CoarseNow().Add(ttl),
 	})
+
 	return nil
 }
 

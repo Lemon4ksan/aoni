@@ -45,7 +45,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -2420,7 +2419,7 @@ func TestFluentAPI_PathInterpolationAndDownload(t *testing.T) {
 	}
 
 	var res apiResult
-	resp, err := fluent.R(client).
+	resp, err := client.R().
 		SetContext(t.Context()).
 		SetPathParam("userId", "usr_42").
 		SetPathParam("orderId", "ord_100").

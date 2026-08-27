@@ -63,6 +63,7 @@ func ParseLinkHeader(raw string) []Link {
 
 		for _, param := range parts[1:] {
 			param = strings.TrimSpace(param)
+
 			k, v, found := strings.Cut(param, "=")
 			if !found {
 				continue
@@ -145,6 +146,7 @@ func ProcessEarlyHints(ctx context.Context, p Preconnecter, hints http.Header) {
 				defer cancel()
 
 				u, err := url.Parse(target)
+
 				host := target
 				if err == nil && u.Hostname() != "" {
 					host = u.Hostname()

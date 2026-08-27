@@ -28,6 +28,7 @@ func FuzzQUICVarint(f *testing.F) {
 
 			// Verify Len and Append roundtrip
 			expectedLen := quicvarint.Len(val)
+
 			appended := quicvarint.Append(nil, val)
 			if len(appended) != expectedLen {
 				t.Fatalf("appended len %d != Len %d", len(appended), expectedLen)
@@ -40,6 +41,7 @@ func FuzzQUICVarint(f *testing.F) {
 
 			// Read via ByteReader
 			r := bytes.NewReader(data)
+
 			val3, err3 := quicvarint.Read(r)
 			if err3 == nil && val3 != val {
 				t.Fatalf("Read vs Parse mismatch: got %d, expected %d", val3, val)

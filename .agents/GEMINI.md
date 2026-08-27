@@ -26,7 +26,7 @@ This document outlines the architecture, coding standards, build/test commands, 
   - Pure-Go JA3/JA4/JA4H fingerprint calculation and emulation.
   - TCP/IP p0f stack spoofing and HPACK framing control.
 - **Generics-First Ergonomics & Codecs**:
-  - Type-safe single-line calls via `fluent.FetchTo[T]` and `request.GetTo[T]`.
+  - Type-safe single-line calls via `client.Get[T]`, `client.Post[T]`, `client.R()`, and `aoni.Get[T]`.
   - Native decoders for JSON, XML, Protobuf, and gRPC-Web (5-byte framing & trailer validation).
 - **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streaming (Socket.IO v5 / Engine.IO v4 in `aoni/x/socketio`).
 - **Proxy Isolation & Utilities**: Proxy-isolated Cookie Jars (`ProxyIsolatedCookieJar`), proxy rotators, IPv6 subnet rotators, and DoH/DoT/DoQ DNS resolvers.
@@ -38,8 +38,6 @@ aoni/
 ├── client.go, config.go, dial.go ...  // Core standard aoni client (net/http compatible)
 ├── option/                            // Functional client options (option.WithBaseURL, option.WithChrome...)
 ├── mod/                               // Per-request modifiers (mod.WithVar, mod.WithHeader, mod.WithQuery...)
-├── request/                           // High-level generic helpers (request.GetTo[T], PostTo, PostProtoTo)
-├── fluent/                            // Chainable Request Builder API (fluent.FetchTo[T], fluent.R)
 ├── fast/                              // Ultra-fast client engine built on fasthttp
 ├── cookie/                            // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/                       // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
@@ -61,7 +59,7 @@ aoni/
 2. **Chromium-Grade Network Stability**:
    - Outbound requests and transport layers must maintain industrial fault tolerance under un-reliable networks. Always handle connection pool invalidation, stale keep-alives, socket leaks, and protocol fallbacks cleanly.
 3. **Zero Performance Regressions & High Readability**:
-   - **Zero Allocation Mindset**: Avoid heap allocations in high-throughput hot paths (`fast`, `codec`, `fluent`, `fingerprint`). Utilize `sync.Pool` for buffers and builders. Pre-allocate slices (`make([]T, 0, capacity)`).
+   - **Zero Allocation Mindset**: Avoid heap allocations in high-throughput hot paths (`fast`, `codec`, `fingerprint`). Utilize `sync.Pool` for buffers and builders. Pre-allocate slices (`make([]T, 0, capacity)`).
    - **No Hidden Magic / High Readability**: Performance optimizations must not obscure code clarity or introduce cryptic side effects. Code readability and clean interface abstractions remain paramount.
    - Avoid `reflect` wherever generics or interface-based dispatch suffice.
 4. **Strict IETF RFC & W3C Standards Adherence**:
@@ -169,7 +167,7 @@ Submodule 2:
 2. **Preserve Comments & Context**:
    - Do not delete or mangle existing inline code comments and Godoc documentation unless rendered obsolete by code changes.
 3. **No Performance Regressions**:
-   - When modifying hot paths (`fast`, `codec`, `fluent`, `fingerprint`, `netutil`), ensure zero unnecessary memory allocations are introduced. Use pooled buffers (`sync.Pool`) and slice capacity hints.
+   - When modifying hot paths (`fast`, `codec`, `fingerprint`, `netutil`), ensure zero unnecessary memory allocations are introduced. Use pooled buffers (`sync.Pool`) and slice capacity hints.
 4. **Maintain High Readability**:
    - Prefer clean, self-describing abstractions over overly obscure or overly clever micro-hacks. High performance must coexist with readable, maintainable Go code.
 5. **No Symptom Masking**:

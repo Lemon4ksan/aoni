@@ -99,6 +99,7 @@ func (c *Client) Post[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
@@ -123,6 +124,7 @@ func (c *Client) PostInto[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
@@ -156,6 +158,7 @@ func (c *Client) Put[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
@@ -180,6 +183,7 @@ func (c *Client) PutInto[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
@@ -213,6 +217,7 @@ func (c *Client) Patch[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
@@ -237,6 +242,7 @@ func (c *Client) PatchInto[Resp any](
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
@@ -323,6 +329,7 @@ func (c *Client) Fetch[Resp any](
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
@@ -349,6 +356,7 @@ func (c *Client) FetchInto[Resp any](
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
@@ -427,8 +435,10 @@ func executeToEx[Resp any](
 	body any,
 	mods []RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-	var stackBuf [stackModCapacity]RequestModifier
+	var (
+		raw      *http.Response
+		stackBuf [stackModCapacity]RequestModifier
+	)
 
 	reqMods := withCaptureMod(&stackBuf, &raw, mods)
 
@@ -437,6 +447,7 @@ func executeToEx[Resp any](
 		if raw != nil && raw.Body != nil {
 			_ = raw.Body.Close()
 		}
+
 		return nil, raw, err
 	}
 
@@ -444,7 +455,7 @@ func executeToEx[Resp any](
 }
 
 // HandleResponse processes and decodes an HTTP response stream into a target structure or API error.
-func HandleResponse(resp *http.Response, target any, c any) error {
+func HandleResponse(resp *http.Response, target, c any) error {
 	if resp == nil {
 		return ErrNilResponse
 	}
@@ -520,7 +531,9 @@ func (responseDecoder) DumpDiagnostics(resp *http.Response, c any) {
 	var respDump []byte
 	if telemetry.IsStreamingResponse(resp) {
 		respDump = []byte(
-			resp.Proto + " " + resp.Status + "\r\nContent-Type: " + resp.Header.Get("Content-Type") + "\r\n\r\n[streaming body omitted]",
+			resp.Proto + " " + resp.Status + "\r\nContent-Type: " + resp.Header.Get(
+				"Content-Type",
+			) + "\r\n\r\n[streaming body omitted]",
 		)
 	} else {
 		respDump, _ = httputil.DumpResponse(resp, true)
@@ -642,6 +655,7 @@ func (responseDecoder) DecodeSuccess(
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
+
 			return err
 		}
 
@@ -681,8 +695,10 @@ func extractBaseResponse(c any, resp *http.Response) BaseResponse {
 			if cli == nil {
 				return nil
 			}
+
 			return cli.BaseResponse()
 		}
+
 		if p, ok := c.(BaseResponseProvider); ok && p != nil {
 			return p.BaseResponse()
 		}
@@ -723,6 +739,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 				if d, ok := cfg.Decoder.(decode.Decoder); ok && d != nil {
 					return d
 				}
+
 				return cfg.Decoder
 			}
 
@@ -732,6 +749,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 					if dec, ok := d.(decode.Decoder); ok && dec != nil {
 						return dec
 					}
+
 					return decode.DecoderFunc(d.Decode)
 				}
 			}
@@ -755,6 +773,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 			}
 
 			mediaType, _, _ := strings.Cut(contentType, ";")
+
 			mediaType = strings.TrimSpace(mediaType)
 			switch {
 			case bytesconv.EqualFoldASCII(mediaType, "application/xml"),
@@ -809,6 +828,7 @@ func withJSONBodyMods(
 	}
 
 	var allMods []RequestModifier
+
 	totalLen := len(mods) + 2
 
 	if totalLen <= stackModCapacity && stackBuf != nil {
@@ -829,6 +849,7 @@ func withCaptureMod(
 	mods []RequestModifier,
 ) []RequestModifier {
 	totalLen := len(mods) + 1
+
 	var allMods []RequestModifier
 
 	if totalLen <= stackModCapacity && stackBuf != nil {

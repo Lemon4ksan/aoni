@@ -27,6 +27,7 @@ type VAPIDKeys struct {
 // GenerateVAPIDKeys generates a fresh ECDSA P-256 key pair for VAPID signing.
 func GenerateVAPIDKeys() (*VAPIDKeys, error) {
 	curve := elliptic.P256()
+
 	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("aoni/webpush: failed to generate VAPID key: %w", err)
@@ -84,6 +85,7 @@ func (k *VAPIDKeys) PublicKeyBase64() string {
 	}
 
 	raw := elliptic.Marshal(elliptic.P256(), k.PublicKey.X, k.PublicKey.Y)
+
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
@@ -111,7 +113,7 @@ type jwtClaims struct {
 }
 
 // SignJWT constructs and signs an RFC 8292 VAPID JSON Web Token.
-func (k *VAPIDKeys) SignJWT(endpoint string, subject string, ttl time.Duration) (string, error) {
+func (k *VAPIDKeys) SignJWT(endpoint, subject string, ttl time.Duration) (string, error) {
 	if k == nil || k.PrivateKey == nil {
 		return "", ErrInvalidVAPIDKeys
 	}
@@ -148,6 +150,7 @@ func (k *VAPIDKeys) SignJWT(endpoint string, subject string, ttl time.Duration) 
 	signingInput := headerB64 + "." + claimsB64
 
 	hashed := sha256.Sum256([]byte(signingInput))
+
 	r, s, err := ecdsa.Sign(rand.Reader, k.PrivateKey, hashed[:])
 	if err != nil {
 		return "", fmt.Errorf("aoni/webpush: failed to sign VAPID JWT: %w", err)
@@ -164,13 +167,14 @@ func (k *VAPIDKeys) SignJWT(endpoint string, subject string, ttl time.Duration) 
 }
 
 // AuthorizationHeader generates the RFC 8292 §3 `Authorization: vapid t=<JWT>, k=<PublicKey>` header value.
-func (k *VAPIDKeys) AuthorizationHeader(endpoint string, subject string, ttl time.Duration) (string, error) {
+func (k *VAPIDKeys) AuthorizationHeader(endpoint, subject string, ttl time.Duration) (string, error) {
 	jwtToken, err := k.SignJWT(endpoint, subject, ttl)
 	if err != nil {
 		return "", err
 	}
 
 	pubKeyB64 := k.PublicKeyBase64()
+
 	return fmt.Sprintf("vapid t=%s, k=%s", jwtToken, pubKeyB64), nil
 }
 

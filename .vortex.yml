@@ -17,8 +17,6 @@ lint:
       - "internal/fast"
       - "internal/quic"
       - "fast"
-      - "fluent"
-      - "request"
 
 contracts:
   - name: 001API

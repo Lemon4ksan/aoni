@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -54,15 +53,15 @@ type User struct {
 func main() {
 	ctx := context.Background()
 
-	// Initialize a reusable, Chromium-resilient client
+	// 1. Initialize a reusable client with browser fingerprinting
 	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://api.example.com"),
 		option.WithTimeout(10*time.Second),
 		option.WithChrome(), // Bit-exact Chrome uTLS, ECH, JA4, and HTTP/2 framing
 	)
 
-	// Fetch directly into a strongly-typed generic struct (0 B/op on hot paths)
-	user, resp, err := fluent.FetchTo[User](ctx, client, "GET", "/users/{id}",
+	// 2. Direct generic GET request (0 B/op on hot paths)
+	user, err := client.Get[User](ctx, "/users/{id}",
 		mod.WithVar("id", 42),
 		mod.WithHeader("Accept", "application/json"),
 	)
@@ -70,8 +69,80 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("User: %s (ID: %d), HTTP Status: %d\n", user.Name, user.ID, resp.StatusCode)
+	fmt.Printf("User: %s (ID: %d)\n", user.Name, user.ID)
 }
+```
+
+## Client Usage & Ergonomics
+
+`aoni` provides clean, flexible interaction patterns for every use-case:
+
+### 1. Direct Generic Methods (`client.Get[T]`, `client.Post[T]`, etc.)
+The most concise and idiomatic way to send requests. Body payloads and responses are handled automatically:
+
+```go
+// GET request decoded directly into *User
+user, err := client.Get[User](ctx, "/users/42")
+
+// POST with JSON body payload
+created, err := client.Post[User](ctx, "/users", User{Name: "Alice"})
+
+// PUT, PATCH, DELETE
+updated, err := client.Put[User](ctx, "/users/42", User{Name: "Alice Cooper"})
+deleted, err := client.Delete[User](ctx, "/users/42")
+
+// Custom HTTP method
+res, err := client.Fetch[User](ctx, "CUSTOM", "/endpoint", payload)
+```
+
+### 2. Raw Response Access & Zero-Allocation Binding
+When you need access to HTTP status codes, headers, or want to reuse existing memory structs:
+
+```go
+// GetEx returns both the typed struct and raw *http.Response
+user, resp, err := client.GetEx[User](ctx, "/users/42")
+fmt.Printf("Status: %d, Server: %s\n", resp.StatusCode, resp.Header.Get("Server"))
+
+// GetInto unmarshals directly into a pre-allocated struct (0 allocs)
+var existing User
+err := client.GetInto(ctx, "/users/42", &existing)
+```
+
+### 3. Chainable Request Builder (`client.R()`)
+For complex requests requiring dynamic path parameters, query parameters, custom headers, or form data:
+
+```go
+var user User
+
+resp, err := client.R().
+	SetContext(ctx).
+	SetPathParam("userId", "42").
+	SetQueryParam("fields", "id,name,email").
+	SetHeader("X-Trace-ID", "trace-12345").
+	SetBody(map[string]any{"active": true}).
+	SetResult(&user).
+	Post("/users/{userId}/update")
+```
+
+### 4. Zero-Setup Top-Level Calls (`aoni.Get[T]`, `aoni.Post[T]`)
+For quick scripts and CLI tools that don't need a dedicated client instance:
+
+```go
+user, err := aoni.Get[User](ctx, "https://api.example.com/users/42")
+```
+
+### 5. Extreme Performance Engine (`fast.Client`)
+For high-throughput backends and scrapers requiring millions of requests per second:
+
+```go
+import "github.com/lemon4ksan/aoni/fast"
+
+fastClient := fast.NewClient(
+	option.WithBaseURL("https://api.example.com"),
+	option.WithChrome(),
+)
+
+user, err := fastClient.Get[User](ctx, "/users/42")
 ```
 
 ## ⚡ Performance Profile: Aoni vs Traditional HTTP Clients
@@ -88,33 +159,33 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 
 ## Core Architectural Pillars
 
-### 1. The Evergreen Public Contract vs. Adaptive Silicon Reactor
+### 1. Evergreen Public API & Transport Architecture
 > _«Code written against **aoni v1.0.0** is guaranteed to compile and execute without modifications on any **v1.x** version 5, 10, and 20 years from now.»_
 
-* **The Immutable Consumer Surface (Public API):** Semantic RFC 9110 abstractions (`fluent.FetchTo[T]`, `option.With...`, `mod.With...`) are permanently frozen. Business logic remains completely insulated from protocol churn.
-* **The Adaptive Silicon Reactor (Internal Engine):** Beneath the stable surface, `aoni` transparently upgrades transport protocols (HTTP/1.1 $\leftrightarrow$ HTTP/2 $\leftrightarrow$ HTTP/3 $\leftrightarrow$ Post-Quantum Kyber/ML-KEM TLS, MASQUE) and optimizes memory layouts without breaking changes.
-* **Ecosystem Experiments in `aoni/x/...`:** Third-party adapters and protocol experiments (e.g. Socket.IO v5, GeoIP MMDB) live strictly in isolated sub-modules.
+* **Stable Public Surface (Public API):** Standard RFC 9110 abstractions (`client.Get[T]`, `client.Post[T]`, `client.R()`, `option.With...`, `mod.With...`) are permanently frozen. Business logic remains insulated from underlying protocol changes.
+* **Underlying Transport Engine (Internal Core):** Transparently handles connection racing, protocol negotiation (HTTP/1.1 $\leftrightarrow$ HTTP/2 $\leftrightarrow$ HTTP/3 $\leftrightarrow$ Post-Quantum ML-KEM TLS, MASQUE), and pooled buffer management.
+* **Extensions in `aoni/x/...`:** Third-party integrations and protocol adapters (e.g. Socket.IO v5, GeoIP MMDB) reside in dedicated sub-modules.
 
-### 2. The Zero-Copy Safety Paradox: Solved for Go
-In traditional Go programming, zero-allocation memory pooling outside trivial leaf functions is hazardous: a borrowed slice passed to a background goroutine results in silent data races and Use-After-Free corruption.
+### 2. Memory Safety in Zero-Copy Paths
+In high-throughput Go networking, zero-allocation memory pooling outside simple leaf functions can easily lead to data races or use-after-free bugs if borrowed buffers escape into background goroutines.
 
-`aoni` pairs its zero-copy execution paths with **`vortex check` / `vortex lint`** — a built-in static verification engine powered by Control Flow Graph (CFG) analysis, Escape Analysis, and Separation Logic ($P * Q$):
-* **Escape Prevention (`B001`):** Formally verifies that borrowed buffers (`borrow.Bytes`, scoped headers) never escape into un-synchronized background goroutines.
+`aoni` pairs its zero-copy execution paths with **`vortex check` / `vortex lint`** — a built-in static verification tool powered by Control Flow Graph (CFG) analysis, Escape Analysis, and Separation Logic ($P * Q$):
+* **Escape Prevention (`B001`):** Verifies that borrowed buffers (`borrow.Bytes`, scoped headers) never escape into un-synchronized background goroutines.
 * **Disjoint Interval Borrowing (`B003`):** Proves non-overlapping slice mutations (`[0:10]` vs `[10:20]`) at compile-time.
-* **Typestate Lifecycle Automata (`B011`):** Enforces strict linear resource progression ($\text{Acquired} \to \text{Frozen} \to \text{Released}$) — preventing double-releases and use-after-free.
+* **Typestate Lifecycle Automata (`B011`):** Enforces strict linear resource progression ($\text{Acquired} \to \text{Frozen} \to \text{Released}$) to prevent double-releases and use-after-free.
 
 ```bash
 # Verify memory safety invariants across all zero-copy paths in CI/CD:
 vortex check --strict ./...
 ```
 
-### 3. Silicon Sympathy: How Aoni Achieves 2.34M+ RPS
-1. **Contention-Free Multi-Core Reactor (`pool.PerPStorage`)**: Thread-local, core-pinned storage rings eliminating cross-core memory locks under 128+ core saturation.
-2. **GC-Invisible Off-Heap Slabs (`offheap.SlabAllocator`)**: Protocol framing structures managed in off-heap slab arenas, reducing runtime Garbage Collector mark-assist CPU overhead to **0.00%**.
-3. **64-Byte Cache Line Padding (`_ cpu.CacheLinePad`)**: Aligned to 64-byte L1/L2 CPU cache boundaries, eliminating False Sharing penalties across multi-threaded socket loops.
-4. **Vectorized SIMD Header Scanning & Table-Driven LUTs**: `\r\n` protocol delimiter scans run on 64-bit SWAR / AVX2 SIMD vector chunks at **~9 GB/s**.
-5. **vDSO Timestamping Bypass**: Bypasses standard `time.Now()` syscall overhead with atomic monotonic clock ticks in **0.28 ns** (11.2x faster than stdlib).
-6. **Native Linux `io_uring` Kernel Bypass (`netutil/iouring`)**: Direct memory-mapped submission (SQ) and completion (CQ) queues, bypassing synchronous socket syscalls at hardware line-rate.
+### 3. CPU & Memory Optimizations
+1. **Contention-Free Multi-Core Storage (`pool.PerPStorage`)**: Core-local buffers eliminate mutex and channel lock contention under high core saturation.
+2. **Off-Heap Slabs (`offheap.SlabAllocator`)**: Protocol framing structures managed in off-heap slab pools reduce runtime Garbage Collector mark-assist overhead during heavy loads.
+3. **64-Byte Cache Line Alignment (`_ cpu.CacheLinePad`)**: Aligned to 64-byte L1/L2 CPU cache boundaries, eliminating False Sharing penalties across multi-threaded socket loops.
+4. **Vectorized SIMD Header Scanning & Lookup Tables**: Delimiter scanning (`\r\n`) leverages AVX2 / SWAR vector instructions and lookup tables (~9 GB/s).
+5. **Optimized Monotonic Clocks**: High-precision timestamping avoids syscall overhead on hot paths (0.28 ns per tick).
+6. **Linux `io_uring` Kernel Bypass (`netutil/iouring`)**: Direct memory-mapped submission (SQ) and completion (CQ) queues for hardware line-rate socket I/O.
 
 ## Vortex Declarative AST Toolchain
 
@@ -160,7 +231,7 @@ For complete syntax reference and workflows, see the [**Vortex Toolchain Guide**
 
 ```go
 // Direct gRPC-Web call with 5-byte framing and trailer validation
-userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/UserService/GetUser", &pb.UserRequest{
+userResp, resp, err := aoni.PostGRPCWebTo[pb.UserResponse](ctx, client, "/UserService/GetUser", &pb.UserRequest{
 	UserId: 42,
 })
 ```
@@ -228,12 +299,12 @@ client := aoni.NewClient(nil,
 
 </details>
 
-## Microarchitectural Benchmark Suite
+## Benchmark Suite
 
 <details>
 <summary><b>Detailed Subsystem Microbenchmarks (Click to Expand)</b></summary>
 
-### 1. Foundation Silicon Subsystem Microbenchmarks (Zero-Alloc Plumbing)
+### 1. Subsystem Microbenchmarks
 
 | Subsystem / Primitive | Go Standard / `x/...` Baseline | `foundation` Engine | Latency Delta | Heap Allocations (`B / alloc`) |
 | :--- | :---: | :---: | :---: | :---: |
@@ -246,8 +317,8 @@ client := aoni.NewClient(nil,
 | **Token Bucket Limiter** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **3.6x Faster** | **0 B / 0 allocs** |
 | **SWAR UTF-8 Scan (1KB)** | 280+ ns (`bytes.Index`) | **5.88 ns** (`silicon/simd`) | **12.4 GB/s throughput** | **0 B / 0 allocs** (64-bit vector SWAR) |
 | **SWAR `\r\n` Header Scan (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **2.5x Faster (~9 GB/s)** | **0 B / 0 allocs** (64-bit vector chunking) |
-| **Zstd Decompression (1KB)** | 1.8+ µs (`klauspost/zstd`) | **251.6 ns / 0 B** (`compress/zstd`) | **7.2x Faster (~4.0M ops/s)** | **0 B / 0 allocs** (Silicon Line Speed) |
-| **Brotli Decompression (1KB)** | 2.1+ µs (`google/brotli`) | **282.6 ns / 0 B** (`compress/brotli`) | **7.4x Faster (~3.5M ops/s)** | **0 B / 0 allocs** (Per-P Storage Ring) |
+| **Zstd Decompression (1KB)** | 1.8+ µs (`klauspost/zstd`) | **251.6 ns / 0 B** (`compress/zstd`) | **7.2x Faster (~4.0M ops/s)** | **0 B / 0 allocs** (Direct stream parsing) |
+| **Brotli Decompression (1KB)** | 2.1+ µs (`google/brotli`) | **282.6 ns / 0 B** (`compress/brotli`) | **7.4x Faster (~3.5M ops/s)** | **0 B / 0 allocs** (Per-P buffer pool) |
 | **WebSocket Stream Throughput** | 800 MB/s (`gorilla/websocket`) | **1,789 MB/s** (`realtime/ws`) | **2.23x Faster** | **0 B / 0 allocs** (`writev` / `net.Buffers`) |
 
 ### 2. Gollvm (LLVM 20.1.8 -O3) Vectorization Benchmarks
@@ -302,9 +373,7 @@ client := aoni.NewClient(nil,
 aoni/
 ├── option/       // Client initialization options (option.With...)
 ├── mod/          // Per-request modifiers (mod.With...)
-├── request/      // Generic request helpers (request.GetTo[T], PostTo, PostProtoTo)
 ├── fast/         // High-performance fasthttp engine adapters
-├── fluent/       // Chainable Request Builder API (fluent.R, FetchTo[T], Codec)
 ├── tunnel/       // L3/L4 tunneling: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
@@ -329,7 +398,7 @@ aoni/
 - [**Vortex Contract Toolchain Guide**](docs/VORTEX.md): Complete AST declarative syntax, CLI manual, OpenAPI/AsyncAPI ingestion, in-memory mocks, and CI/CD integration.
 - [**Vortex DSL & Architecture Specification**](docs/SPEC.md): Formal EBNF grammar, 3-pass optimization pipeline, and static linter rules.
 - [**Network Stack Specification**](docs/NETWORK_STACK.md): Detailed overview of Happy Eyeballs v3, HTTP 421/408/425 auto-recovery, ECH, and pool lifetime mechanics.
-- [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md): Architecture details on native PLAN9 AVX2 SIMD assembly (`simd_amd64.s`), 2MB LargePages slab arenas, and instruction execution budgets.
+- [**CPU & Memory Optimization Guide**](docs/CPU_STACK.md): Architecture details on native PLAN9 AVX2 SIMD assembly (`simd_amd64.s`), 2MB LargePages slab arenas, and instruction execution budgets.
 - [**Demystifying the Voodoo**](docs/VOODOO.md): Deep dive into HPACK state manipulation, TCP window tuning via syscalls, and packet jitter framing.
 - [**Cookbook & Practical Recipes**](docs/COOKBOOK.md): Practical recipes for REST, WebSockets, gRPC-Web, and streaming workflows.
 - [**Code Examples**](examples): Runnable code snippets for REST, WebSockets, gRPC-Web, and browser evasion integrations.

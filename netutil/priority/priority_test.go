@@ -51,6 +51,7 @@ func TestPriority_Parse(t *testing.T) {
 		if err != nil {
 			t.Errorf("Parse(%q) returned error: %v", tt.input, err)
 		}
+
 		if got.Urgency != tt.wantU || got.Incremental != tt.wantI {
 			t.Errorf("Parse(%q) = {%d, %v}, want {%d, %v}", tt.input, got.Urgency, got.Incremental, tt.wantU, tt.wantI)
 		}

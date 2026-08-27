@@ -142,13 +142,16 @@ func appendJarCookies(sb *strings.Builder, cookies []*http.Cookie, isSecret bool
 // appendBodyAndURL formats request body payload and destination URL onto sb.
 func appendBodyAndURL(sb *strings.Builder, req *http.Request, body []byte) {
 	contentType := req.Header.Get(fheader.ContentType)
-	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], fheader.MIMEMultipartFormData) && len(body) > 0 {
+	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], fheader.MIMEMultipartFormData) &&
+		len(body) > 0 {
 		summary := SummarizeMultipartBody(body, contentType)
 		for part := range strings.SplitSeq(summary, "&") {
 			sb.WriteString(" -F ")
 			sb.WriteString(escapeShell(part))
 		}
-	} else if len(body) > 0 {
+	} else if len(
+		body,
+	) > 0 {
 		sb.WriteString(" -d ")
 		sb.WriteString(escapeShell(bytesconv.B2S(body)))
 	}

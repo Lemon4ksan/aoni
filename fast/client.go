@@ -219,7 +219,11 @@ func (r *RawClient) Options(ctx context.Context, path string, mods ...aoni.Reque
 }
 
 // Request executes a raw HTTP request along the high-performance fasthttp pipeline.
-func (r *RawClient) Request(ctx context.Context, method, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+func (r *RawClient) Request(
+	ctx context.Context,
+	method, path string,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
 	return r.client.Request(ctx, method, path, mods...)
 }
 
@@ -616,6 +620,7 @@ func (c *Client) Preresolve(ctx context.Context, host string) error {
 	}
 
 	_, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+
 	return err
 }
 
@@ -634,6 +639,7 @@ func (c *Client) Preconnect(ctx context.Context, targetURL string) error {
 	if err != nil {
 		return nil
 	}
+
 	_ = resp.Close()
 
 	return nil

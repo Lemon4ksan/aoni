@@ -72,6 +72,7 @@ func NewSameSite(site string) NetworkIsolationKey {
 // Useful for private/incognito browsing tabs or one-off tasks where state must never be shared.
 func NewTransient() NetworkIsolationKey {
 	var buf [16]byte
+
 	_, _ = rand.Read(buf[:])
 
 	id := hex.EncodeToString(buf[:])

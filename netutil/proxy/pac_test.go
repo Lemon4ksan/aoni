@@ -50,6 +50,7 @@ func TestParsePACResult(t *testing.T) {
 			if d.Type != tt.wantTypes[i] {
 				t.Errorf("[%d] got Type %q, want %q", i, d.Type, tt.wantTypes[i])
 			}
+
 			if d.HostPort != tt.wantHosts[i] {
 				t.Errorf("[%d] got HostPort %q, want %q", i, d.HostPort, tt.wantHosts[i])
 			}
@@ -95,10 +96,12 @@ func TestPACEngine_Rules(t *testing.T) {
 	// 4. ProxyURLFunc integration
 	fn := engine.ProxyURLFunc()
 	u, _ := url.Parse("https://blocked.com/test")
+
 	proxyURL, err := fn(u)
 	if err != nil {
 		t.Fatalf("unexpected error from ProxyURLFunc: %v", err)
 	}
+
 	if proxyURL == nil || proxyURL.String() != "http://gateway.corp:8080" {
 		t.Fatalf("expected http://gateway.corp:8080, got %v", proxyURL)
 	}
@@ -108,6 +111,7 @@ func TestPACHelpers(t *testing.T) {
 	if !proxy.IsPlainHostName("intranet") {
 		t.Error("expected intranet to be plain")
 	}
+
 	if proxy.IsPlainHostName("intranet.corp") {
 		t.Error("expected intranet.corp not to be plain")
 	}
@@ -127,6 +131,7 @@ func TestPACHelpers(t *testing.T) {
 	if !proxy.IsInNet("192.168.1.50", "192.168.1.0", "255.255.255.0") {
 		t.Error("expected 192.168.1.50 in 192.168.1.0/24")
 	}
+
 	if proxy.IsInNet("10.0.0.1", "192.168.1.0", "255.255.255.0") {
 		t.Error("expected 10.0.0.1 not in 192.168.1.0/24")
 	}

@@ -12,9 +12,8 @@ import (
 	"net/http"
 	"strings"
 
-	"google.golang.org/protobuf/proto"
-
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -78,6 +77,7 @@ func (g *FastGRPCClient) Invoke[Resp any](
 	defer resp.Close()
 
 	result := new(Resp)
+
 	msg, ok := any(result).(proto.Message)
 	if !ok {
 		return nil, fmt.Errorf("aoni/fast: response type %T does not implement proto.Message", result)
@@ -101,32 +101,65 @@ func (c *Client) GetInto[Resp any](ctx context.Context, path string, target *Res
 }
 
 // Post performs a fast HTTP POST request with payload body and decodes response into *Resp.
-func (c *Client) Post[Resp any](ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (*Resp, error) {
+func (c *Client) Post[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
 	return c.Fetch[Resp](ctx, http.MethodPost, path, body, mods...)
 }
 
 // PostInto performs a fast HTTP POST request with payload body and decodes response directly into target without allocations.
-func (c *Client) PostInto[Resp any](ctx context.Context, path string, body any, target *Resp, mods ...aoni.RequestModifier) error {
+func (c *Client) PostInto[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	target *Resp,
+	mods ...aoni.RequestModifier,
+) error {
 	return c.FetchInto[Resp](ctx, http.MethodPost, path, body, target, mods...)
 }
 
 // Put performs a fast HTTP PUT request with payload body and decodes response into *Resp.
-func (c *Client) Put[Resp any](ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (*Resp, error) {
+func (c *Client) Put[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
 	return c.Fetch[Resp](ctx, http.MethodPut, path, body, mods...)
 }
 
 // PutInto performs a fast HTTP PUT request with payload body and decodes response directly into target without allocations.
-func (c *Client) PutInto[Resp any](ctx context.Context, path string, body any, target *Resp, mods ...aoni.RequestModifier) error {
+func (c *Client) PutInto[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	target *Resp,
+	mods ...aoni.RequestModifier,
+) error {
 	return c.FetchInto[Resp](ctx, http.MethodPut, path, body, target, mods...)
 }
 
 // Patch performs a fast HTTP PATCH request with payload body and decodes response into *Resp.
-func (c *Client) Patch[Resp any](ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (*Resp, error) {
+func (c *Client) Patch[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
 	return c.Fetch[Resp](ctx, http.MethodPatch, path, body, mods...)
 }
 
 // PatchInto performs a fast HTTP PATCH request with payload body and decodes response directly into target without allocations.
-func (c *Client) PatchInto[Resp any](ctx context.Context, path string, body any, target *Resp, mods ...aoni.RequestModifier) error {
+func (c *Client) PatchInto[Resp any](
+	ctx context.Context,
+	path string,
+	body any,
+	target *Resp,
+	mods ...aoni.RequestModifier,
+) error {
 	return c.FetchInto[Resp](ctx, http.MethodPatch, path, body, target, mods...)
 }
 
@@ -136,7 +169,12 @@ func (c *Client) Delete[Resp any](ctx context.Context, path string, mods ...aoni
 }
 
 // DeleteInto performs a fast HTTP DELETE request and decodes response directly into target without allocations.
-func (c *Client) DeleteInto[Resp any](ctx context.Context, path string, target *Resp, mods ...aoni.RequestModifier) error {
+func (c *Client) DeleteInto[Resp any](
+	ctx context.Context,
+	path string,
+	target *Resp,
+	mods ...aoni.RequestModifier,
+) error {
 	return c.FetchInto[Resp](ctx, http.MethodDelete, path, nil, target, mods...)
 }
 
@@ -217,6 +255,7 @@ func (c *Client) executeFast(
 			if err != nil {
 				return nil, err
 			}
+
 			bodyMod = mod.WithBodyBytes(data)
 		}
 
@@ -224,6 +263,7 @@ func (c *Client) executeFast(
 			allMods := make([]aoni.RequestModifier, 0, len(mods)+1)
 			allMods = append(allMods, bodyMod)
 			allMods = append(allMods, mods...)
+
 			return c.Request(ctx, method, path, allMods...)
 		}
 	}

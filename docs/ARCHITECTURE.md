@@ -99,23 +99,22 @@ graph TD
 
 ```go
 // Safe by Default: Concise, safe, and fully typed
-users, resp, err := request.GetTo[[]User](ctx, client, "https://api.example.com/users")
+users, err := client.Get[[]User](ctx, "https://api.example.com/users")
 ```
 
-### 2. Power-User Fast Path (`fast.Client` & `fluent.FetchTo`)
+### 2. Power-User Fast Path (`fast.Client`)
 *Engineered for real-time HFT gateways, telemetry ingestion pipelines, and ultra-high-concurrency proxies.*
 
-- **Silicon Line Speed**: Up to **1,870,000+ RPS** on a single workstation with sub-microsecond latency.
+- **Hardware Line Speed**: Up to **2,480,000+ RPS** on a single workstation with sub-microsecond latency.
 - **Zero Allocations**: Eliminates heap churn (`0 B/op, 0 allocs/op`) through object reuse, stack hints, and off-heap memory slabs.
-- **Zero Type Drift**: Uses generic decoding pipelines (`fluent.FetchTo[T]`, `codec.Decode`) without runtime reflection overhead.
+- **Zero Type Drift**: Uses generic decoding pipelines (`fastClient.Get[T]`, `codec.Decode`) without runtime reflection overhead.
 
 ```go
 // Power-User Fast Path: 0 allocations, line speed
-res := fluent.FetchTo[UserResponse](ctx, fastClient, "https://api.example.com/v1/data")
-if res.IsErr() {
-    return res.Err()
+user, err := fastClient.Get[UserResponse](ctx, "https://api.example.com/v1/data")
+if err != nil {
+    return err
 }
-user := res.Value()
 ```
 
 ## 3. Mathematical Proof of Zero-Allocation Pipeline

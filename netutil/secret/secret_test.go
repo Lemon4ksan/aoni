@@ -37,6 +37,7 @@ func TestSecret_Masking(t *testing.T) {
 
 	// JSON Unmarshal
 	var unmarshaled secret.Secret[string]
+
 	err = json.Unmarshal([]byte(`"new-secret"`), &unmarshaled)
 	require.NoError(t, err)
 	assert.Equal(t, "new-secret", unmarshaled.Value())

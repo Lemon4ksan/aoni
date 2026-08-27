@@ -11,7 +11,9 @@ import (
 )
 
 func FuzzParseSettings(f *testing.F) {
-	f.Add(`{"header_table_size":65536,"enable_push":0,"initial_window_size":6291456,"max_header_list_size":262144,"connection_flow":15663105,"priority_weight":255,"priority_exclusive":true}`)
+	f.Add(
+		`{"header_table_size":65536,"enable_push":0,"initial_window_size":6291456,"max_header_list_size":262144,"connection_flow":15663105,"priority_weight":255,"priority_exclusive":true}`,
+	)
 	f.Add(`{"HeaderTableSize":65536,"EnablePush":0}`)
 	f.Add(`{}`)
 	f.Add(`not a json string`)

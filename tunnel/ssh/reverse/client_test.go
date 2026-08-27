@@ -47,6 +47,7 @@ func TestExposeLocal_WithMockServer(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	defer listener.Close()
 
 	forwardReqReceived := make(chan struct{}, 1)
@@ -73,6 +74,7 @@ func TestExposeLocal_WithMockServer(t *testing.T) {
 		for req := range reqs {
 			if req.Type == "tcpip-forward" {
 				_ = req.Reply(true, golangssh.Marshal(struct{ Port uint32 }{Port: 80}))
+
 				select {
 				case forwardReqReceived <- struct{}{}:
 				default:

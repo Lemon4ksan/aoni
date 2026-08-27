@@ -301,6 +301,7 @@ func isFatalError(err error) bool {
 	}
 
 	_, ok := errors.AsType[*x509.UnknownAuthorityError](err)
+
 	return ok
 }
 

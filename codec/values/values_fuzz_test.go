@@ -40,6 +40,7 @@ func FuzzValuesEncode(f *testing.F) {
 		}
 
 		var sb strings.Builder
+
 		_ = values.EncodeQueryString(item, &sb)
 
 		m := map[string]string{

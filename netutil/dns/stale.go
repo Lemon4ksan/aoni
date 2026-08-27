@@ -143,7 +143,11 @@ func (s *StaleResolver) LookupNetIP(ctx context.Context, host string) ([]netip.A
 	return netAddrs, nil
 }
 
-func (s *StaleResolver) lookupWithTimeout(ctx context.Context, host string, timeout time.Duration) ([]net.IPAddr, error) {
+func (s *StaleResolver) lookupWithTimeout(
+	ctx context.Context,
+	host string,
+	timeout time.Duration,
+) ([]net.IPAddr, error) {
 	tCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

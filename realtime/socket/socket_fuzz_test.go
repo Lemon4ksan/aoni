@@ -30,9 +30,11 @@ func FuzzLengthPrefixedFramer(f *testing.F) {
 		})
 
 		r := bytes.NewReader(data)
+
 		fb, err := framer.ReadFrame(r)
 		if err == nil && fb != nil {
 			var w bytes.Buffer
+
 			_ = framer.WriteFrame(&w, fb.Bytes())
 			socket.ReleaseFrameBuffer(fb)
 		}

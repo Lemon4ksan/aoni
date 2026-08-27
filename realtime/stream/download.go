@@ -127,7 +127,13 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 	probeResp, err := t.executeRequest(ctx, http.MethodHead, t.url, 0)
 	if err != nil {
 		// If HEAD is disallowed, fallback to GET probe with Range: bytes=0-0
-		probeResp, err = t.executeRequest(ctx, http.MethodGet, t.url, 0, mod.WithHeader(fheader.Range, fheader.ValueBytes+"=0-0"))
+		probeResp, err = t.executeRequest(
+			ctx,
+			http.MethodGet,
+			t.url,
+			0,
+			mod.WithHeader(fheader.Range, fheader.ValueBytes+"=0-0"),
+		)
 		if err != nil {
 			return err
 		}

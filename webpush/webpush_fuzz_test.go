@@ -16,7 +16,12 @@ import (
 
 func FuzzVAPIDKeys(f *testing.F) {
 	keys, _ := webpush.GenerateVAPIDKeys()
-	f.Add(keys.PrivateKeyBase64(), keys.PublicKeyBase64(), "https://updates.push.services.mozilla.com/wpush/v2/sub", "mailto:admin@example.com")
+	f.Add(
+		keys.PrivateKeyBase64(),
+		keys.PublicKeyBase64(),
+		"https://updates.push.services.mozilla.com/wpush/v2/sub",
+		"mailto:admin@example.com",
+	)
 	f.Add("", "", "", "")
 	f.Add("invalid_priv", "invalid_pub", "not_a_url", "admin")
 

@@ -145,7 +145,10 @@ func prepareGRPCModifiers(
 	)
 
 	if isStreaming {
-		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity))
+		grpcMods = append(
+			grpcMods,
+			mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity),
+		)
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {

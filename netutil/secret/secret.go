@@ -48,6 +48,7 @@ func (s Secret[T]) Format(f fmt.State, verb rune) {
 		_, _ = f.Write([]byte("secret.Secret(******)"))
 		return
 	}
+
 	_, _ = f.Write([]byte("******"))
 }
 

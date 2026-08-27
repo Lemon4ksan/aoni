@@ -11,7 +11,11 @@ import (
 )
 
 func FuzzSanitize(f *testing.F) {
-	f.Add("attachment; filename=\"report.pdf\"; filename*=UTF-8''%e2%82%ac%20rates.pdf", "../../../etc/passwd", "UTF-8''filename.txt")
+	f.Add(
+		"attachment; filename=\"report.pdf\"; filename*=UTF-8''%e2%82%ac%20rates.pdf",
+		"../../../etc/passwd",
+		"UTF-8''filename.txt",
+	)
 	f.Add("form-data; name=\"upload\"; filename=\"COM1.txt\"", "CON", "")
 	f.Add("", "", "")
 

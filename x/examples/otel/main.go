@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/x/otel"
@@ -58,7 +57,7 @@ func main() {
 	defer span.End()
 
 	// 4. Outgoing request will automatically become a child span and inject W3C traceparent header
-	item, resp, err := fluent.FetchTo[ItemResponse](ctx, client, "GET", "/todos/{id}",
+	item, resp, err := client.GetEx[ItemResponse](ctx, "/todos/{id}",
 		mod.WithVar("id", 1),
 	)
 	if err != nil {

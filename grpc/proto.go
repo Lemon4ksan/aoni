@@ -10,9 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -51,6 +50,7 @@ func ProtoGetTo[Resp any](
 	mods ...core.RequestModifier,
 ) (*Resp, error) {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withProtoGetMods(&stackBuf, mods)
 
 	resp, err := doer.Request(ctx, http.MethodGet, path, allMods...)
@@ -76,6 +76,7 @@ func ProtoGetInto[T any](
 	mods ...core.RequestModifier,
 ) error {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withProtoGetMods(&stackBuf, mods)
 
 	resp, err := doer.Request(ctx, http.MethodGet, path, allMods...)
@@ -96,6 +97,7 @@ func ProtoPostTo[Resp any](
 	mods ...core.RequestModifier,
 ) (*Resp, error) {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withProtoPostMods(&stackBuf, msg, mods)
 
 	resp, err := doer.Request(ctx, http.MethodPost, path, allMods...)
@@ -122,6 +124,7 @@ func ProtoPostInto[T any](
 	mods ...core.RequestModifier,
 ) error {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withProtoPostMods(&stackBuf, msg, mods)
 
 	resp, err := doer.Request(ctx, http.MethodPost, path, allMods...)
@@ -142,6 +145,7 @@ func WebPostTo[Resp any](
 	mods ...core.RequestModifier,
 ) (*Resp, error) {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withWebPostMods(&stackBuf, msg, mods)
 
 	resp, err := doer.Request(ctx, http.MethodPost, path, allMods...)
@@ -168,6 +172,7 @@ func WebPostInto[T any](
 	mods ...core.RequestModifier,
 ) error {
 	var stackBuf [stackModCapacity]core.RequestModifier
+
 	allMods := withWebPostMods(&stackBuf, msg, mods)
 
 	resp, err := doer.Request(ctx, http.MethodPost, path, allMods...)
@@ -195,7 +200,11 @@ func withProtoGetMods(
 	}
 
 	allMods := make([]core.RequestModifier, 0, total)
-	allMods = append(allMods, mod.WithHeader(fheader.Accept, fheader.MIMEApplicationProtobuf), mod.WithDecoder(decode.ProtoDecoder))
+	allMods = append(
+		allMods,
+		mod.WithHeader(fheader.Accept, fheader.MIMEApplicationProtobuf),
+		mod.WithDecoder(decode.ProtoDecoder),
+	)
 	allMods = append(allMods, mods...)
 
 	return allMods

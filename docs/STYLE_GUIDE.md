@@ -24,7 +24,7 @@ All current code and future contributions **must** adhere strictly to this guide
 Simple tasks must be simple; complex enterprise tasks must be possible without API friction. A single-line request (`request.GetTo[T]`) executes with zero overhead, while advanced network resilience (Happy Eyeballs v3, uTLS fingerprinting, WAF challenge solving, p0f OS spoofing, SSH/MASQUE tunneling) is selectively enabled via functional options without altering call site contracts.
 
 ### 1.2 Zero-Allocation Mindset in Hot Paths
-Hot execution paths (`fast`, `codec`, `fluent`, `fingerprint`, `internal/pipeline`) must maintain an absolute minimum or zero heap allocation footprint under parallel I/O. Object pooling (`sync.Pool`), slice pre-allocation, buffer re-use, and avoiding reflection in runtime loops are mandatory.
+Hot execution paths (`fast`, `codec`, `fingerprint`, `internal/pipeline`) must maintain an absolute minimum or zero heap allocation footprint under parallel I/O. Object pooling (`sync.Pool`), slice pre-allocation, buffer re-use, and avoiding reflection in runtime loops are mandatory.
 
 ### 1.3 High Readability & Pure Go Transparency
 Performance optimizations must never degrade code legibility. Avoid cryptic micro-hacks, unchecked magic constants, or obscure side effects. Code abstractions must remain clean, self-describing, and maintainable.
@@ -38,7 +38,7 @@ Built on a pure-Go zero-allocation stream-and-codec pipeline architecture, `aoni
 ## 2. Initialization & Memory Allocation Style
 
 ### 2.1 Struct Initialization & Constructors
-- **Constructors (`New...`)**: Exported types with non-zero defaults, internal goroutines, background janitors, or sync pools **must** provide a `New...` factory function (e.g., `aoni.NewClient`, `fluent.New`, `cookie.NewProxyIsolatedJar`). Notice how there's no stutter like in `cookie.NewCookieJar` or `client.NewClient`.
+- **Constructors (`New...`)**: Exported types with non-zero defaults, internal goroutines, background janitors, or sync pools **must** provide a `New...` factory function (e.g., `aoni.NewClient`, `fast.NewClient`, `cookie.NewProxyIsolatedJar`). Notice how there's no stutter like in `cookie.NewCookieJar` or `client.NewClient`.
 - **Struct Literals**: Use field-keyed struct initialization for all complex structs. Unkeyed struct literals are forbidden except for simple 1-2 field internal coordinate pairs or 0-field sentinel types (`type NoResponse struct{}`).
 - **Default Zero Values**: Structs should be designed such that their zero-value is safe and usable whenever possible. If zero-values require hydration, the constructor or initialization guard must handle it lazily.
 
@@ -127,7 +127,7 @@ Go conventions require acronyms to maintain consistent casing (all uppercase or 
 - Multi-method domain interfaces must use clear, descriptive noun phrases (e.g., `Requester`, `CookieStorage`).
 
 ### 3.5 Package Naming
-- Packages must be single-word, lowercase, and self-describing (`option`, `mod`, `request`, `fluent`, `fast`, `grpc`, `cookie`, `codec`, `fingerprint`, `resiliency`, `realtime`, `telemetry`, `tunnel`, `netutil`, `internal`).
+- Packages must be single-word, lowercase, and self-describing (`option`, `mod`, `fast`, `grpc`, `cookie`, `codec`, `fingerprint`, `resiliency`, `realtime`, `telemetry`, `tunnel`, `netutil`, `internal`).
 - Avoid generic package names like `util` or `helpers`. Sub-packages inside `netutil` or `resiliency` must reflect their specific domain (e.g., `netutil/proxy`, `netutil/dns`, `resiliency/circuit`).
 
 ## 4. Package Layout & File Structuring Rules
@@ -139,8 +139,6 @@ aoni/
 ├── client.go, config.go, engine.go    // Core public client & engine contract
 ├── option/                            // Functional Client Options (option.With...)
 ├── mod/                               // Per-Request Modifiers (mod.With...)
-├── request/                           // Generic execution helpers (request.GetTo[T])
-├── fluent/                            // Chainable Request Builder (fluent.FetchTo[T])
 ├── fast/                              // High-throughput fasthttp + H2/H3 engine
 ├── grpc/                              // Native gRPC client & stream invoker
 ├── cookie/                            // Proxy-isolated cookie jars & storage
@@ -232,7 +230,7 @@ func FetchTo[T any](
 - If an operation requires multiple sequential execution stages (e.g., TLS setup -> HTTP/2 frame construction -> header compression), split each stage into a dedicated, unexported helper function.
 
 ### 6.2 Segregation of Hot Paths vs Cold Paths
-- **Hot Paths (`fast/`, `pipeline/`, `codec/`, `fluent/`)**: Must maintain zero allocations. Never allocate temporary closures, use `fmt.Sprintf`, perform runtime reflection, or create un-buffered slices in hot execution routines.
+- **Hot Paths (`fast/`, `pipeline/`, `codec/`)**: Must maintain zero allocations. Never allocate temporary closures, use `fmt.Sprintf`, perform runtime reflection, or create un-buffered slices in hot execution routines.
 - **Cold Paths (`option/`, `NewClient`, `Configure`)**: Configuration and setup functions may perform allocations, slice copying, and parsing to validate options and pre-compute execution configurations.
 
 ### 6.3 Resource Cleanup & Error Handling
@@ -243,7 +241,7 @@ func FetchTo[T any](
 ### 6.4 Error Message Prefix Formatting Standard
 All sentinel errors (`errors.New`) and formatted error strings (`fmt.Errorf`) MUST follow the unified package namespace prefix format:
 - Root package (`aoni`): `"aoni: <description>"`
-- Subpackages (`aoni/<submodule>`): `"aoni/<submodule>: <description>"` (e.g., `"aoni/mod: ..."`, `"aoni/fluent: ..."`, `"aoni/fast: ..."`, `"aoni/values: ..."`, `"aoni/cookie: ..."`, `"aoni/transport: ..."`, `"aoni/grpc: ..."`).
+- Subpackages (`aoni/<submodule>`): `"aoni/<submodule>: <description>"` (e.g., `"aoni/mod: ..."`, `"aoni/fast: ..."`, `"aoni/values: ..."`, `"aoni/cookie: ..."`, `"aoni/transport: ..."`, `"aoni/grpc: ..."`).
 - Never use spaces (`"aoni mod:"` ❌), colons with space (`"aoni transport:"` ❌), or hyphens (`"aoni-codegen:"` ❌) in error prefixes.
 
 ## 7. Public API Design & Ergonomics
@@ -255,8 +253,9 @@ All sentinel errors (`errors.New`) and formatted error strings (`fmt.Errorf`) MU
 
 ### 7.2 Generics-First Unmarshaling Ergonomics
 `aoni` uses Go generics (`[T any]`) to eliminate boilerplate unmarshaling:
-- `request.GetTo[T](ctx, client, url)`
-- `fluent.FetchTo[T](ctx, client, method, path)`
+- `client.Get[T](ctx, path)`
+- `client.Post[T](ctx, path, body)`
+- `client.R().SetResult(&target).Get(path)`
 - `codec.DecodeTo[T](resp, target)`
 
 ### 7.3 Immutability & Thread Safety

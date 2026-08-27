@@ -33,7 +33,9 @@ func (m *mockPreconnector) Preconnect(ctx context.Context, targetURL string) err
 	m.mu.Lock()
 	m.preconnects = append(m.preconnects, targetURL)
 	m.mu.Unlock()
+
 	m.preconnectCh <- targetURL
+
 	return nil
 }
 
@@ -41,7 +43,9 @@ func (m *mockPreconnector) Preresolve(ctx context.Context, host string) error {
 	m.mu.Lock()
 	m.preresolves = append(m.preresolves, host)
 	m.mu.Unlock()
+
 	m.preresolveCh <- host
+
 	return nil
 }
 

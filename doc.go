@@ -29,8 +29,6 @@
 //
 //   - [github.com/lemon4ksan/aoni/option] - Functional client configuration options (e.g. WithProxy, WithTimeout, WithChrome).
 //   - [github.com/lemon4ksan/aoni/mod] - Per-request modifiers (e.g. WithJSONBody, WithHeader, WithQuery).
-//   - [github.com/lemon4ksan/aoni/fluent] - Chainable Request Builder API (e.g. fluent.FetchTo[T]).
-//   - [github.com/lemon4ksan/aoni/request] - Generic single-line execution helpers (e.g. request.GetTo[T]).
 //   - [github.com/lemon4ksan/aoni/fast] - Ultra-high-throughput fasthttp + H2/H3 client facade.
 //   - [github.com/lemon4ksan/aoni/grpc] - Native gRPC client (Invoke, ServerStream, DynamicInvoker).
 //   - [github.com/lemon4ksan/aoni/cookie] - Proxy-isolated cookie jars (ProxyIsolatedJar, SQLStorage, JSONFileStorage).
@@ -55,19 +53,19 @@
 //  1. Single-Line Zero Config (Complete Beginner):
 //     Fetch and decode JSON/XML/Protobuf payloads into a typed struct with zero boilerplate or client setup:
 //
-//     user, err := aoni.GetTo[User](ctx, "https://api.github.com/users/octocat")
+//     user, err := aoni.Get[User](ctx, "https://api.github.com/users/octocat")
 //
 //  2. Production-Grade Stealth Client (Standard App):
 //     Configure TLS browser impersonation, base URLs, timeouts, and proxy rotators:
 //
-//     client := aoni.New(option.WithChrome(), option.WithTimeout(10*time.Second), option.WithBaseURL("https://api.github.com"))
-//     user, err := request.GetTo[User](ctx, client, "/users/123")
+//     client := aoni.NewClient(nil, option.WithChrome(), option.WithTimeout(10*time.Second), option.WithBaseURL("https://api.github.com"))
+//     user, err := client.Get[User](ctx, "/users/123")
 //
-//  3. Extreme RPS Engine (High-Throughput 1.86M+ RPS):
+//  3. Extreme RPS Engine (High-Throughput 2.48M+ RPS):
 //     Use [github.com/lemon4ksan/aoni/fast.Client] for zero-allocation performance:
 //
-//     fastClient := fast.NewClient()
-//     resp, err := fastClient.Get(ctx, "/users/123")
+//     fastClient := fast.NewClient(option.WithBaseURL("https://api.github.com"))
+//     user, err := fastClient.Get[User](ctx, "/users/123")
 //     defer resp.Close()
 //
 // # Error Inspection Suite

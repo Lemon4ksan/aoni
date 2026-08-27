@@ -76,8 +76,10 @@ func (c *Client) Send(ctx context.Context, sub *Subscription, msg *Message) (*ht
 		msg = &Message{}
 	}
 
-	var ciphertext []byte
-	var err error
+	var (
+		ciphertext []byte
+		err        error
+	)
 
 	if len(msg.Payload) > 0 {
 		ciphertext, err = Encrypt(msg.Payload, sub, nil)
@@ -107,6 +109,7 @@ func (c *Client) Send(ctx context.Context, sub *Subscription, msg *Message) (*ht
 	}
 
 	var mods []aoni.RequestModifier
+
 	mods = append(mods,
 		mod.WithHeader(HeaderTTL, strconv.FormatInt(ttlSeconds, 10)),
 		mod.WithHeader(HeaderUrgency, string(urgency)),
@@ -138,18 +141,25 @@ func (c *Client) Send(ctx context.Context, sub *Subscription, msg *Message) (*ht
 	}
 
 	// 201 Created (standard accepted) or 202 Accepted (with receipts) are successful deliveries
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
+	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusAccepted ||
+		resp.StatusCode == http.StatusOK {
 		return resp, nil
 	}
 
 	defer func() { _ = resp.Body.Close() }()
+
 	body, _ := io.ReadAll(resp.Body)
 
 	return resp, fmt.Errorf("%w: status %d: %s", ErrPushRejected, resp.StatusCode, string(body))
 }
 
 // SendJSON marshals payload into JSON and delivers the encrypted WebPush notification.
-func (c *Client) SendJSON(ctx context.Context, sub *Subscription, payload any, opts ...MessageOption) (*http.Response, error) {
+func (c *Client) SendJSON(
+	ctx context.Context,
+	sub *Subscription,
+	payload any,
+	opts ...MessageOption,
+) (*http.Response, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("aoni/webpush: failed to marshal JSON payload: %w", err)

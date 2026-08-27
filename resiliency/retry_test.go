@@ -17,7 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/resiliency"
 )
@@ -52,7 +51,7 @@ func TestRetryBuilder_FullPipeline(t *testing.T) {
 		option.WithRetry(retryBuilder),
 	)
 
-	resp, err := fluent.R(client).Get("/")
+	resp, err := client.R().Get("/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

@@ -96,6 +96,7 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 								switch req.Type {
 								case "exec":
 									var msg struct{ Command string }
+
 									_ = golangssh.Unmarshal(req.Payload, &msg)
 									_ = req.Reply(true, nil)
 
@@ -106,10 +107,12 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 									}
 
 									_, _ = ch.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
+
 									return
 
 								case "subsystem":
 									var msg struct{ Name string }
+
 									_ = golangssh.Unmarshal(req.Payload, &msg)
 									_ = req.Reply(true, nil)
 
@@ -120,6 +123,7 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 											_ = sftpSrv.Close()
 										}
 									}
+
 									return
 
 								default:
@@ -136,6 +140,7 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 
 						go func(ch golangssh.Channel, reqs <-chan *golangssh.Request, extra []byte) {
 							defer ch.Close()
+
 							go golangssh.DiscardRequests(reqs)
 
 							var msg struct {
@@ -144,6 +149,7 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 								LAddr string
 								LPort uint32
 							}
+
 							_ = golangssh.Unmarshal(extra, &msg)
 
 							destConn, err := net.Dial("tcp", net.JoinHostPort(msg.RAddr, string(rune(msg.RPort))))
@@ -153,6 +159,7 @@ func startTestSSHServer(t testing.TB, config *golangssh.ServerConfig) *mockServe
 							defer destConn.Close()
 
 							go func() { _, _ = io.Copy(ch, destConn) }()
+
 							_, _ = io.Copy(destConn, ch)
 						}(ch, requests, newChan.ExtraData())
 
@@ -179,6 +186,7 @@ func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
 			if conn.User() == "e2e_user" && string(password) == "e2e_pass" {
 				return nil, nil
 			}
+
 			return nil, errors.New("invalid password")
 		},
 	}
@@ -196,6 +204,7 @@ func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
+
 	require.NotNil(t, cl)
 	defer cl.Close()
 
@@ -233,6 +242,7 @@ func TestE2E_CA_CertAuthentication(t *testing.T) {
 			if cert, ok := key.(*golangssh.Certificate); ok {
 				return certChecker.Authenticate(conn, cert)
 			}
+
 			return nil, errors.New("auth failed")
 		},
 	}
@@ -247,6 +257,7 @@ func TestE2E_CA_CertAuthentication(t *testing.T) {
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
+
 	defer cl.Close()
 
 	out, err := cl.Run(t.Context(), "check")
@@ -271,6 +282,7 @@ func TestE2E_SFTP_FileTransfers(t *testing.T) {
 		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
+
 	defer cl.Close()
 
 	localDir := t.TempDir()

@@ -12,10 +12,10 @@ import (
 )
 
 type DecodeFuzzTarget struct {
-	ID    int      `json:"id" xml:"id" yaml:"id"`
-	Name  string   `json:"name" xml:"name" yaml:"name"`
-	Tags  []string `json:"tags" xml:"tags>tag" yaml:"tags"`
-	Valid bool     `json:"valid" xml:"valid" yaml:"valid"`
+	ID    int      `json:"id"    xml:"id"       yaml:"id"`
+	Name  string   `json:"name"  xml:"name"     yaml:"name"`
+	Tags  []string `json:"tags"  xml:"tags>tag" yaml:"tags"`
+	Valid bool     `json:"valid" xml:"valid"    yaml:"valid"`
 }
 
 func FuzzDecoders(f *testing.F) {
@@ -27,6 +27,7 @@ func FuzzDecoders(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte, contentType string) {
 		var target DecodeFuzzTarget
+
 		_ = decode.Payload(contentType, data, &target)
 
 		r := bytes.NewReader(data)

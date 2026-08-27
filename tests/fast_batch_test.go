@@ -16,8 +16,8 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
@@ -121,7 +121,7 @@ func TestFluent_BatchGetTo(t *testing.T) {
 		paths[i] = fmt.Sprintf("%s/item?id=%d", ts.URL, i)
 	}
 
-	items, err := fluent.BatchGetTo[Item](context.Background(), nil, paths)
+	items, err := aoni.BatchGetTo[Item](context.Background(), nil, paths)
 	require.NoError(t, err)
 	require.Len(t, items, 10)
 	for i := range 10 {
@@ -244,14 +244,14 @@ func BenchmarkFluent_BatchGetTo50(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		items, err := fluent.BatchGetTo[Item](context.Background(), nil, paths)
+		items, err := aoni.BatchGetTo[Item](context.Background(), nil, paths)
 		if err != nil || len(items) != 50 {
 			b.Fatalf("batch error: %v", err)
 		}
 	}
 }
 
-func BenchmarkFluent_SerialGetTo50(b *testing.B) {
+func BenchmarkAoni_SerialGetTo50(b *testing.B) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":100,"active":true}`))
@@ -270,10 +270,7 @@ func BenchmarkFluent_SerialGetTo50(b *testing.B) {
 
 	for b.Loop() {
 		for range 50 {
-			_, resp, err := fluent.GetTo[Item](context.Background(), nil, url)
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
+			_, err := aoni.GetTo[Item](context.Background(), url)
 			if err != nil {
 				b.Fatalf("serial error: %v", err)
 			}

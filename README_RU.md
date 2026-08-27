@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -54,15 +53,15 @@ type User struct {
 func main() {
 	ctx := context.Background()
 
-	// Инициализация переиспользуемого клиента с Chromium-устойчивостью
+	// 1. Инициализация переиспользуемого клиента с TLS-отпечатками браузера
 	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://api.example.com"),
 		option.WithTimeout(10*time.Second),
 		option.WithChrome(), // Побитовая эмуляция Chrome uTLS, ECH, JA4 и HTTP/2 фрейминга
 	)
 
-	// Получение типизированного ответа напрямую в структуру (0 B/op на горячем пути)
-	user, resp, err := fluent.FetchTo[User](ctx, client, "GET", "/users/{id}",
+	// 2. Прямой типизированный GET-запрос (0 B/op на горячем пути)
+	user, err := client.Get[User](ctx, "/users/{id}",
 		mod.WithVar("id", 42),
 		mod.WithHeader("Accept", "application/json"),
 	)
@@ -70,8 +69,80 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Пользователь: %s (ID: %d), HTTP Статус: %d\n", user.Name, user.ID, resp.StatusCode)
+	fmt.Printf("Пользователь: %s (ID: %d)\n", user.Name, user.ID)
 }
+```
+
+## Работа с клиентом и сценарии использования
+
+`aoni` предоставляет удобные и гибкие способы выполнения запросов для любых задач:
+
+### 1. Прямые generic-методы (`client.Get[T]`, `client.Post[T]` и др.)
+Самый лаконичный и идиоматичный способ работы. Тело запроса и ответ сериализуются/десериализуются автоматически без оверхеда на рефлексию:
+
+```go
+// GET-запрос с автоматическим декодированием ответа в *User
+user, err := client.Get[User](ctx, "/users/42")
+
+// POST с передачей структуры в теле (JSON)
+created, err := client.Post[User](ctx, "/users", User{Name: "Alice"})
+
+// PUT, PATCH, DELETE
+updated, err := client.Put[User](ctx, "/users/42", User{Name: "Alice Cooper"})
+deleted, err := client.Delete[User](ctx, "/users/42")
+
+// Произвольный HTTP-метод
+res, err := client.Fetch[User](ctx, "CUSTOM", "/endpoint", payload)
+```
+
+### 2. Доступ к сырому ответу и Zero-Allocation биндинг
+Когда требуется получить статус ответа, HTTP-заголовки или переиспользовать уже выделенную структуру памяти:
+
+```go
+// GetEx возвращает типизированный результат и сырой *http.Response
+user, resp, err := client.GetEx[User](ctx, "/users/42")
+fmt.Printf("Статус: %d, Сервер: %s\n", resp.StatusCode, resp.Header.Get("Server"))
+
+// GetInto десериализует ответ напрямую в существующую структуру (0 аллокаций)
+var existing User
+err := client.GetInto(ctx, "/users/42", &existing)
+```
+
+### 3. Цепочный Request Builder (`client.R()`)
+Для составных запросов с динамическими path-переменными, query-параметрами, заголовками или form-data:
+
+```go
+var user User
+
+resp, err := client.R().
+	SetContext(ctx).
+	SetPathParam("userId", "42").
+	SetQueryParam("fields", "id,name,email").
+	SetHeader("X-Trace-ID", "trace-12345").
+	SetBody(map[string]any{"active": true}).
+	SetResult(&user).
+	Post("/users/{userId}/update")
+```
+
+### 4. Вызовы верхнего уровня без настройки (`aoni.Get[T]`, `aoni.Post[T]`)
+Для простых скриптов, утилит и тестов без создания отдельного экземпляра клиента:
+
+```go
+user, err := aoni.Get[User](ctx, "https://api.example.com/users/42")
+```
+
+### 5. Движок экстремальной производительности (`fast.Client`)
+Для высоконагруженных бэкендов и скрейперов, требующих миллионы запросов в секунду без аллокаций:
+
+```go
+import "github.com/lemon4ksan/aoni/fast"
+
+fastClient := fast.NewClient(
+	option.WithBaseURL("https://api.example.com"),
+	option.WithChrome(),
+)
+
+user, err := fastClient.Get[User](ctx, "/users/42")
 ```
 
 ## ⚡ Сравнение производительности: Aoni против традиционных клиентов
@@ -86,35 +157,35 @@ func main() {
 | `net/http` (Stdlib) | 165 000 | 78 allocs/op | 6 800 B/op | ⚠️ (Только H2) | ✗ | ✗ |
 | `go-resty/resty` | 142 000 | 86 allocs/op | 8 940 B/op | ✗ | ✗ | ✗ |
 
-## Ключевые архитектурные столпы
+## Ключевые архитектурные принципы
 
-### 1. Вечный публичный контракт и адаптивный кремниевый реактор
-> _«Код, написанный для **aoni v1.0.0**, гарантированно скомпилируется и будет работать без единого изменения на любой версии **v1.x** через 5, 10 и 20 лет.»_
+### 1. Долговечный публичный API и транспортная архитектура
+> _«Код, написанный для **aoni v1.0.0**, гарантированно скомпилируется и будет работать без изменений на любой версии **v1.x** через 5, 10 и 20 лет.»_
 
-* **Неизменяемый публичный интерфейс (Public API):** Семантические абстракции RFC 9110 (`fluent.FetchTo[T]`, `option.With...`, `mod.With...`) заморожены навсегда. Бизнес-логика полностью изолирована от смены сетевых протоколов.
-* **Адаптивный кремниевый реактор (Internal Engine):** Под капотом `aoni` прозрачно переключает и обновляет протоколы (HTTP/1.1 $\leftrightarrow$ HTTP/2 $\leftrightarrow$ HTTP/3 $\leftrightarrow$ Постквантовый Kyber/ML-KEM TLS, MASQUE) и оптимизирует память без ломающих изменений.
-* **Изоляция экспериментов в `aoni/x/...`:** Все сторонние адаптеры и протокольные эксперименты (Socket.IO v5, GeoIP MMDB) живут строго в изолированных субмодулях.
+* **Стабильный публичный интерфейс (Public API):** Стандартные абстракции RFC 9110 (`client.Get[T]`, `client.Post[T]`, `client.R()`, `option.With...`, `mod.With...`) зафиксированы. Бизнес-логика приложений полностью изолирована от изменений низкоуровневых протоколов.
+* **Внутренний транспортный движок:** Прозрачно управляет конкурентным установлением соединений (Happy Eyeballs), выбором протоколов (HTTP/1.1 $\leftrightarrow$ HTTP/2 $\leftrightarrow$ HTTP/3 $\leftrightarrow$ Post-Quantum ML-KEM TLS, MASQUE) и пулом буферов без аллокаций.
+* **Расширения в `aoni/x/...`:** Сторонние интеграции и протокольные адаптеры (Socket.IO v5, GeoIP MMDB) вынесены в отдельные изолированные субмодули.
 
-### 2. Парадокс безопасности Zero-Copy: Решено для Go
-В традиционном Go пулинг памяти без аллокаций за пределами простых функций опасен: переданный в фоновую горутину заимствованный слайс приводит к Data Race и повреждению памяти (Use-After-Free).
+### 2. Безопасность при работе с памятью (Zero-Copy)
+При высоконагруженной сетевой обработке в Go повторное использование буферов без аллокаций за пределами локальных функций часто приводит к race condition и повреждению памяти (use-after-free), если заимствованные срезы случайно утекают в фоновые горутины.
 
-В `aoni` пути выполнения zero-copy объединены со статическим верификатором **`vortex check` / `vortex lint`** на базе графов потока управления (CFG), Escape Analysis и логики разделения памяти ($P * Q$):
-* **Предотвращение утечек (`B001`):** Формально проверяет, что заимствованные буферы (`borrow.Bytes`, scoped headers) никогда не утекают в несинхронизированные горутины.
-* **Непересекающиеся интервалы (`B003`):** Доказывает отсутствие пересечений при мутациях слайсов на этапе компиляции.
-* **Автоматы жизненного цикла типов (`B011`):** Гарантирует линейный прогресс ресурсов ($\text{Acquired} \to \text{Frozen} \to \text{Released}$) — исключая double-free и use-after-free.
+В `aoni` пути zero-copy защищены статическим верификатором **`vortex check` / `vortex lint`**, использующим анализ графов потока управления (CFG), Escape Analysis и логику разделения памяти ($P * Q$):
+* **Предотвращение утечек (`B001`):** Проверяет, что заимствованные буферы (`borrow.Bytes`, scoped headers) не передаются в несинхронизированные фоновые горутины.
+* **Непересекающиеся интервалы (`B003`):** На этапе компиляции доказывает корректность непересекающихся модификаций срезов.
+* **Контроль жизненного цикла (`B011`):** Обеспечивает линейную смену состояний ресурсов ($\text{Acquired} \to \text{Frozen} \to \text{Released}$), предотвращая повторное освобождение памяти и use-after-free.
 
 ```bash
-# Проверка инвариантов безопасности памяти zero-copy в CI/CD:
+# Проверка инвариантов безопасности памяти в CI/CD:
 vortex check --strict ./...
 ```
 
-### 3. Кремниевая симпатия: Как Aoni достигает 2.34M+ RPS
-1. **Реактор без блокировок (`pool.PerPStorage`)**: Локальные для ядер CPU кольцевые буферы исключают конкуренцию за мьютексы даже при насыщении 128+ ядер.
-2. **Off-Heap Slab-арены (`offheap.SlabAllocator`)**: Служебные структуры фрейминга протоколов размещаются вне кучи Go, снижая оверхед сборщика мусора (GC) до **0.00%**.
-3. **Паддинг кэш-линий 64 байта (`_ cpu.CacheLinePad`)**: Выравнивание атомиков по границам L1/L2 кэша процессора исключает штрафы False Sharing.
-4. **Векторный SIMD-поиск заголовков и плоские LUT-таблицы**: Поиск разделителей `\r\n` выполняется 64-битными SWAR / AVX2 инструкциями со скоростью **~9 ГБ/с**.
-5. **vDSO Bypass таймстемпов**: Получение системного времени за **0.28 нс** (в 11.2 раз быстрее `time.Now()`).
-6. **Нативный Linux `io_uring` Kernel Bypass (`netutil/iouring`)**: Разделяемые кольцевые буферы SQ/CQ в памяти `mmap` без системных вызовов со скоростью линии.
+### 3. Оптимизация работы с CPU и памятью
+1. **Буферы без блокировок (`pool.PerPStorage`)**: Локальные для ядер CPU буферы исключают конкуренцию за мьютексы и каналы даже при высокой нагрузке на десятках ядер.
+2. **Off-Heap Slab-аллокатор (`offheap.SlabAllocator`)**: Служебные структуры фрейминга протоколов размещаются вне кучи Go, снижая оверхед сборщика мусора (GC) во время пикового трафика.
+3. **Выравнивание кэш-линий 64 байта (`_ cpu.CacheLinePad`)**: Выравнивание структур по границам L1/L2 кэша процессора исключает эффекты False Sharing в многопоточных сокетных циклах.
+4. **Векторный SIMD-поиск и таблицы подстановки (LUT)**: Поиск разделителей `\r\n` использует AVX2 / SWAR инструкции и прямые таблицы (~9 ГБ/с).
+5. **Оптимизированные монотонные часы**: Высокоточное получение меток времени без лишних системных вызовов на горячем пути (0.28 нс за тик).
+6. **Поддержка Linux `io_uring` (`netutil/iouring`)**: Прямые очереди отправки (SQ) и завершения (CQ) в разделяемой памяти для максимальной пропускной способности ввода-вывода.
 
 ## Декларативный AST-тулчейн Vortex
 
@@ -160,7 +231,7 @@ vortex check --strict ./...
 
 ```go
 // Прямой вызов gRPC-Web с 5-байтным фреймингом и валидацией трейлеров
-userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/UserService/GetUser", &pb.UserRequest{
+userResp, resp, err := aoni.PostGRPCWebTo[pb.UserResponse](ctx, client, "/UserService/GetUser", &pb.UserRequest{
 	UserId: 42,
 })
 ```
@@ -233,7 +304,7 @@ client := aoni.NewClient(nil,
 <details>
 <summary><b>Детальные микробенчмарки подсистем (Нажмите, чтобы развернуть)</b></summary>
 
-### 1. Микробенчмарки подсистем Foundation (Zero-Alloc сантехника)
+### 1. Микробенчмарки подсистем
 
 | Подсистема / Примитив | Базовая реализация Go / `x/...` | Движок `foundation` | Дельта задержки | Аллокации в куче (`B / alloc`) |
 | :--- | :---: | :---: | :---: | :---: |
@@ -246,8 +317,8 @@ client := aoni.NewClient(nil,
 | **Ограничитель Token Bucket** | 85+ нс (`x/time`) | **23.8 нс** (`async/rate`) | **В 3.6 раза быстрее** | **0 B / 0 allocs** |
 | **SWAR UTF-8 сканирование (1KB)** | 280+ нс (`bytes.Index`) | **5.88 нс** (`silicon/simd`) | **Пропускная 12.4 ГБ/с** | **0 B / 0 allocs** (64-битный вектор SWAR) |
 | **SWAR `\r\n` сканирование (1KB)** | 280+ нс (`bytes.Index`) | **114.4 нс** (`silicon/simd`) | **В 2.5 раза быстрее (~9 ГБ/с)** | **0 B / 0 allocs** |
-| **Zstd декомпрессия (1KB)** | 1.8+ мкс (`klauspost/zstd`) | **251.6 нс / 0 B** (`compress/zstd`) | **В 7.2 раза быстрее (~4.0M ops/s)** | **0 B / 0 allocs** |
-| **Brotli декомпрессия (1KB)** | 2.1+ мкс (`google/brotli`) | **282.6 нс / 0 B** (`compress/brotli`) | **В 7.4 раза быстрее (~3.5M ops/s)** | **0 B / 0 allocs** |
+| **Zstd декомпрессия (1KB)** | 1.8+ мкс (`klauspost/zstd`) | **251.6 нс / 0 B** (`compress/zstd`) | **В 7.2 раза быстрее (~4.0M ops/s)** | **0 B / 0 allocs** (Прямой парсинг потока) |
+| **Brotli декомпрессия (1KB)** | 2.1+ мкс (`google/brotli`) | **282.6 нс / 0 B** (`compress/brotli`) | **В 7.4 раза быстрее (~3.5M ops/s)** | **0 B / 0 allocs** (Пул буферов Per-P) |
 | **Пропускная способность WebSocket** | 800 МБ/с (`gorilla/websocket`) | **1 789 МБ/с** (`realtime/ws`) | **В 2.23 раза быстрее** | **0 B / 0 allocs** (`writev` / `net.Buffers`) |
 
 ### 2. Векторизация Gollvm (LLVM 20.1.8 -O3)
@@ -302,9 +373,7 @@ client := aoni.NewClient(nil,
 aoni/
 ├── option/       // Опции инициализации клиента (option.With...)
 ├── mod/          // Модификаторы запросов (mod.With...)
-├── request/      // Generic-хелперы (request.GetTo[T], PostTo, PostProtoTo)
 ├── fast/         // Движок высокой производительности на базе fasthttp
-├── fluent/       // Цепочный Builder API (fluent.R, FetchTo[T], Codec)
 ├── tunnel/       // L3/L4 туннелирование: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Прокси-изолированные куки, формат Netscape, сортировка по RFC 6265
 ├── fingerprint/  // Обход TLS/JA4/p0f отпечатков, кадры HTTP/2, CDN-паддинг
@@ -329,7 +398,7 @@ aoni/
 - [**Руководство по Vortex**](docs/VORTEX_RU.md): Декларативный синтаксис AST, OpenAPI/AsyncAPI парсинг, in-memory моки и CI/CD интеграция.
 - [**Спецификация Vortex DSL и архитектуры**](docs/SPEC.md): Формальная EBNF-грамматика, 3-стадийный конвейер оптимизации и правила статического линтера.
 - [**Спецификация сетевого стека**](docs/NETWORK_STACK_RU.md): Подробный обзор Happy Eyeballs v3, авто-восстановления HTTP 421/408/425, ECH и механики пулов.
-- [**Спецификация аппаратной оптимизации**](docs/CPU_STACK.md): Детали PLAN9 AVX2 SIMD ассемблера (`simd_amd64.s`), 2MB LargePages slab-арены и бюджеты инструкций.
+- [**Руководство по оптимизации CPU и памяти**](docs/CPU_STACK.md): Архитектурные детали PLAN9 AVX2 SIMD ассемблера (`simd_amd64.s`), 2MB LargePages slab-арен и бюджетов инструкций.
 - [**Разбор нетривиальных решений**](docs/VOODOO_RU.md): Управление состоянием HPACK, тюнинг TCP-окон через системные вызовы и фрейминг пакетов.
 - [**Книга рецептов (Cookbook)**](docs/COOKBOOK_RU.md): Практические рецепты для REST, WebSockets, gRPC-Web и стриминга.
 - [**Примеры кода**](examples): Готовые примеры для REST, WebSockets, gRPC-Web и обхода систем защиты.

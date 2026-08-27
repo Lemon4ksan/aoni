@@ -36,18 +36,25 @@ func (rawDecoder) Decode(r io.Reader, target any) error {
 		if err != nil {
 			return &Error{Format: "raw", Target: refkit.FullTypeName(target), Err: err}
 		}
+
 		*outPtr = rawBytes
+
 		return nil
+
 	case **[]byte:
 		rawBytes, err := ReadAllSafe(r)
 		if err != nil {
 			return &Error{Format: "raw", Target: refkit.FullTypeName(target), Err: err}
 		}
+
 		if *outPtr == nil {
 			*outPtr = new([]byte)
 		}
+
 		**outPtr = rawBytes
+
 		return nil
+
 	default:
 		return &Error{Format: "raw", Target: refkit.FullTypeName(target), Err: ErrInvalidRawTarget}
 	}

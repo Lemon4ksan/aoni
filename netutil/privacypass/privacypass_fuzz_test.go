@@ -27,6 +27,7 @@ func FuzzUnmarshalTokenChallenge(f *testing.F) {
 		if err == nil && ch != nil {
 			_ = privacypass.ValidateChallenge("issuer.example.com", ch)
 			_ = privacypass.ComputeChallengeDigest(ch)
+
 			encoded := privacypass.MarshalTokenChallenge(ch)
 			if len(encoded) == 0 {
 				t.Fatalf("expected non-empty marshaled challenge")
@@ -57,7 +58,9 @@ func FuzzUnmarshalToken(f *testing.F) {
 }
 
 func FuzzParseWWWAuthenticate(f *testing.F) {
-	f.Add(`PrivateToken challenge="AQIABWlzc3VlcgAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABm9yaWdpbg==", token-key="AQIDBA==", max-age=3600`)
+	f.Add(
+		`PrivateToken challenge="AQIABWlzc3VlcgAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABm9yaWdpbg==", token-key="AQIDBA==", max-age=3600`,
+	)
 	f.Add(`PrivateToken challenge="invalid_b64", realm="api"`)
 	f.Add(`Bearer realm="oauth", PrivateToken challenge=""`)
 	f.Add("")

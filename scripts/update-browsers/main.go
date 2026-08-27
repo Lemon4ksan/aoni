@@ -38,9 +38,11 @@ type versionInfo struct {
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "dry run (do not write changes)")
+
 	flag.Parse()
 
 	fmt.Println("=== Fetching Latest Browser Versions ===")
+
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	info := fetchVersions(client)
@@ -53,20 +55,20 @@ func main() {
 	fmt.Printf("Latest Chrome Android: %s\n", info.chromeAndroid)
 	fmt.Printf("Latest Chrome iOS:     %s\n", info.chromeIOS)
 	fmt.Printf("Latest Firefox:        %s (Major/Minor: %s)\n", info.firefox, info.firefoxMajor)
+
 	if info.ios != "" {
 		fmt.Printf("Latest iOS:            %s\n", info.ios)
 	}
+
 	if info.android != "" {
 		fmt.Printf("Latest Android:        %s\n", info.android)
 	}
+
 	fmt.Println()
 
-	updated := false
+	updated := updateChrome(info, *dryRun)
 
 	// 1. Update Chrome
-	if updateChrome(info, *dryRun) {
-		updated = true
-	}
 
 	// 2. Update Firefox
 	if updateFirefox(info, *dryRun) {
@@ -87,13 +89,16 @@ func main() {
 
 	if updated {
 		fmt.Println("\n=== Verifying Profiles & Tests ===")
+
 		cmd := exec.Command("go", "test", "./fingerprint/profiles/...")
 		cmd.Stdout = os.Stdout
+
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: profile tests failed: %v\n", err)
 			os.Exit(1)
 		}
+
 		fmt.Println("✓ All profile tests passed successfully!")
 	} else {
 		fmt.Println("All browser profiles are already up to date.")
@@ -106,7 +111,7 @@ func writeGitHubOutput(info versionInfo, updated bool) {
 		return
 	}
 
-	f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
@@ -127,6 +132,7 @@ func fetchVersions(client *http.Client) versionInfo {
 
 	info.chromeWin = fetchChrome(client, "Windows")
 	info.chromeAndroid = fetchChrome(client, "Android")
+
 	info.chromeIOS = fetchChrome(client, "iOS")
 	if info.chromeWin != "" {
 		parts := strings.Split(info.chromeWin, ".")
@@ -155,10 +161,12 @@ func fetchVersions(client *http.Client) versionInfo {
 
 func fetchChrome(client *http.Client, platform string) string {
 	url := fmt.Sprintf("https://chromiumdash.appspot.com/fetch_releases?platform=%s&channel=Stable&num=1", platform)
+
 	req, err := http.NewRequest(fheader.MethodGet, url, nil) //nolint:noctx
 	if err != nil {
 		return ""
 	}
+
 	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
@@ -173,6 +181,7 @@ func fetchChrome(client *http.Client, platform string) string {
 	if err := json.NewDecoder(resp.Body).Decode(&releases); err == nil && len(releases) > 0 {
 		return releases[0].Version
 	}
+
 	return ""
 }
 
@@ -189,6 +198,7 @@ func fetchFirefox(client *http.Client) string {
 	if err := json.NewDecoder(resp.Body).Decode(&ff); err == nil {
 		return ff.Latest
 	}
+
 	return ""
 }
 
@@ -197,6 +207,7 @@ func fetchIOS(client *http.Client) string {
 	if err != nil {
 		return ""
 	}
+
 	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
@@ -218,14 +229,20 @@ func fetchIOS(client *http.Client) string {
 			}
 		}
 	}
+
 	return ""
 }
 
 func fetchAndroid(client *http.Client) string {
-	req, err := http.NewRequest(fheader.MethodGet, "https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims", nil) //nolint:noctx
+	req, err := http.NewRequest(
+		fheader.MethodGet,
+		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
+		nil,
+	) //nolint:noctx
 	if err != nil {
 		return ""
 	}
+
 	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
@@ -258,6 +275,7 @@ func fetchAndroid(client *http.Client) string {
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -266,20 +284,27 @@ func updateChrome(info versionInfo, dryRun bool) bool {
 	if err != nil {
 		return false
 	}
+
 	content := string(contentBytes)
 	original := content
 
 	// Extract current major
 	reSec := regexp.MustCompile(`"Google Chrome";v="(\d+)"`)
+
 	m := reSec.FindStringSubmatch(content)
 	if len(m) < 2 {
 		return false
 	}
+
 	currMajor := m[1]
 
 	if currMajor != info.chromeMajor {
 		fmt.Printf("Updating Chrome: %s -> %s\n", currMajor, info.chromeMajor)
-		content = strings.ReplaceAll(content, `"Google Chrome";v="`+currMajor+`"`, `"Google Chrome";v="`+info.chromeMajor+`"`)
+		content = strings.ReplaceAll(
+			content,
+			`"Google Chrome";v="`+currMajor+`"`,
+			`"Google Chrome";v="`+info.chromeMajor+`"`,
+		)
 		content = strings.ReplaceAll(content, `"Chromium";v="`+currMajor+`"`, `"Chromium";v="`+info.chromeMajor+`"`)
 		content = strings.ReplaceAll(content, `Chrome/`+currMajor+`.0.0.0`, `Chrome/`+info.chromeMajor+`.0.0.0`)
 	}
@@ -298,13 +323,15 @@ func updateChrome(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(chromeFile, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(chromeFile, []byte(content), 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", chromeFile, err)
 				return false
 			}
 		}
+
 		return true
 	}
+
 	return false
 }
 
@@ -313,11 +340,13 @@ func updateFirefox(info versionInfo, dryRun bool) bool {
 	if err != nil {
 		return false
 	}
+
 	content := string(contentBytes)
 	original := content
 
 	// Update rv: and Firefox/
 	reFF := regexp.MustCompile(`Firefox/(\d+\.\d+)`)
+
 	m := reFF.FindStringSubmatch(content)
 	if len(m) >= 2 {
 		currFF := m[1]
@@ -337,13 +366,15 @@ func updateFirefox(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(firefoxFile, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(firefoxFile, []byte(content), 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", firefoxFile, err)
 				return false
 			}
 		}
+
 		return true
 	}
+
 	return false
 }
 
@@ -352,6 +383,7 @@ func updateSafari(info versionInfo, dryRun bool) bool {
 	if err != nil {
 		return false
 	}
+
 	content := string(contentBytes)
 	original := content
 
@@ -366,12 +398,14 @@ func updateSafari(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(safariFile, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(safariFile, []byte(content), 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", safariFile, err)
 				return false
 			}
 		}
+
 		return true
 	}
+
 	return false
 }

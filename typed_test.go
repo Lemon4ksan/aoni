@@ -11,10 +11,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"google.golang.org/protobuf/types/known/wrapperspb"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/grpc"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type UserDTO struct {
@@ -33,6 +34,7 @@ func TestClientTypedGet(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", r.Method)
 		}
+
 		if r.URL.Path != "/users/42" {
 			t.Fatalf("expected /users/42, got %s", r.URL.Path)
 		}
@@ -45,6 +47,7 @@ func TestClientTypedGet(t *testing.T) {
 	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
 
 	ctx := context.Background()
+
 	user, err := client.Get[UserDTO](ctx, "/users/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -65,6 +68,7 @@ func TestClientTypedGetInto(t *testing.T) {
 	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
 
 	var user UserDTO
+
 	err := client.GetInto(context.Background(), "/users/99", &user)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -80,6 +84,7 @@ func TestClientTypedPost(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
 		}
+
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Fatalf("expected Content-Type application/json, got %s", r.Header.Get("Content-Type"))
 		}
@@ -97,6 +102,7 @@ func TestClientTypedPost(t *testing.T) {
 	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
 
 	reqPayload := CreateUserRequest{Name: "Eli", Email: "eli@blackmesa.gov"}
+
 	user, err := client.Post[UserDTO](context.Background(), "/users", reqPayload)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -110,6 +116,7 @@ func TestClientTypedPost(t *testing.T) {
 func TestClientTypedPutPatchDelete(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
 		switch r.Method {
 		case http.MethodPut:
 			_ = json.NewEncoder(w).Encode(UserDTO{ID: 1, Name: "Barney Put"})
@@ -165,9 +172,11 @@ func TestClientTypedEx(t *testing.T) {
 	if rawResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created, got %d", rawResp.StatusCode)
 	}
+
 	if rawResp.Header.Get("X-Custom-Header") != "aoni-v1" {
 		t.Fatalf("expected X-Custom-Header header, got %s", rawResp.Header.Get("X-Custom-Header"))
 	}
+
 	if user.ID != 7 || user.Name != "Seven" {
 		t.Fatalf("unexpected user: %+v", user)
 	}
@@ -200,6 +209,7 @@ func TestClientGRPC(t *testing.T) {
 		}
 
 		resMsg := wrapperspb.String("Hello from native gRPC over aoni!")
+
 		frameBytes, err := grpc.MarshalFrame(resMsg, false)
 		if err != nil {
 			t.Fatalf("failed to marshal gRPC frame: %v", err)
@@ -214,6 +224,7 @@ func TestClientGRPC(t *testing.T) {
 	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
 
 	reqMsg := wrapperspb.String("Ping")
+
 	res, err := client.GRPC().Invoke[wrapperspb.StringValue](
 		context.Background(),
 		"/test.TestService/Ping",

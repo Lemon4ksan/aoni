@@ -79,19 +79,24 @@ var targets = []fuzzTarget{
 
 func main() {
 	fuzzDuration := flag.String("fuzztime", "5s", "duration to fuzz each target")
+
 	flag.Parse()
 
 	fmt.Printf("=== Starting Heavy Fuzzing Suite (%d targets, %s each) ===\n\n", len(targets), *fuzzDuration)
 
 	var failed []string
+
 	startTotal := time.Now()
 
 	for i, tgt := range targets {
 		fmt.Printf("[%2d/%2d] Fuzzing %s :: %s (fuzztime=%s) ... ", i+1, len(targets), tgt.pkg, tgt.name, *fuzzDuration)
+
 		start := time.Now()
 
 		cmd := exec.Command("go", "test", "-fuzz=^"+tgt.name+"$", "-fuzztime="+*fuzzDuration, tgt.pkg)
+
 		var outBuf bytes.Buffer
+
 		cmd.Stdout = &outBuf
 		cmd.Stderr = &outBuf
 
@@ -103,6 +108,7 @@ func main() {
 			fmt.Println("----------------- OUTPUT -----------------")
 			fmt.Println(strings.TrimSpace(outBuf.String()))
 			fmt.Println("------------------------------------------")
+
 			failed = append(failed, fmt.Sprintf("%s :: %s", tgt.pkg, tgt.name))
 		} else {
 			fmt.Printf("PASSED (%s)\n", elapsed)
@@ -114,9 +120,11 @@ func main() {
 
 	if len(failed) > 0 {
 		fmt.Printf("FAILURES (%d targets failed):\n", len(failed))
+
 		for _, f := range failed {
 			fmt.Printf("  - %s\n", f)
 		}
+
 		os.Exit(1)
 	}
 

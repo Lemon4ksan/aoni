@@ -74,6 +74,7 @@ func fetchIOSVersion(client *http.Client) string {
 	if err != nil {
 		return ""
 	}
+
 	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
@@ -112,10 +113,15 @@ type wikiResponse struct {
 }
 
 func fetchAndroidVersion(client *http.Client) string {
-	req, err := http.NewRequest(fheader.MethodGet, "https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims", nil) //nolint:noctx
+	req, err := http.NewRequest(
+		fheader.MethodGet,
+		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
+		nil,
+	) //nolint:noctx
 	if err != nil {
 		return ""
 	}
+
 	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)

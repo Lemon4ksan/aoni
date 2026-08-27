@@ -6,6 +6,7 @@ package iouring_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"runtime"
@@ -21,12 +22,12 @@ func TestIOUring_NonLinuxFallback(t *testing.T) {
 	}
 
 	_, err := iouring.New(32)
-	if err != iouring.ErrIOUringUnsupported {
+	if !errors.Is(err, iouring.ErrIOUringUnsupported) {
 		t.Fatalf("expected ErrIOUringUnsupported on %s, got %v", runtime.GOOS, err)
 	}
 
 	_, err = iouring.DialIOUring(context.Background(), "tcp", "127.0.0.1:80")
-	if err != iouring.ErrIOUringUnsupported {
+	if !errors.Is(err, iouring.ErrIOUringUnsupported) {
 		t.Fatalf("expected ErrIOUringUnsupported on %s, got %v", runtime.GOOS, err)
 	}
 }
@@ -55,6 +56,7 @@ func TestIOUring_EchoServer_Linux(t *testing.T) {
 			if err != nil {
 				return
 			}
+
 			_, _ = conn.Write(buf[:n])
 		}
 	}()
@@ -69,12 +71,14 @@ func TestIOUring_EchoServer_Linux(t *testing.T) {
 	defer conn.Close()
 
 	payload := []byte("HELLO_IO_URING_SILICON_SPEED")
+
 	n, err := conn.Write(payload)
 	if err != nil || n != len(payload) {
 		t.Fatalf("write failed: %v (wrote %d)", err, n)
 	}
 
 	readBuf := make([]byte, len(payload))
+
 	n, err = io.ReadFull(conn, readBuf)
 	if err != nil || n != len(payload) {
 		t.Fatalf("read failed: %v (read %d)", err, n)
@@ -102,14 +106,17 @@ func BenchmarkIOUring_ReadWrite_64B(b *testing.B) {
 			if err != nil {
 				return
 			}
+
 			go func(c net.Conn) {
 				defer c.Close()
+
 				buf := make([]byte, 4096)
 				for {
 					n, err := c.Read(buf)
 					if err != nil {
 						return
 					}
+
 					_, _ = c.Write(buf[:n])
 				}
 			}(conn)
@@ -134,6 +141,7 @@ func BenchmarkIOUring_ReadWrite_64B(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		_, err = io.ReadFull(conn, readBuf)
 		if err != nil {
 			b.Fatal(err)
@@ -158,14 +166,17 @@ func BenchmarkIOUring_ReadWrite_1KB(b *testing.B) {
 			if err != nil {
 				return
 			}
+
 			go func(c net.Conn) {
 				defer c.Close()
+
 				buf := make([]byte, 4096)
 				for {
 					n, err := c.Read(buf)
 					if err != nil {
 						return
 					}
+
 					_, _ = c.Write(buf[:n])
 				}
 			}(conn)
@@ -190,6 +201,7 @@ func BenchmarkIOUring_ReadWrite_1KB(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		_, err = io.ReadFull(conn, readBuf)
 		if err != nil {
 			b.Fatal(err)
@@ -214,15 +226,19 @@ func BenchmarkIOUring_Parallel_RPS(b *testing.B) {
 			if err != nil {
 				return
 			}
+
 			go func(c net.Conn) {
 				defer c.Close()
+
 				buf := make([]byte, 4096)
+
 				resp := []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
 				for {
 					n, err := c.Read(buf)
 					if err != nil || n == 0 {
 						return
 					}
+
 					_, _ = c.Write(resp)
 				}
 			}(conn)
@@ -247,6 +263,7 @@ func BenchmarkIOUring_Parallel_RPS(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+
 			_, err = conn.Read(buf)
 			if err != nil {
 				b.Fatal(err)

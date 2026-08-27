@@ -25,6 +25,7 @@ import (
 
 func decodeB64URL(t *testing.T, s string) []byte {
 	t.Helper()
+
 	s = strings.TrimSpace(s)
 	if m := len(s) % 4; m != 0 {
 		s += strings.Repeat("=", 4-m)
@@ -134,7 +135,11 @@ func TestVAPID_SignAndVerify(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, keys.PublicKeyBase64(), reconstructed.PublicKeyBase64())
 
-	authHeader, err := keys.AuthorizationHeader("https://fcm.googleapis.com/fcm/send/token", "mailto:admin@example.com", time.Hour)
+	authHeader, err := keys.AuthorizationHeader(
+		"https://fcm.googleapis.com/fcm/send/token",
+		"mailto:admin@example.com",
+		time.Hour,
+	)
 	require.NoError(t, err)
 
 	assert.True(t, strings.HasPrefix(authHeader, "vapid t="))
@@ -162,8 +167,10 @@ func TestClient_E2E_PushDelivery(t *testing.T) {
 	vapidKeys, err := webpush.GenerateVAPIDKeys()
 	require.NoError(t, err)
 
-	var receivedBody []byte
-	var receivedHeaders http.Header
+	var (
+		receivedBody    []byte
+		receivedHeaders http.Header
+	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHeaders = r.Header.Clone()

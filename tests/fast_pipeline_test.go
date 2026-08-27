@@ -19,7 +19,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
@@ -93,7 +92,7 @@ func TestFast_ScopedBorrow_DoScoped(t *testing.T) {
 	require.True(t, called)
 }
 
-func TestFluent_FetchScoped(t *testing.T) {
+func TestAoni_FetchScoped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":42,"name":"scoped_user"}`))
@@ -106,7 +105,7 @@ func TestFluent_FetchScoped(t *testing.T) {
 	}
 
 	called := false
-	err := fluent.GetScoped[User](context.Background(), nil, ts.URL, func(scope *borrow.Scope, val User, resp *http.Response) error {
+	err := aoni.GetScoped[User](context.Background(), nil, ts.URL, func(scope *borrow.Scope, val User, resp *http.Response) error {
 		called = true
 		require.Equal(t, 42, val.ID)
 		require.Equal(t, "scoped_user", val.Name)

@@ -22,6 +22,7 @@ type mockResolver struct {
 
 func (m *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	m.calls.Add(1)
+
 	if m.delay > 0 {
 		select {
 		case <-time.After(m.delay):
@@ -29,6 +30,7 @@ func (m *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPA
 			return nil, ctx.Err()
 		}
 	}
+
 	return m.addrs, nil
 }
 
@@ -50,9 +52,11 @@ func TestStaleResolver_BasicAndStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupIPAddr failed: %v", err)
 	}
+
 	if len(addrs) == 0 || !addrs[0].IP.Equal(net.ParseIP("192.0.2.1")) {
 		t.Fatalf("unexpected addrs: %v", addrs)
 	}
+
 	if mock.calls.Load() != 1 {
 		t.Fatalf("expected 1 call, got %d", mock.calls.Load())
 	}
@@ -62,6 +66,7 @@ func TestStaleResolver_BasicAndStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupIPAddr second failed: %v", err)
 	}
+
 	if mock.calls.Load() != 1 {
 		t.Fatalf("expected still 1 call for fresh cache, got %d", mock.calls.Load())
 	}
@@ -74,12 +79,14 @@ func TestStaleResolver_BasicAndStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupIPAddr stale failed: %v", err)
 	}
+
 	if len(addrs) == 0 || !addrs[0].IP.Equal(net.ParseIP("192.0.2.1")) {
 		t.Fatalf("unexpected stale addrs: %v", addrs)
 	}
 
 	// Wait briefly for background goroutine to execute
 	time.Sleep(50 * time.Millisecond)
+
 	if mock.calls.Load() < 2 {
 		t.Fatalf("expected background refresh call >= 2, got %d", mock.calls.Load())
 	}
@@ -97,6 +104,7 @@ func TestStaleResolver_LookupNetIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupNetIP failed: %v", err)
 	}
+
 	if len(netAddrs) == 0 || netAddrs[0].String() != "93.184.216.34" {
 		t.Fatalf("unexpected netAddrs: %v", netAddrs)
 	}

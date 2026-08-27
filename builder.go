@@ -280,6 +280,7 @@ func (r *RequestBuilder) SetHeader(header, value string) *RequestBuilder {
 	}
 
 	r.headerEntries = append(r.headerEntries, headerEntry{key: header, val: value})
+
 	return r
 }
 
@@ -289,6 +290,7 @@ func (r *RequestBuilder) SetHeaders(headers map[string]string) *RequestBuilder {
 		for k, v := range headers {
 			r.headers.Set(k, v)
 		}
+
 		return r
 	}
 
@@ -307,6 +309,7 @@ func (r *RequestBuilder) SetQueryParam(param, value string) *RequestBuilder {
 	}
 
 	r.queryEntries = append(r.queryEntries, queryParamEntry{key: param, val: value})
+
 	return r
 }
 
@@ -316,6 +319,7 @@ func (r *RequestBuilder) SetQueryParams(params map[string]string) *RequestBuilde
 		for k, v := range params {
 			r.queryParams.Add(k, v)
 		}
+
 		return r
 	}
 
@@ -339,6 +343,7 @@ func (r *RequestBuilder) SetFormField(key, value string) *RequestBuilder {
 	}
 
 	r.formFields[key] = value
+
 	return r
 }
 
@@ -349,6 +354,7 @@ func (r *RequestBuilder) SetFormFile(fieldname string, reader io.Reader) *Reques
 	}
 
 	r.formFiles[fieldname] = reader
+
 	return r
 }
 
@@ -413,6 +419,7 @@ func (r *RequestBuilder) SetPathParam(param, value string) *RequestBuilder {
 	}
 
 	r.pathParams[param] = value
+
 	return r
 }
 
@@ -423,6 +430,7 @@ func (r *RequestBuilder) SetPathParams(params map[string]string) *RequestBuilder
 	}
 
 	maps.Copy(r.pathParams, params)
+
 	return r
 }
 
@@ -650,6 +658,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	if client == nil {
 		client = DefaultClient
 	}
+
 	resultTarget := r.result
 	outputFile := r.outputFile
 
@@ -674,6 +683,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
+
 	mods := r.buildModifiers(&stackBuf)
 
 	if outputFile != "" || r.outputDirectory != "" {
@@ -872,8 +882,10 @@ func (r *RequestBuilder) executeDownload(
 		maxAttempts = r.retryOverride.MaxAttempts
 	}
 
-	var lastResp *http.Response
-	var lastErr error
+	var (
+		lastResp *http.Response
+		lastErr  error
+	)
 
 	for attempt := range maxAttempts {
 		if attempt > 0 {
@@ -881,6 +893,7 @@ func (r *RequestBuilder) executeDownload(
 			if r.retryOverride != nil && r.retryOverride.Backoff > 0 {
 				backoffDelay = r.retryOverride.Backoff * time.Duration(attempt)
 			}
+
 			time.Sleep(backoffDelay)
 		}
 
@@ -894,6 +907,7 @@ func (r *RequestBuilder) executeDownload(
 			lastResp = resp
 			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
 			_ = resp.Body.Close()
+
 			continue
 		}
 
@@ -915,6 +929,7 @@ func (r *RequestBuilder) executeDownload(
 					filename = "downloaded_file"
 				}
 			}
+
 			targetFile = filepath.Join(r.outputDirectory, filename)
 		}
 
@@ -953,6 +968,7 @@ func (r *RequestBuilder) executeDownload(
 // FetchTo executes the request and unmarshals the response into T.
 func (r *RequestBuilder) FetchTo[T any](method, path string) (T, *http.Response, error) {
 	var target T
+
 	resp, err := r.SetResult(&target).Execute(method, path)
 	return target, resp, err
 }
@@ -967,6 +983,7 @@ func (r *RequestBuilder) PostTo[T any](path string, body ...any) (T, *http.Respo
 	if len(body) > 0 {
 		r.SetBody(body[0])
 	}
+
 	return r.FetchTo[T](http.MethodPost, path)
 }
 
@@ -975,6 +992,7 @@ func (r *RequestBuilder) PutTo[T any](path string, body ...any) (T, *http.Respon
 	if len(body) > 0 {
 		r.SetBody(body[0])
 	}
+
 	return r.FetchTo[T](http.MethodPut, path)
 }
 
@@ -983,6 +1001,7 @@ func (r *RequestBuilder) PatchTo[T any](path string, body ...any) (T, *http.Resp
 	if len(body) > 0 {
 		r.SetBody(body[0])
 	}
+
 	return r.FetchTo[T](http.MethodPatch, path)
 }
 
@@ -1018,8 +1037,10 @@ func FetchTo[T any](
 	method, path string,
 	mods ...RequestModifier,
 ) (T, *http.Response, error) {
-	var target T
-	var doer HTTPRequester
+	var (
+		target T
+		doer   HTTPRequester
+	)
 	if d, ok := c.(HTTPRequester); ok {
 		doer = d
 	} else if c == nil {
@@ -1101,8 +1122,10 @@ func FetchScoped[T any](
 	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
 	mods ...RequestModifier,
 ) error {
-	var target T
-	var doer HTTPRequester
+	var (
+		target T
+		doer   HTTPRequester
+	)
 	if d, ok := c.(HTTPRequester); ok {
 		doer = d
 	} else if c == nil {

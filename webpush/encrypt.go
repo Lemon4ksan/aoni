@@ -64,8 +64,10 @@ func Encrypt(plaintext []byte, sub *Subscription, cfg *EncryptConfig) ([]byte, e
 }
 
 func encryptWithKeys(plaintext []byte, uaPub *ecdh.PublicKey, authSecret []byte, cfg *EncryptConfig) ([]byte, error) {
-	var asPriv *ecdh.PrivateKey
-	var err error
+	var (
+		asPriv *ecdh.PrivateKey
+		err    error
+	)
 
 	if cfg != nil && cfg.SenderPriv != nil {
 		asPriv = cfg.SenderPriv
@@ -163,6 +165,7 @@ func Decrypt(payload []byte, uaPriv *ecdh.PrivateKey, authSecret []byte) ([]byte
 	}
 
 	salt := payload[0:16]
+
 	idLen := int(payload[20])
 	if idLen != 65 || len(payload) < 21+idLen {
 		return nil, ErrDecryptionFailed

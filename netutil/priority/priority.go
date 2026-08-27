@@ -124,6 +124,7 @@ func Parse(s string) (Priority, error) {
 
 		if strings.HasPrefix(item, "u=") {
 			valStr := strings.TrimPrefix(item, "u=")
+
 			val, err := strconv.Atoi(strings.TrimSpace(valStr))
 			if err == nil && val >= 0 && val <= 7 {
 				p.Urgency = val

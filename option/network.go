@@ -275,6 +275,7 @@ func WithPACRules(defaultRoute string, rules ...proxy.PACRule) aoni.ClientOption
 		for _, r := range rules {
 			engine.AddRule(r)
 		}
+
 		cfg.Network.TransportProxy = engine.ProxyFunc()
 	}
 }

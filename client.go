@@ -408,6 +408,7 @@ func (c *Client) Do(req Request) (Response, error) {
 		if cfg.BodyError != nil {
 			return nil, cfg.BodyError
 		}
+
 		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
 			cfg.TargetHost = httpReq.URL.Hostname()
 		}
@@ -665,6 +666,7 @@ func (c *Client) Preresolve(ctx context.Context, host string) error {
 	}
 
 	_, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+
 	return err
 }
 

@@ -39,6 +39,7 @@ func FuzzQUICFrameParser(f *testing.F) {
 		}
 
 		parser := wire.NewFrameParser(true, true, true)
+
 		frameType, consumed, err := parser.ParseType(data, encLevel)
 		if err == nil && frameType != 0 && consumed <= len(data) {
 			remaining := data[consumed:]

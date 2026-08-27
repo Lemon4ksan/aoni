@@ -72,12 +72,14 @@ func FuzzWSCloseMessage(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, code int, reason string) {
 		formatted := ws.FormatCloseMessage(code, reason)
+
 		parsedCode, parsedReason := ws.ParseCloseMessage(formatted)
 		if len(formatted) >= 2 {
 			expectedCode := int(uint16(code))
 			if parsedCode != expectedCode {
 				t.Fatalf("close code mismatch: got %d, expected %d", parsedCode, expectedCode)
 			}
+
 			if parsedReason != reason {
 				t.Fatalf("close reason mismatch: got %q, expected %q", parsedReason, reason)
 			}

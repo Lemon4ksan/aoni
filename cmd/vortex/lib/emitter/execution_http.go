@@ -210,6 +210,7 @@ func emitBodyVerbExecution(
 				bodyArg,
 			)
 		}
+
 		buf.WriteString("\treturn err\n")
 
 		return
@@ -234,6 +235,7 @@ func emitBodyVerbExecution(
 			bodyArg,
 		)
 	}
+
 	fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 	emitChecks(buf, tracker, m)
 

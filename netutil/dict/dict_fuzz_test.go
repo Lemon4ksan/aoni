@@ -12,7 +12,10 @@ import (
 )
 
 func FuzzParseUseAsDictionary(f *testing.F) {
-	f.Add("match=\"/api/*\", match-dest=(\"document\" \"script\"), id=\"v1\", type=raw, ttl=3600", "https://example.com/base")
+	f.Add(
+		"match=\"/api/*\", match-dest=(\"document\" \"script\"), id=\"v1\", type=raw, ttl=3600",
+		"https://example.com/base",
+	)
 	f.Add("match=\"/*\", raw", "https://example.com/")
 	f.Add("", "")
 	f.Add("invalid=format; random", "http://localhost:8080/")
@@ -20,6 +23,7 @@ func FuzzParseUseAsDictionary(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, header, rawURL string) {
 		u, _ := url.Parse(rawURL)
+
 		meta, err := dict.ParseUseAsDictionary(header, u)
 		if err == nil && meta != nil {
 			_ = meta.Match
@@ -57,6 +61,7 @@ func FuzzMatchURLPattern(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, pattern, rawBaseURL, rawTargetURL string) {
 		baseU, _ := url.Parse(rawBaseURL)
+
 		targetU, err := url.Parse(rawTargetURL)
 		if err != nil || targetU == nil {
 			return

@@ -11,7 +11,13 @@ import (
 )
 
 func FuzzExtract(f *testing.F) {
-	f.Add([]byte(`<div class="target" data-token="secret123">hello &amp; world</div>`), `<div class="target" data-token="`, `"`, `div.target`, `data-token`)
+	f.Add(
+		[]byte(`<div class="target" data-token="secret123">hello &amp; world</div>`),
+		`<div class="target" data-token="`,
+		`"`,
+		`div.target`,
+		`data-token`,
+	)
 	f.Add([]byte(``), ``, ``, ``, ``)
 	f.Add([]byte(`prefix middle suffix`), `prefix `, ` suffix`, `a`, `href`)
 

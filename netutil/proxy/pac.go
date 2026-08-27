@@ -73,6 +73,7 @@ func ParsePACResult(result string) []PACDirective {
 		}
 
 		hostPort := fields[1]
+
 		var scheme string
 		switch pType {
 		case "PROXY", "HTTP":
@@ -316,10 +317,12 @@ func IsInNet(host, pattern, mask string) bool {
 		if err != nil {
 			return false
 		}
+
 		ip = ip4.AsSlice()
 	}
 
 	patternIP := net.ParseIP(pattern)
+
 	maskIP := net.ParseIP(mask)
 	if patternIP == nil || maskIP == nil {
 		return false
