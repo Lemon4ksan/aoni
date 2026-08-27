@@ -35,6 +35,10 @@ func DefaultCommands(runner base.AppRunner) []base.Command {
 	cmds = append(cmds, ast.NewCommand())
 	cmds = append(cmds, perf.NewCommand())
 
+	// Top-level shortcuts for frequent dev workflows
+	cmds = append(cmds, &perf.CmdBench{})
+	cmds = append(cmds, &perf.CmdCover{})
+
 	// Workspace Management
 	cmds = append(cmds, workspace.Commands(runner)...)
 
