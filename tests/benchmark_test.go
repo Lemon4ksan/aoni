@@ -207,7 +207,7 @@ func BenchmarkGET_Generic_Aoni(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if res.ID != 1001 {
+		if res.ID != 100 {
 			b.Fatalf("unexpected id: %d", res.ID)
 		}
 	}

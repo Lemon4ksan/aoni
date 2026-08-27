@@ -115,7 +115,13 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 		cqSize = sqSize
 	}
 
-	sqPtr, err := unix.Mmap(r.fd, IORING_OFF_SQ_RING, int(sqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
+	sqPtr, err := unix.Mmap(
+		r.fd,
+		IORING_OFF_SQ_RING,
+		int(sqSize),
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED|unix.MAP_POPULATE,
+	)
 	if err != nil {
 		return fmt.Errorf("mmap SQ ring: %w", err)
 	}
@@ -136,39 +142,59 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 
 	// Map SQEs
 	sqesSize := uintptr(p.sqEntries) * unsafe.Sizeof(SQE{})
-	sqesPtr, err := unix.Mmap(r.fd, IORING_OFF_SQES, int(sqesSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
+	sqesPtr, err := unix.Mmap(
+		r.fd,
+		IORING_OFF_SQES,
+		int(sqesSize),
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED|unix.MAP_POPULATE,
+	)
 	if err != nil {
 		_ = unix.Munmap(sqPtr)
 		return fmt.Errorf("mmap SQEs: %w", err)
 	}
 
-	r.sq.sqesPtr = uintptr(unsafe.Pointer(&sqesPtr[0]))
+	sqesBase := unsafe.Pointer(&sqesPtr[0])
+	r.sq.sqesPtr = uintptr(sqesBase)
 	r.sq.sqesSize = sqesSize
-	r.sq.sqes = unsafe.Slice((*SQE)(unsafe.Pointer(r.sq.sqesPtr)), p.sqEntries)
+	r.sq.sqes = unsafe.Slice((*SQE)(sqesBase), p.sqEntries)
 
 	// Map CQ ring
-	var cqPtr []byte
+	var (
+		cqPtr     []byte
+		cqBasePtr unsafe.Pointer
+	)
+
 	if p.features&1 != 0 {
 		r.cq.ringPtr = r.sq.ringPtr
 		r.cq.ringSize = r.sq.ringSize
+		cqBasePtr = basePtr
 	} else {
-		cqPtr, err = unix.Mmap(r.fd, IORING_OFF_CQ_RING, int(cqSize), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED|unix.MAP_POPULATE)
+		cqPtr, err = unix.Mmap(
+			r.fd,
+			IORING_OFF_CQ_RING,
+			int(cqSize),
+			unix.PROT_READ|unix.PROT_WRITE,
+			unix.MAP_SHARED|unix.MAP_POPULATE,
+		)
 		if err != nil {
 			_ = unix.Munmap(sqesPtr)
 			_ = unix.Munmap(sqPtr)
 			return fmt.Errorf("mmap CQ ring: %w", err)
 		}
-		r.cq.ringPtr = uintptr(unsafe.Pointer(&cqPtr[0]))
+
+		cqBasePtr = unsafe.Pointer(&cqPtr[0])
+		r.cq.ringPtr = uintptr(cqBasePtr)
 		r.cq.ringSize = cqSize
 	}
 
-	r.cq.khead = (*uint32)(unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.head)))
-	r.cq.ktail = (*uint32)(unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.tail)))
-	r.cq.kringMask = (*uint32)(unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.ringMask)))
-	r.cq.kringEntries = (*uint32)(unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.ringEntries)))
-	r.cq.koverflow = (*uint32)(unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.overflow)))
+	r.cq.khead = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.head))
+	r.cq.ktail = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.tail))
+	r.cq.kringMask = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.ringMask))
+	r.cq.kringEntries = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.ringEntries))
+	r.cq.koverflow = (*uint32)(unsafe.Add(cqBasePtr, p.cqOff.overflow))
 
-	cqesPtr := unsafe.Pointer(r.cq.ringPtr + uintptr(p.cqOff.cqes))
+	cqesPtr := unsafe.Add(cqBasePtr, p.cqOff.cqes)
 	r.cq.cqes = unsafe.Slice((*CQE)(cqesPtr), p.cqEntries)
 
 	return nil
@@ -249,6 +275,7 @@ func (r *Ring) WaitCQE() (CQE, error) {
 			index := head & *r.cq.kringMask
 			cqe := r.cq.cqes[index]
 			atomic.StoreUint32(r.cq.khead, head+1)
+
 			return cqe, nil
 		}
 

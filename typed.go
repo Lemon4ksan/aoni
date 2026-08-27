@@ -83,7 +83,8 @@ func (c *Client) Get[Resp any](
 	path string,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose // body is closed inside decodeResponseTo
+	//nolint:bodyclose // body is closed inside decodeResponseTo
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,8 @@ func (c *Client) GetInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose // body is closed inside HandleResponse
+	//nolint:bodyclose // body is closed inside HandleResponse
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
 	if err != nil {
 		return err
 	}
@@ -146,6 +148,7 @@ func (c *Client) Post[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
 	if err != nil {
 		return nil, err
@@ -171,6 +174,7 @@ func (c *Client) PostInto[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside HandleResponse
 	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
 	if err != nil {
 		return err
@@ -209,6 +213,7 @@ func (c *Client) Put[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
 	if err != nil {
 		return nil, err
@@ -234,6 +239,7 @@ func (c *Client) PutInto[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside HandleResponse
 	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
 	if err != nil {
 		return err
@@ -272,6 +278,7 @@ func (c *Client) Patch[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
 	if err != nil {
 		return nil, err
@@ -297,6 +304,7 @@ func (c *Client) PatchInto[Resp any](
 
 	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
+	//nolint:bodyclose // body is closed inside HandleResponse
 	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
 	if err != nil {
 		return err
@@ -325,6 +333,7 @@ func (c *Client) Delete[Resp any](
 	path string,
 	mods ...RequestModifier,
 ) (*Resp, error) {
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
 	if err != nil {
 		return nil, err
@@ -340,6 +349,7 @@ func (c *Client) DeleteInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
+	//nolint:bodyclose // body is closed inside HandleResponse
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
 	if err != nil {
 		return err
@@ -363,6 +373,7 @@ func (c *Client) Options[Resp any](
 	path string,
 	mods ...RequestModifier,
 ) (*Resp, error) {
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, http.MethodOptions, path, mods...)
 	if err != nil {
 		return nil, err
@@ -389,6 +400,7 @@ func (c *Client) Fetch[Resp any](
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
+	//nolint:bodyclose // body is closed inside decodeResponseTo
 	resp, err := c.Request(ctx, method, path, mods...)
 	if err != nil {
 		return nil, err
@@ -416,6 +428,7 @@ func (c *Client) FetchInto[Resp any](
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
+	//nolint:bodyclose // body is closed inside HandleResponse
 	resp, err := c.Request(ctx, method, path, mods...)
 	if err != nil {
 		return err

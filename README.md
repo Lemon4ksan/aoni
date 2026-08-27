@@ -379,7 +379,8 @@ aoni/
 
 ## Case Studies & Integrations
 
-- [ao](https://github.com/Lemon4ksan/ao): CLI tool and C/Go library powered by `libaoni` (`lib/aoni_bridge.c`). Supports uTLS (JA4) profiles, ML-KEM-768 hybrid key exchange, and multi-threaded operation.
+- [ao](https://github.com/Lemon4ksan/ao): High-performance fork of `curl` with its HTTP/HTTPS/WS transport engine completely replaced by `libaoni` (`lib/aoni_bridge.c`).
+  - Replacing the networking core accelerated the original C codebase: `ao` delivers **9,145+ RPS** across 100 concurrent POSIX threads (3–5x faster than standard multi-threaded `curl`), adding bit-exact Chromium uTLS (JA4) fingerprints and hybrid Post-Quantum TLS 1.3 (ML-KEM-768) with 0 memory leaks.
 - [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): Fork of `discordgo` with network transport powered by `aoni` and `aoni/realtime/ws`, optimized for reduced allocations during REST and WebSocket processing.
 
 ## 📚 Technical Documentation

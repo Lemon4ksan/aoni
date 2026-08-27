@@ -3,8 +3,8 @@ module github.com/lemon4ksan/aoni/x
 go 1.27.0
 
 require (
-	github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54
-	github.com/lemon4ksan/foundation v0.0.0-20260826200314-de4763a9c376
+	github.com/lemon4ksan/aoni v0.6.2-0.20260827105733-b55869f21af2
+	github.com/lemon4ksan/foundation v0.0.0-20260827105332-90a271d07e46
 	github.com/oschwald/maxminddb-golang/v2 v2.4.1
 	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.11
@@ -21,4 +21,3 @@ require (
 )
 
 replace github.com/lemon4ksan/aoni => ../
-

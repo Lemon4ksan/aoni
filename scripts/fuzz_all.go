@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -93,15 +94,22 @@ func main() {
 
 		start := time.Now()
 
-		pkg := tgt.pkg
 		var dir string
 
+		pkg := tgt.pkg
 		if strings.HasPrefix(pkg, "./x/") {
 			dir = "x"
 			pkg = "." + strings.TrimPrefix(pkg, "./x")
 		}
 
-		cmd := exec.Command("go", "test", "-fuzz=^"+tgt.name+"$", "-fuzztime="+*fuzzDuration, pkg) // #nosec G204
+		// #nosec G204
+		cmd := exec.CommandContext(
+			context.Background(),
+			"go", "test",
+			"-fuzz=^"+tgt.name+"$",
+			"-fuzztime="+*fuzzDuration,
+			pkg,
+		)
 		if dir != "" {
 			cmd.Dir = dir
 		}

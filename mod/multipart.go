@@ -28,7 +28,23 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 	return RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req Request) {
-			offBuf, err := offheap.NewBuffer(64 * 1024)
+			var estCap int
+			for k, v := range fields {
+				estCap += len(k) + len(v) + 128
+			}
+
+			for key, r := range files {
+				estCap += len(key)*2 + 256
+				if s, ok := r.(interface{ Len() int }); ok {
+					estCap += s.Len()
+				}
+			}
+
+			if estCap < 64*1024 {
+				estCap = 64 * 1024
+			}
+
+			offBuf, err := offheap.NewBuffer(estCap)
 
 			var (
 				body     io.Writer = &bytes.Buffer{}
@@ -95,7 +111,21 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req Request) {
-			offBuf, err := offheap.NewBuffer(64 * 1024)
+			var estCap int
+			for _, f := range fields {
+				estCap += len(f.Name) + len(f.Value) + len(f.Filename) + len(f.ContentType) + 256
+				if f.Reader != nil {
+					if s, ok := f.Reader.(interface{ Len() int }); ok {
+						estCap += s.Len()
+					}
+				}
+			}
+
+			if estCap < 64*1024 {
+				estCap = 64 * 1024
+			}
+
+			offBuf, err := offheap.NewBuffer(estCap)
 
 			var (
 				body     io.Writer = &bytes.Buffer{}

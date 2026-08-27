@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -112,7 +113,7 @@ func writeGitHubOutput(info versionInfo, updated bool) {
 		return
 	}
 
-	f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(ghOutput), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G703
 	if err != nil {
 		return
 	}
