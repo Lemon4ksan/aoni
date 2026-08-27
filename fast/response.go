@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -26,16 +27,12 @@ import (
 )
 
 var (
-	responseAdapterPool = sync.Pool{
-		New: func() any {
-			return &Response{}
-		},
-	}
-	pooledResponsePool = sync.Pool{
-		New: func() any {
-			return &PooledResponse{}
-		},
-	}
+	responseAdapterStorage = pool.NewPerPStorage(func() *Response {
+		return &Response{}
+	})
+	pooledResponseStorage = pool.NewPerPStorage(func() *PooledResponse {
+		return &PooledResponse{}
+	})
 )
 
 type fastBodyReadCloser struct {
@@ -106,11 +103,7 @@ func NewResponse(resp *h1engine.Response) *Response {
 		resp = h1engine.AcquireResponse()
 	}
 
-	r, ok := responseAdapterPool.Get().(*Response)
-	if !ok || r == nil {
-		r = &Response{}
-	}
-
+	r := responseAdapterStorage.Get()
 	r.resp = resp
 	r.trailers = nil
 	r.uncompressed = false
@@ -448,7 +441,7 @@ func (f *Response) WriteTo(w io.Writer) (int64, error) {
 	return total, streamErr
 }
 
-// Release returns the Response adapter instance back to [sync.Pool] for memory recycling.
+// Release returns the Response adapter instance back to PerPStorage for memory recycling.
 func (f *Response) Release() {
 	if f == nil {
 		return
@@ -457,7 +450,7 @@ func (f *Response) Release() {
 	f.resp = nil
 	f.trailers = nil
 	f.uncompressed = false
-	responseAdapterPool.Put(f)
+	responseAdapterStorage.Put(f)
 }
 
 const maxBodySlurpBytes int64 = 2048
@@ -485,7 +478,7 @@ func (f *Response) Close() error {
 	return nil
 }
 
-// PooledResponse wraps a fasthttp request/response pair, automatically releasing objects back to [sync.Pool] upon Close.
+// PooledResponse wraps a fasthttp request/response pair, automatically releasing objects back to PerPStorage upon Close.
 type PooledResponse struct {
 	_ cpu.CacheLinePad
 	Response
@@ -499,10 +492,7 @@ type PooledResponse struct {
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
 func NewPooledResponse(fastReq *h1engine.Request, fastResp *h1engine.Response) *PooledResponse {
-	pr, ok := pooledResponsePool.Get().(*PooledResponse)
-	if !ok || pr == nil {
-		pr = &PooledResponse{}
-	}
+	pr := pooledResponseStorage.Get()
 
 	pr.resp = fastResp
 	pr.trailers = nil
@@ -552,7 +542,7 @@ func (r *PooledResponse) Close() error {
 		r.resp = nil
 		r.trailers = nil
 		r.uncompressed = false
-		pooledResponsePool.Put(r)
+		pooledResponseStorage.Put(r)
 	}
 
 	return nil

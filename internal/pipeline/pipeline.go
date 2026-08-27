@@ -87,15 +87,37 @@ func (p *Pipeline[Req, Resp]) Execute(
 
 	resp, err := doer.Do(req)
 	if err != nil {
-		for _, hook := range p.defaults.AfterResponse {
-			hook(nil, err)
-		}
+		p.handleAfterResponseError(err)
 
 		var zero Resp
 
 		return zero, err
 	}
 
+	if len(p.defaults.AfterResponse) > 0 {
+		p.handleAfterResponseSuccess(resp, err)
+	}
+
+	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
+		p.captureInspector(req, resp)
+	}
+
+	if tx.JA4ReportStore != nil {
+		p.finalizeJA4Report(tx)
+	}
+
+	return resp, nil
+}
+
+//go:noinline
+func (p *Pipeline[Req, Resp]) handleAfterResponseError(err error) {
+	for _, hook := range p.defaults.AfterResponse {
+		hook(nil, err)
+	}
+}
+
+//go:noinline
+func (p *Pipeline[Req, Resp]) handleAfterResponseSuccess(resp Resp, err error) {
 	for _, hook := range p.defaults.AfterResponse {
 		if stdResp, ok := any(resp).(*http.Response); ok {
 			hook(stdResp, err)
@@ -105,38 +127,35 @@ func (p *Pipeline[Req, Resp]) Execute(
 			hook(nil, err)
 		}
 	}
+}
 
-	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
-		var stdReq *http.Request
-		if r, ok := any(req).(*http.Request); ok {
-			stdReq = r
-		} else if rAdapter, okAdapter := any(req).(core.Request); okAdapter {
-			stdReq = rAdapter.HTTPRequest()
-			if stdReq == nil {
-				stdReq, _ = http.NewRequestWithContext( //nolint:gosec
-					rAdapter.Context(),
-					rAdapter.Method(),
-					rAdapter.URL(),
-					nil,
-				)
-			}
-		}
-
-		var stdResp *http.Response
-		if r, ok := any(resp).(*http.Response); ok {
-			stdResp = r
-		} else if rAdapter, okAdapter := any(resp).(core.Response); okAdapter {
-			stdResp = rAdapter.HTTPResponse() //nolint:bodyclose
-		}
-
-		if stdReq != nil {
-			p.defaults.Inspector.Capture(stdReq, stdResp, nil, nil) //nolint:bodyclose
+//go:noinline
+func (p *Pipeline[Req, Resp]) captureInspector(req Req, resp Resp) {
+	var stdReq *http.Request
+	if r, ok := any(req).(*http.Request); ok {
+		stdReq = r
+	} else if rAdapter, okAdapter := any(req).(core.Request); okAdapter {
+		stdReq = rAdapter.HTTPRequest()
+		if stdReq == nil {
+			stdReq, _ = http.NewRequestWithContext( //nolint:gosec
+				rAdapter.Context(),
+				rAdapter.Method(),
+				rAdapter.URL(),
+				nil,
+			)
 		}
 	}
 
-	p.finalizeJA4Report(tx)
+	var stdResp *http.Response
+	if r, ok := any(resp).(*http.Response); ok {
+		stdResp = r
+	} else if rAdapter, okAdapter := any(resp).(core.Response); okAdapter {
+		stdResp = rAdapter.HTTPResponse() //nolint:bodyclose
+	}
 
-	return resp, nil
+	if stdReq != nil {
+		p.defaults.Inspector.Capture(stdReq, stdResp, nil, nil) //nolint:bodyclose
+	}
 }
 
 func (p *Pipeline[Req, Resp]) executeStandardFastPath(

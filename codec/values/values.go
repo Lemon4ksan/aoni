@@ -37,11 +37,14 @@ func Encode(v any) (url.Values, error) {
 		return make(url.Values), nil
 	}
 
-	if val.Kind() != reflect.Struct && val.Kind() != reflect.Map {
-		return nil, ErrUnsupportedType
+	var res url.Values
+	if val.Kind() == reflect.Struct {
+		s := getStructSchema(val.Type())
+		res = make(url.Values, len(s.Fields))
+	} else {
+		res = make(url.Values, val.Len())
 	}
 
-	res := make(url.Values)
 	if err := EncodeInto(res, v); err != nil {
 		return nil, err
 	}

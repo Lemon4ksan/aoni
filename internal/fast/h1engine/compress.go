@@ -15,6 +15,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine/stackless"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 // Supported compression levels.
@@ -26,12 +27,15 @@ const (
 	CompressHuffmanOnly        = -2 // flate.HuffmanOnly
 )
 
+var gzipReaderStorage = pool.NewPerPStorage(func() *gzip.Reader {
+	return nil
+})
+
 func acquireGzipReader(r io.Reader) (*gzip.Reader, error) {
-	v := gzipReaderPool.Get()
-	if v == nil {
+	zr := gzipReaderStorage.Get()
+	if zr == nil {
 		return gzip.NewReader(r)
 	}
-	zr := v.(*gzip.Reader) //nolint:forcetypeassert
 	if err := zr.Reset(r); err != nil {
 		return nil, err
 	}
@@ -39,11 +43,12 @@ func acquireGzipReader(r io.Reader) (*gzip.Reader, error) {
 }
 
 func releaseGzipReader(zr *gzip.Reader) {
-	zr.Close()
-	gzipReaderPool.Put(zr)
+	if zr == nil {
+		return
+	}
+	_ = zr.Close()
+	gzipReaderStorage.Put(zr)
 }
-
-var gzipReaderPool sync.Pool
 
 func acquireFlateReader(r io.Reader) (io.ReadCloser, error) {
 	v := flateReaderPool.Get()

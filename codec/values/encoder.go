@@ -87,6 +87,34 @@ func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values
 
 // serializeValue converts a concrete field value into its string representation and sets it in values.
 func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+	switch fieldValue.Kind() {
+	case reflect.String:
+		if fieldValue.Type().PkgPath() == "" {
+			values.Set(f.Key, fieldValue.String())
+			return nil
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if fieldValue.Type().PkgPath() == "" {
+			values.Set(f.Key, strconv.FormatInt(fieldValue.Int(), 10))
+			return nil
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if fieldValue.Type().PkgPath() == "" {
+			values.Set(f.Key, strconv.FormatUint(fieldValue.Uint(), 10))
+			return nil
+		}
+	case reflect.Bool:
+		if fieldValue.Type().PkgPath() == "" {
+			values.Set(f.Key, strconv.FormatBool(fieldValue.Bool()))
+			return nil
+		}
+	case reflect.Float32, reflect.Float64:
+		if fieldValue.Type().PkgPath() == "" {
+			values.Set(f.Key, strconv.FormatFloat(fieldValue.Float(), 'f', -1, 64))
+			return nil
+		}
+	}
+
 	if !fieldValue.CanInterface() {
 		return nil
 	}
@@ -281,6 +309,19 @@ func toString(v reflect.Value) (string, error) {
 		v = v.Elem()
 	}
 
+	switch v.Kind() {
+	case reflect.String:
+		return v.String(), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10), nil
+	case reflect.Bool:
+		return strconv.FormatBool(v.Bool()), nil
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
+	}
+
 	if v.CanInterface() {
 		val := v.Interface()
 
@@ -298,18 +339,5 @@ func toString(v reflect.Value) (string, error) {
 		}
 	}
 
-	switch v.Kind() {
-	case reflect.String:
-		return v.String(), nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(v.Int(), 10), nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(v.Uint(), 10), nil
-	case reflect.Bool:
-		return strconv.FormatBool(v.Bool()), nil
-	case reflect.Float32, reflect.Float64:
-		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
-	default:
-		return "", ErrUnsupportedType
-	}
+	return "", ErrUnsupportedType
 }

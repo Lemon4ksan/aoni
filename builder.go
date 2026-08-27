@@ -702,7 +702,10 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 
 	defer r.Release()
 
-	finalPath := urlkit.BuildPath(path, r.pathParams, nil)
+	finalPath := path
+	if len(r.pathParams) > 0 {
+		finalPath = urlkit.BuildPath(path, r.pathParams, nil)
+	}
 
 	ctx := r.ctx
 	if ctx == nil {
@@ -710,14 +713,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if r.digestAuth != nil {
-		if c, ok := client.(*Client); ok {
-			client = c.With(func(cfg *Config) {
-				cfg.Engine.DigestAuth = &DigestAuthConfig{
-					Username: r.digestAuth.username,
-					Password: r.digestAuth.password,
-				}
-			})
-		}
+		client = r.applyDigestAuth(client)
 	}
 
 	var stackBuf [stackModCapacity]RequestModifier
@@ -757,6 +753,20 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	return resp, nil
 }
 
+//go:noinline
+func (r *RequestBuilder) applyDigestAuth(client HTTPRequester) HTTPRequester {
+	if c, ok := client.(*Client); ok {
+		return c.With(func(cfg *Config) {
+			cfg.Engine.DigestAuth = &DigestAuthConfig{
+				Username: r.digestAuth.username,
+				Password: r.digestAuth.password,
+			}
+		})
+	}
+
+	return client
+}
+
 // checkExpectedStatus verifies that the response status code matches expectations configured via [RequestBuilder.ExpectStatus].
 func (r *RequestBuilder) checkExpectedStatus(resp *http.Response, finalPath string) error {
 	if len(r.expectedStatuses) == 0 || resp == nil {
@@ -767,6 +777,11 @@ func (r *RequestBuilder) checkExpectedStatus(resp *http.Response, finalPath stri
 		return nil
 	}
 
+	return r.unexpectedStatusError(resp, finalPath)
+}
+
+//go:noinline
+func (r *RequestBuilder) unexpectedStatusError(resp *http.Response, finalPath string) error {
 	return &Error{
 		Op:   "expect_status",
 		Path: finalPath,
@@ -777,7 +792,14 @@ func (r *RequestBuilder) checkExpectedStatus(resp *http.Response, finalPath stri
 
 // buildModifiers constructs value modifiers for headers, auth, body serialization, decoding, and telemetry.
 func (r *RequestBuilder) buildModifiers(stackBuf *[stackModCapacity]RequestModifier) []RequestModifier {
-	estimatedCap := len(r.headerEntries) + len(r.headers) + len(r.queryEntries) + len(r.appliedMods) + 12
+	estimatedCap := len(r.headerEntries) + len(r.headers) + len(r.queryEntries) + len(r.appliedMods)
+	if r.bearerToken != "" || r.basicAuth != nil || r.body != nil || r.protoBody != nil || r.timeout > 0 {
+		estimatedCap += 4
+	}
+
+	if estimatedCap == 0 {
+		return nil
+	}
 
 	var mods []RequestModifier
 	if estimatedCap <= stackModCapacity && stackBuf != nil {
