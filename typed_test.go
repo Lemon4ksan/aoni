@@ -242,18 +242,208 @@ func TestClientGRPC(t *testing.T) {
 func TestFastClientTyped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(UserDTO{ID: 55, Name: "Fast Gordon"})
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 55, Name: "Fast Gordon"})
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 56, Name: "Fast Post"})
+		case http.MethodPut:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 57, Name: "Fast Put"})
+		case http.MethodPatch:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 58, Name: "Fast Patch"})
+		case http.MethodDelete:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 59, Name: "Fast Delete"})
+		default:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 60, Name: "Fast Other"})
+		}
 	}))
 	defer ts.Close()
 
+	ctx := context.Background()
 	fastClient := fast.NewClient(aoni.WithBaseURL(ts.URL))
 
-	user, err := fastClient.GetTo[UserDTO](context.Background(), "/users/55")
-	if err != nil {
-		t.Fatalf("fast client get failed: %v", err)
+	// GetTo & GetInto
+	user, err := fastClient.GetTo[UserDTO](ctx, "/users/55")
+	if err != nil || user.ID != 55 {
+		t.Fatalf("fast get failed: %v", err)
 	}
 
-	if user.ID != 55 || user.Name != "Fast Gordon" {
-		t.Fatalf("unexpected fast user: %+v", user)
+	var userInto UserDTO
+	err = fastClient.GetInto(ctx, "/users/55", &userInto)
+	if err != nil || userInto.ID != 55 {
+		t.Fatalf("fast get into failed: %v", err)
+	}
+
+	// PostTo & PostInto
+	pUser, err := fastClient.PostTo[UserDTO](ctx, "/users", CreateUserRequest{Name: "Post"})
+	if err != nil || pUser.ID != 56 {
+		t.Fatalf("fast post failed: %v", err)
+	}
+
+	err = fastClient.PostInto(ctx, "/users", CreateUserRequest{Name: "Post"}, &userInto)
+	if err != nil || userInto.ID != 56 {
+		t.Fatalf("fast post into failed: %v", err)
+	}
+
+	// PutTo, PatchTo, DeleteTo, FetchTo
+	putUser, err := fastClient.PutTo[UserDTO](ctx, "/users/57", CreateUserRequest{Name: "Put"})
+	if err != nil || putUser.ID != 57 {
+		t.Fatalf("fast put failed: %v", err)
+	}
+
+	patchUser, err := fastClient.PatchTo[UserDTO](ctx, "/users/58", CreateUserRequest{Name: "Patch"})
+	if err != nil || patchUser.ID != 58 {
+		t.Fatalf("fast patch failed: %v", err)
+	}
+
+	delUser, err := fastClient.DeleteTo[UserDTO](ctx, "/users/59")
+	if err != nil || delUser.ID != 59 {
+		t.Fatalf("fast delete failed: %v", err)
+	}
+
+	fetchUser, err := fastClient.FetchTo[UserDTO](ctx, "GET", "/users/55", nil)
+	if err != nil || fetchUser.ID != 55 {
+		t.Fatalf("fast fetch failed: %v", err)
+	}
+
+	// Raw response methods on fastClient
+	rGet, err := fastClient.Get(ctx, "/users/55")
+	if err != nil || rGet.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw get failed: %v", err)
+	}
+
+	rPost, err := fastClient.Post(ctx, "/users", "body")
+	if err != nil || rPost.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw post failed: %v", err)
+	}
+
+	rPut, err := fastClient.Put(ctx, "/users/57", "body")
+	if err != nil || rPut.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw put failed: %v", err)
+	}
+
+	rPatch, err := fastClient.Patch(ctx, "/users/58", "body")
+	if err != nil || rPatch.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw patch failed: %v", err)
+	}
+
+	rDel, err := fastClient.Delete(ctx, "/users/59")
+	if err != nil || rDel.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw delete failed: %v", err)
+	}
+
+	rFetch, err := fastClient.Fetch(ctx, "GET", "/users/60", nil)
+	if err != nil || rFetch.StatusCode() != http.StatusOK {
+		t.Fatalf("fast raw fetch failed: %v", err)
 	}
 }
+
+func TestStandardClient_AllMethods_And_PackageLevel(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 1, Name: "Get"})
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 2, Name: "Post"})
+		case http.MethodPut:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 3, Name: "Put"})
+		case http.MethodPatch:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 4, Name: "Patch"})
+		case http.MethodDelete:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 5, Name: "Delete"})
+		case http.MethodOptions:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_ = json.NewEncoder(w).Encode(UserDTO{ID: 6, Name: "Fetch"})
+		}
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	c := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+
+	// PutTo, PatchTo, DeleteTo, FetchTo
+	uPut, err := c.PutTo[UserDTO](ctx, "/items/3", UserDTO{ID: 3})
+	if err != nil || uPut.ID != 3 {
+		t.Fatalf("put failed: %v", err)
+	}
+
+	uPatch, err := c.PatchTo[UserDTO](ctx, "/items/4", UserDTO{ID: 4})
+	if err != nil || uPatch.ID != 4 {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	uDel, err := c.DeleteTo[UserDTO](ctx, "/items/5")
+	if err != nil || uDel.ID != 5 {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	uFetch, err := c.FetchTo[UserDTO](ctx, "GET", "/items/1", nil)
+	if err != nil || uFetch.ID != 1 {
+		t.Fatalf("fetch failed: %v", err)
+	}
+
+	// Raw response methods
+	rGet, err := c.Get(ctx, "/items/1")
+	if err != nil || rGet.StatusCode != http.StatusOK {
+		t.Fatalf("raw get failed: %v", err)
+	}
+
+	rPost, err := c.Post(ctx, "/items", "data")
+	if err != nil || rPost.StatusCode != http.StatusOK {
+		t.Fatalf("raw post failed: %v", err)
+	}
+
+	rPut, err := c.Put(ctx, "/items/3", "data")
+	if err != nil || rPut.StatusCode != http.StatusOK {
+		t.Fatalf("raw put failed: %v", err)
+	}
+
+	rPatch, err := c.Patch(ctx, "/items/4", "data")
+	if err != nil || rPatch.StatusCode != http.StatusOK {
+		t.Fatalf("raw patch failed: %v", err)
+	}
+
+	rDel, err := c.Delete(ctx, "/items/5")
+	if err != nil || rDel.StatusCode != http.StatusOK {
+		t.Fatalf("raw delete failed: %v", err)
+	}
+
+	rOpt, err := c.Options(ctx, "/items")
+	if err != nil || rOpt.StatusCode != http.StatusNoContent {
+		t.Fatalf("raw options failed: %v", err)
+	}
+
+	rFetch, err := c.Fetch(ctx, "GET", "/items/1", nil)
+	if err != nil || rFetch.StatusCode != http.StatusOK {
+		t.Fatalf("raw fetch failed: %v", err)
+	}
+
+	// Package-level calls
+	pkgUser, err := aoni.GetTo[UserDTO](ctx, ts.URL+"/items/1")
+	if err != nil || pkgUser.ID != 1 {
+		t.Fatalf("pkg get failed: %v", err)
+	}
+
+	pkgPostUser, err := aoni.PostTo[UserDTO](ctx, ts.URL+"/items", UserDTO{ID: 2})
+	if err != nil || pkgPostUser.ID != 2 {
+		t.Fatalf("pkg post failed: %v", err)
+	}
+
+	pkgPutUser, err := aoni.PutTo[UserDTO](ctx, ts.URL+"/items/3", UserDTO{ID: 3})
+	if err != nil || pkgPutUser.ID != 3 {
+		t.Fatalf("pkg put failed: %v", err)
+	}
+
+	pkgPatchUser, err := aoni.PatchTo[UserDTO](ctx, ts.URL+"/items/4", UserDTO{ID: 4})
+	if err != nil || pkgPatchUser.ID != 4 {
+		t.Fatalf("pkg patch failed: %v", err)
+	}
+
+	pkgDelUser, err := aoni.DeleteTo[UserDTO](ctx, ts.URL+"/items/5")
+	if err != nil || pkgDelUser.ID != 5 {
+		t.Fatalf("pkg delete failed: %v", err)
+	}
+}
+

@@ -79,11 +79,9 @@ user, err := client.GetTo[User](ctx, "/fast-path")
 Legacy APIs and regional services frequently return responses in non-UTF-8 character sets (such as Windows-1251, Shift-JIS, or ISO-8859-1), resulting in corrupt Unicode strings during JSON or XML unmarshaling. `aoni` inspects incoming `Content-Type` charset parameters on the fly and transparently transcodes the payload into valid UTF-8 before decoding.
 
 ```go
-manifest, err := client.GetTo[Manifest](ctx, "/legacy-manifest",
-	mod.WithDownloadProgress(func(current, total int64) {
-		fmt.Printf("Downloaded %d of %d bytes\n", current, total)
-	}),
-)
+// When the upstream server responds with "Content-Type: application/json; charset=windows-1251",
+// aoni automatically detects the legacy charset and transcodes the body into valid UTF-8 before unmarshaling.
+manifest, err := client.GetTo[Manifest](ctx, "/legacy-manifest")
 ```
 
 ## 5. WAF Evasion with JA4 & JA4H Fingerprinting
@@ -177,8 +175,13 @@ type APIEnvelope struct {
 	target any
 }
 
-func (e *APIEnvelope) IsSuccess() bool  { return e.Status == "success" }
-func (e *APIEnvelope) Error() error     { return errors.New(e.Error) }
+func (e *APIEnvelope) IsSuccess() bool { return e.Status == "success" }
+func (e *APIEnvelope) Error() error {
+	if e.Error == "" {
+		return nil
+	}
+	return errors.New(e.Error)
+}
 func (e *APIEnvelope) SetData(data any) { e.target = data }
 
 func (e *APIEnvelope) UnmarshalJSON(b []byte) error {
@@ -232,12 +235,13 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/option"
 )
 
 client := aoni.NewClient(nil,
 	// Split TLS ClientHello across 2-byte TCP segments with jitter
-	option.WithFragmentation(aoni.FragmentConfig{
+	option.WithFragmentation(fragment.Config{
 		ChunkSize: 2,
 		MaxDelay:  10 * time.Millisecond,
 	}),

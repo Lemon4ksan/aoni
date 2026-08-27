@@ -337,3 +337,58 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 		assert.Equal(t, binaryData, string(consumed))
 	})
 }
+
+func TestDuplicateRequestGuard(t *testing.T) {
+	t.Parallel()
+
+	var duplicateDetected bool
+	var detectedMethod, detectedURL string
+
+	guard := telemetry.NewDuplicateRequestGuard(10, 5*time.Second, func(method, rawURL string, elapsed time.Duration) {
+		duplicateDetected = true
+		detectedMethod = method
+		detectedURL = rawURL
+	})
+
+	// 1. First record - no duplicate
+	guard.CheckAndRecord("GET", "https://api.example.com/items")
+	assert.False(t, duplicateDetected)
+
+	// 2. Second record with same method and URL within window - duplicate!
+	guard.CheckAndRecord("GET", "https://api.example.com/items")
+	assert.True(t, duplicateDetected)
+	assert.Equal(t, "GET", detectedMethod)
+	assert.Equal(t, "https://api.example.com/items", detectedURL)
+
+	// 3. Nil guard or empty URL
+	var nilGuard *telemetry.DuplicateRequestGuard
+	nilGuard.CheckAndRecord("GET", "https://example.com")
+	guard.CheckAndRecord("GET", "")
+}
+
+func TestTelemetry_DynamicHedgingConfig_And_Trace(t *testing.T) {
+	t.Parallel()
+
+	cfg := telemetry.DefaultDynamicHedgingConfig()
+	assert.True(t, cfg.MinDelay > 0)
+	assert.True(t, cfg.MaxDelay > cfg.MinDelay)
+
+	for range 15 {
+		cfg.Tracker.Record(50 * time.Millisecond)
+	}
+
+	delay := cfg.ComputeDelay()
+	assert.True(t, delay >= cfg.MinDelay && delay <= cfg.MaxDelay)
+
+	// IsStreamingResponse
+	respSSE := &http.Response{
+		Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+	assert.True(t, telemetry.IsStreamingResponse(respSSE))
+
+	respJSON := &http.Response{
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+	}
+	assert.False(t, telemetry.IsStreamingResponse(respJSON))
+}
+

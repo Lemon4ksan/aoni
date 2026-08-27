@@ -18,11 +18,14 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/dpop"
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
 	"github.com/lemon4ksan/aoni/netutil/privacypass"
+	"github.com/lemon4ksan/aoni/netutil/secret"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -355,3 +358,144 @@ func TestOption_WithPrivacyPass(t *testing.T) {
 	assert.NotNil(t, cfg.Defaults.ChallengeDetector)
 	assert.NotNil(t, cfg.Defaults.ChallengeSolver)
 }
+
+func TestOption_AllBrowserProfiles_And_Evasion(t *testing.T) {
+	t.Parallel()
+
+	// Chrome, ChromeMobile, Firefox, Safari
+	cfgChrome := &aoni.Config{}
+	option.WithChrome()(cfgChrome)
+	assert.NotNil(t, cfgChrome.Engine.CookieJar)
+
+	cfgMobile := &aoni.Config{}
+	option.WithChromeMobile()(cfgMobile)
+	assert.NotNil(t, cfgMobile.Engine.CookieJar)
+
+	cfgFirefox := &aoni.Config{}
+	option.WithFirefox()(cfgFirefox)
+	assert.NotNil(t, cfgFirefox.Engine.CookieJar)
+
+	cfgSafari := &aoni.Config{}
+	option.WithSafari()(cfgSafari)
+	assert.NotNil(t, cfgSafari.Engine.CookieJar)
+
+	// BrowserProfile variants
+	cfgBP1 := &aoni.Config{}
+	option.WithBrowserProfile(aoni.BrowserFirefox, 0)(cfgBP1)
+	cfgBP2 := &aoni.Config{}
+	option.WithBrowserProfile(aoni.BrowserChrome, 0)(cfgBP2)
+
+	// TLSFingerprint & ClientHelloID
+	cfgTLS := &aoni.Config{}
+	option.WithTLSFingerprint(aoni.BrowserChrome)(cfgTLS)
+	assert.Equal(t, aoni.BrowserChrome, cfgTLS.Fingerprint.BrowserID)
+
+	option.WithTLSFingerprint(aoni.BrowserNone)(cfgTLS)
+	assert.Equal(t, aoni.BrowserChrome, cfgTLS.Fingerprint.BrowserID)
+}
+
+func TestOption_Network_And_Protocol_And_Hooks(t *testing.T) {
+	t.Parallel()
+
+	cfg := &aoni.Config{}
+
+	// Network options
+	option.WithInterface("eth0")(cfg)
+	assert.Equal(t, "eth0", cfg.Network.InterfaceName)
+
+	option.WithSocketMark(0x100)(cfg)
+	assert.Equal(t, uint32(0x100), cfg.Network.SocketMark)
+
+	option.WithTCPDelay(5*time.Millisecond, 15*time.Millisecond)(cfg)
+	assert.Equal(t, 1, len(cfg.Defaults.DefaultMods))
+
+	option.WithAllowedRedirectDomains("example.com", "api.example.com")(cfg)
+	assert.NotNil(t, cfg.Engine.CheckRedirect)
+
+	option.WithBlockRedirectTo("/login")(cfg)
+	assert.NotNil(t, cfg.Engine.CheckRedirect)
+
+	// Hooks & Pipeline options
+	option.WithUserAgent("custom-agent")(cfg)
+	assert.Equal(t, "custom-agent", cfg.Defaults.Headers.Get("User-Agent"))
+
+	option.WithOrigin("https://example.com")(cfg)
+	assert.Equal(t, "https://example.com", cfg.Defaults.Headers.Get("Origin"))
+
+	option.WithRefererAutomaton(true)(cfg)
+	assert.True(t, cfg.Defaults.RefererAutomaton)
+
+	option.WithMaxResponseSize(10 * 1024 * 1024)(cfg)
+	assert.Equal(t, int64(10*1024*1024), cfg.Defaults.MaxResponseSize)
+
+	option.WithMultiReadBodyThreshold(64 * 1024)(cfg)
+	assert.Equal(t, int64(64*1024), cfg.Defaults.MultiReadThreshold)
+
+	option.WithMultiReadDisableDisk(true)(cfg)
+	assert.True(t, cfg.Defaults.MultiReadDisableDisk)
+
+	option.WithDuplicateRequestGuard(5*time.Second, nil)(cfg)
+	assert.Equal(t, 1, len(cfg.Defaults.BeforeRequest))
+
+	// Protocol options
+	option.WithH2ServerPush(true)(cfg)
+	assert.NotNil(t, cfg.Fingerprint.H2Settings)
+
+	option.WithHTTP3()(cfg)
+	assert.NotNil(t, cfg.Fingerprint.H3Settings)
+
+	option.WithEngine(http.DefaultClient)(cfg)
+	assert.Equal(t, http.DefaultClient, cfg.Engine.CustomEngine)
+
+	option.WithProtocol("custom", http.DefaultTransport)(cfg)
+	assert.NotNil(t, cfg.Engine.Protocols["custom"])
+}
+
+func TestOption_MoreHooks_And_Pipeline(t *testing.T) {
+	t.Parallel()
+
+	cfg := &aoni.Config{}
+
+	// Priority & Headers
+	option.WithPriority(1, true)(cfg)
+	assert.NotEmpty(t, cfg.Defaults.DefaultMods)
+
+	option.WithSecretBearer(secret.New("secret-token"))(cfg)
+	assert.Equal(t, "Bearer secret-token", cfg.Defaults.Headers.Get("Authorization"))
+
+	option.WithSecretBasicAuth("user", secret.New("pass"))(cfg)
+	assert.NotEmpty(t, cfg.Defaults.Headers.Get("Authorization"))
+
+	// Hooks
+	beforeFn := func(req *http.Request) {}
+	afterFn := func(resp *http.Response, err error) {}
+	option.WithBeforeRequest(beforeFn)(cfg)
+	option.WithAfterResponse(afterFn)(cfg)
+	assert.NotEmpty(t, cfg.Defaults.BeforeRequest)
+	assert.NotEmpty(t, cfg.Defaults.AfterResponse)
+
+	option.WithLocale("en-US")(cfg)
+	assert.NotEmpty(t, cfg.Defaults.DefaultMods)
+
+	option.WithUnixSocket("/var/run/test.sock")(cfg)
+	option.WithProxyString("http://127.0.0.1:8080")(cfg)
+
+	option.WithCookieIndices("session", "auth")(cfg)
+	assert.Equal(t, []string{"session", "auth"}, cfg.Defaults.Pipeline.Cache.CookieIndices)
+
+	option.WithECHConfig([]byte{1, 2, 3})(cfg)
+	assert.Equal(t, []byte{1, 2, 3}, cfg.Fingerprint.ECHConfigList)
+
+	option.WithECHConfigBase64("AQID")(cfg)
+	assert.Equal(t, []byte{1, 2, 3}, cfg.Fingerprint.ECHConfigList)
+
+	option.WithPacketPadding(fingerprint.PaddingConfig{})(cfg)
+	assert.NotNil(t, cfg.Fingerprint.PacketPadding)
+
+	option.WithProfileH2Settings(profiles.H2Settings{HeaderTableSize: 65536})(cfg)
+	assert.NotNil(t, cfg.Fingerprint.H2Settings)
+
+	option.WithHTTP2Config(aoni.HTTP2Config{PingTimeout: 5 * time.Second})(cfg)
+	assert.NotNil(t, cfg.Engine.HTTP2Config)
+}
+

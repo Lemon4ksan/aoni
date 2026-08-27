@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/resiliency/etag"
@@ -62,4 +63,10 @@ func TestETagAutomaton(t *testing.T) {
 
 	missingOpt := auto.GetETagOptional("missing")
 	require.False(t, missingOpt.IsPresent())
+
+	// NewAutomatonWithCapacity
+	customAuto := etag.NewAutomatonWithCapacity(512)
+	require.NotNil(t, customAuto)
+	assert.False(t, customAuto.GetETagOptional("none").IsPresent())
 }
+

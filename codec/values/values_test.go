@@ -7,6 +7,7 @@ package values
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
@@ -258,3 +259,45 @@ func TestEncode_UnsupportedKind(t *testing.T) {
 	require.ErrorAs(t, err, &valErr)
 	assert.ErrorIs(t, valErr, ErrUnsupportedType)
 }
+
+func TestEncode_SliceFormats_And_TextMarshaler(t *testing.T) {
+	t.Parallel()
+
+	type SliceStruct struct {
+		CommaSlice   []string `query:"comma,comma"`
+		SpaceSlice   []string `query:"space,space"`
+		PipeSlice    []string `query:"pipe,pipe"`
+		BracketSlice []string `query:"bracket,brackets"`
+		RepeatSlice  []string `query:"repeat"`
+	}
+
+	s := SliceStruct{
+		CommaSlice:   []string{"a", "b", "c"},
+		SpaceSlice:   []string{"x", "y"},
+		PipeSlice:    []string{"1", "2"},
+		BracketSlice: []string{"foo", "bar"},
+		RepeatSlice:  []string{"r1", "r2"},
+	}
+
+	v, err := Encode(s)
+	require.NoError(t, err)
+
+	assert.Equal(t, "a,b,c", v.Get("comma"))
+	assert.Equal(t, "x y", v.Get("space"))
+	assert.Equal(t, "1|2", v.Get("pipe"))
+	assert.Equal(t, []string{"foo", "bar"}, v["bracket"])
+	assert.Equal(t, []string{"r1", "r2"}, v["repeat"])
+
+	// EncodeQueryString
+	var sb strings.Builder
+	err = EncodeQueryString(s, &sb)
+	require.NoError(t, err)
+	assert.Contains(t, sb.String(), "comma=a%2Cb%2Cc")
+
+	// EncodeInto
+	targetVals := make(map[string][]string)
+	err = EncodeInto(targetVals, s)
+	require.NoError(t, err)
+	assert.Equal(t, "a,b,c", targetVals["comma"][0])
+}
+

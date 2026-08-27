@@ -32,6 +32,17 @@ func TestBetween(t *testing.T) {
 
 	_, err = extract.Between(src, "prefix:", ":missing")
 	assert.ErrorIs(t, err, extract.ErrBetweenNotFound)
+
+	sVal := extract.BetweenString(src, "prefix:", ":suffix")
+	require.True(t, sVal.IsSuccess())
+	assert.Equal(t, "hello world", sVal.MustValue())
+
+	optVal := extract.BetweenOptional(src, "prefix:", ":suffix")
+	assert.True(t, optVal.IsPresent())
+	assert.Equal(t, "hello world", optVal.MustValue())
+
+	optMissing := extract.BetweenOptional(src, "missing:", ":suffix")
+	assert.False(t, optMissing.IsPresent())
 }
 
 func TestAttr(t *testing.T) {
@@ -52,6 +63,17 @@ func TestAttr(t *testing.T) {
 
 	_, err = extract.Attr(src, "#test-id", "missing-attr")
 	assert.ErrorIs(t, err, extract.ErrAttrNotFound)
+
+	sAttr := extract.AttrString(src, "#test-id", "data-token")
+	require.True(t, sAttr.IsSuccess())
+	assert.Equal(t, "secret-123", sAttr.MustValue())
+
+	optAttr := extract.AttrOptional(src, "#test-id", "data-token")
+	assert.True(t, optAttr.IsPresent())
+	assert.Equal(t, "secret-123", optAttr.MustValue())
+
+	optAttrMissing := extract.AttrOptional(src, "#missing", "data-token")
+	assert.False(t, optAttrMissing.IsPresent())
 }
 
 func TestRegex(t *testing.T) {
@@ -69,6 +91,17 @@ func TestRegex(t *testing.T) {
 
 	_, err = extract.Regex(src, `NonMatching:\s*(\d+)`)
 	assert.ErrorIs(t, err, extract.ErrRegexMismatch)
+
+	sRx := extract.RegexString(src, `SessionToken:\s*([0-9a-z-]+)`)
+	require.True(t, sRx.IsSuccess())
+	assert.Equal(t, "98765-abcd", sRx.MustValue())
+
+	optRx := extract.RegexOptional(src, `SessionToken:\s*([0-9a-z-]+)`)
+	assert.True(t, optRx.IsPresent())
+	assert.Equal(t, "98765-abcd", optRx.MustValue())
+
+	optRxMissing := extract.RegexOptional(src, `NonMatching:\s*(\d+)`)
+	assert.False(t, optRxMissing.IsPresent())
 }
 
 func TestHTMLUnescape(t *testing.T) {

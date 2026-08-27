@@ -11,6 +11,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni/codec"
 )
@@ -118,9 +119,53 @@ func TestCodec_GenericHelpers(t *testing.T) {
 func TestCodec_Strategies(t *testing.T) {
 	t.Parallel()
 
-	assert.NotNil(t, codec.JSONCodec)
-	assert.NotNil(t, codec.XMLCodec)
-	assert.NotNil(t, codec.YAMLCodec)
-	assert.NotNil(t, codec.ProtoCodec)
-	assert.NotNil(t, codec.GRPCWebCodec)
+	// JSONCodec
+	modJSONEnc := codec.JSONCodec.Encode(TestUser{Name: "Alice"})
+	assert.NotNil(t, modJSONEnc)
+	modJSONDec := codec.JSONCodec.Decode()
+	assert.NotNil(t, modJSONDec)
+
+	// XMLCodec
+	modXMLEnc := codec.XMLCodec.Encode(TestUser{Name: "Bob"})
+	assert.NotNil(t, modXMLEnc)
+	modXMLDec := codec.XMLCodec.Decode()
+	assert.NotNil(t, modXMLDec)
+
+	// YAMLCodec
+	modYAMLEnc := codec.YAMLCodec.Encode(TestUser{Name: "Charlie"})
+	assert.NotNil(t, modYAMLEnc)
+	modYAMLDec := codec.YAMLCodec.Decode()
+	assert.NotNil(t, modYAMLDec)
+
+	// ProtoCodec
+	strMsg := wrapperspb.String("test-payload")
+	modProtoEnc := codec.ProtoCodec.Encode(strMsg)
+	assert.NotNil(t, modProtoEnc)
+	modProtoDec := codec.ProtoCodec.Decode()
+	assert.NotNil(t, modProtoDec)
+
+	// Non-proto fallback
+	modProtoInvalid := codec.ProtoCodec.Encode(123)
+	assert.NotNil(t, modProtoInvalid)
+
+	// GRPCWebCodec
+	modGRPCEnc := codec.GRPCWebCodec.Encode(strMsg)
+	assert.NotNil(t, modGRPCEnc)
+	modGRPCDec := codec.GRPCWebCodec.Decode()
+	assert.NotNil(t, modGRPCDec)
+
+	modGRPCInvalid := codec.GRPCWebCodec.Encode("invalid")
+	assert.NotNil(t, modGRPCInvalid)
+
+	// DecodeTo
+	u, err := codec.DecodeTo[TestUser](strings.NewReader(`{"name":"Dave","age":20}`), codec.JSONDecoder)
+	require.NoError(t, err)
+	assert.Equal(t, "Dave", u.Name)
+
+	// Payload
+	var uPayload TestUser
+	err = codec.Payload("application/json", []byte(`{"name":"Eve","age":22}`), &uPayload)
+	require.NoError(t, err)
+	assert.Equal(t, "Eve", uPayload.Name)
 }
+

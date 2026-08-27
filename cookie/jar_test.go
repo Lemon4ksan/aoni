@@ -157,16 +157,69 @@ func TestProxyIsolatedCookieJar_ConcurrentUsage(t *testing.T) {
 		"http://p1.com", "http://p2.com", "http://p3.com", "http://p4.com",
 	}
 
-	for _, proxy := range proxies {
+	for _, p := range proxies {
 		wg.Add(1)
 
-		go func(p string) {
+		go func(proxy string) {
 			defer wg.Done()
 
-			jar := pJar.GetJarForProxy(p)
+			jar := pJar.GetJarForProxy(proxy)
 			assert.NotNil(t, jar)
-		}(proxy)
+		}(p)
 	}
 
 	wg.Wait()
 }
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestCookieTransport_RoundTrip_And_PartitionKey(t *testing.T) {
+	t.Parallel()
+
+	// 1. Partition Key
+	ctxPart := cookie.WithPartitionKey(t.Context(), "https://partition.example.com")
+	assert.Equal(t, "https://partition.example.com", cookie.GetPartitionKey(ctxPart))
+
+	// 2. Cookie Transport
+	pJar := cookie.NewProxyIsolatedJar()
+	u, _ := url.Parse("https://example.com/api")
+	pJar.SetCookies(u, []*http.Cookie{{Name: "session", Value: "active-123"}})
+
+	mockRT := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		assert.Equal(t, "session=active-123", req.Header.Get("Cookie"))
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Set-Cookie": []string{"tracker=xyz; Path=/"},
+			},
+		}
+
+		return resp, nil
+	})
+
+	tr := &cookie.Transport{
+		Next:      mockRT,
+		CookieJar: pJar,
+	}
+
+	assert.NotNil(t, tr.Unwrap())
+	cloned := tr.CloneTransport(http.DefaultTransport)
+	assert.NotNil(t, cloned)
+
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "https://example.com/api", nil)
+	require.NoError(t, err)
+
+	resp, err := tr.RoundTrip(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Verify tracker cookie captured
+	cookies := pJar.Cookies(u)
+	assert.NotEmpty(t, cookies)
+}
+

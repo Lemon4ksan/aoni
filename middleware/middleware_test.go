@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type mockDoer struct {
@@ -812,3 +813,65 @@ func TestMaskQueryParams_DoesNotModifyOriginal(t *testing.T) {
 		t.Error("maskQueryParams should not modify the original URL")
 	}
 }
+
+func TestMiddleware_Log_And_MaskURLString(t *testing.T) {
+	t.Parallel()
+
+	// maskURLString
+	masked := maskURLString("https://api.example.com/data?token=secret123&user=john")
+	assert.Contains(t, masked, "token=%2A%2A%2A")
+	assert.Contains(t, masked, "user=john")
+
+	maskedEmpty := maskURLString("")
+	assert.Empty(t, maskedEmpty)
+
+	maskedInvalid := maskURLString("http://[invalid-url")
+	assert.Equal(t, "http://[invalid-url", maskedInvalid)
+
+	// Log middleware execution
+	logMw := Log(telemetry.NewSlogAdapter(nil))
+	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example.com/items", nil)
+	require.NoError(t, err)
+	req := aoni.NewStdRequest(httpReq)
+	next := &mockDoer{}
+	resp, err := logMw(next).Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+}
+
+func TestMiddleware_Predicates_And_RetryPresets(t *testing.T) {
+	t.Parallel()
+
+	// 1. Or & And predicates
+	pTrue := func(resp aoni.Response, err error) bool { return true }
+	pFalse := func(resp aoni.Response, err error) bool { return false }
+
+	orPred := Or(pFalse, pTrue)
+	assert.True(t, orPred(nil, nil))
+
+	andPred := And(pTrue, pFalse)
+	assert.False(t, andPred(nil, nil))
+
+	andPredTrue := And(pTrue, pTrue)
+	assert.True(t, andPredTrue(nil, nil))
+
+	// 2. Retry Conditions
+	predTransient := RetryOnTransientErrors()
+	assert.True(t, predTransient(nil, errors.New("connection reset by peer")))
+	assert.False(t, predTransient(nil, nil))
+
+	predRate := RetryOnRateLimit()
+	resp429 := aoni.NewStdResponse(&http.Response{StatusCode: http.StatusTooManyRequests})
+	assert.True(t, predRate(resp429, nil))
+	assert.False(t, predRate(nil, nil))
+
+	predGateway := RetryOnGatewayErrors()
+	resp502 := aoni.NewStdResponse(&http.Response{StatusCode: http.StatusBadGateway})
+	assert.True(t, predGateway(resp502, nil))
+	assert.False(t, predGateway(nil, nil))
+
+	predGRPC := RetryOnGRPCStatus("14")
+	assert.False(t, predGRPC(nil, nil))
+}
+
+
