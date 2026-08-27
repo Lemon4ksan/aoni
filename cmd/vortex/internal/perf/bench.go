@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/simd"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"golang.org/x/sys/cpu"
@@ -194,8 +194,8 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 			var local int64
 			for j := 0; j < chunkURL; j++ {
-				p1 := url.ReplaceVar(pathTemplate, "app_id", "730")
-				_ = url.ReplaceVar(p1, "market_hash_name", "AK-47 | Redline (Field-Tested)")
+				p1 := urlkit.ReplaceVar(pathTemplate, "app_id", "730")
+				_ = urlkit.ReplaceVar(p1, "market_hash_name", "AK-47 | Redline (Field-Tested)")
 				local++
 			}
 

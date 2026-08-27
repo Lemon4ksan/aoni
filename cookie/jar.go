@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	asyncctx "github.com/lemon4ksan/foundation/async/contextkit"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -68,11 +68,21 @@ type cookieKey struct {
 
 // ProxyIsolatedJar provides thread-safe, per-proxy and CHIPS partitioned cookie storage isolation.
 //
-// Specification Adherence:
-// Implements RFC 6265 cookie isolation augmented with per-proxy session segregation and RFC 6265bis CHIPS partitioning.
+// Automatically manages separate cookie jars per upstream proxy address to prevent cross-account
+// session contamination and cross-tenant data leaks. Supports RFC 6265bis CHIPS (Partitioned) cookies.
 //
-// Thread Safety & Concurrency:
+// # Specification Adherence
+//
+// Conforms to RFC 6265 (HTTP State Management Mechanism) and RFC 6265bis (CHIPS Partitioning).
+//
+// # Thread Safety
+//
 // 100% thread-safe for concurrent read and write operations via atomic [generic.ConcurrentMap].
+//
+// # Example
+//
+//	jar := cookie.NewProxyIsolatedJar()
+//	client := aoni.New(option.WithCookieJar(jar))
 type ProxyIsolatedJar struct {
 	jars    generic.ConcurrentMap[string, http.CookieJar]
 	backend generic.Safe[Storage]
@@ -84,6 +94,7 @@ func NewProxyIsolatedJar() *ProxyIsolatedJar {
 }
 
 // SetCookies satisfies the standard [http.CookieJar] interface.
+//
 // Delegates to the default (unproxied) internal jar when invoked without a proxy-aware context.
 func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	if jar := p.GetJarForProxy(""); jar != nil {
@@ -92,6 +103,7 @@ func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 }
 
 // Cookies satisfies the standard [http.CookieJar] interface.
+//
 // Returns cookies matching destination u from the default (unproxied) internal jar when context is absent.
 func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 	if jar := p.GetJarForProxy(""); jar != nil {
@@ -102,6 +114,7 @@ func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 }
 
 // GetJarForProxy retrieves or lazily initializes an isolated [http.CookieJar] bound to the specified proxyURL.
+//
 // Thread-safe and lock-free on cache hits via atomic [generic.ConcurrentMap].
 func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	if jar, ok := p.jars.Load(proxyURL); ok {
@@ -128,7 +141,7 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	return actual
 }
 
-// WithStorageBackend configures persistent storage for cookie jars and returns p.
+// WithStorageBackend configures a persistent storage backend (e.g. [JSONFileStorage]) for cookie persistence across restarts.
 func (p *ProxyIsolatedJar) WithStorageBackend(backend Storage) *ProxyIsolatedJar {
 	p.backend.Set(backend)
 	return p

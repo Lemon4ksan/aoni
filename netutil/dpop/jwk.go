@@ -17,6 +17,8 @@ import (
 )
 
 // PublicKeyToJWK converts a public key into a public [JWK] and returns its default JWS algorithm (RFC 7517).
+//
+//nolint:staticcheck // RFC 7517 JSON Web Key format requires extracting raw EC X/Y coordinate bignums
 func PublicKeyToJWK(pub crypto.PublicKey) (*JWK, string, error) {
 	switch k := pub.(type) {
 	case *ecdsa.PublicKey:
@@ -82,6 +84,8 @@ func PublicKeyToJWK(pub crypto.PublicKey) (*JWK, string, error) {
 }
 
 // JWKToPublicKey converts a public [JWK] into a standard [crypto.PublicKey].
+//
+//nolint:staticcheck // RFC 7517 JSON Web Key format requires reconstructing raw EC X/Y coordinate bignums
 func JWKToPublicKey(jwk *JWK) (crypto.PublicKey, error) {
 	if jwk == nil {
 		return nil, ErrInvalidHeader

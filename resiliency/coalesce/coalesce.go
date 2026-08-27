@@ -1,9 +1,17 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 // Package coalesce implements concurrent in-flight request deduplication (Singleflight)
-// preventing thundering herd spikes and redundant upstream network queries.
+// preventing thundering herd spikes and redundant upstream network load.
+//
+// # Architectural Context: Singleflight Thundering-Herd Mitigation
+//
+// When hundreds of concurrent goroutines request the exact same cache-miss resource simultaneously,
+// Singleflight coalesces all callers into a single in-flight remote request, broadcasting the resulting
+// response body bytes to all waiting callers.
+//
+// # Example
+//
+//	resp, err := coalesce.DefaultGroup.Do(ctx, "resource-key", func() (*http.Response, error) {
+//	    return client.Get(ctx, "/hot-data")
+//	})
 package coalesce
 
 import (

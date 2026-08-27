@@ -17,19 +17,29 @@ import (
 // ErrInvalidCookieData is returned when persisted cookie data cannot be unmarshaled.
 var ErrInvalidCookieData = errors.New("aoni/cookie: invalid persisted cookie payload")
 
-// Storage defines the persistence interface contract for saving and loading proxy-isolated cookie jars.
+// Storage defines the persistence contract for saving and loading proxy-isolated cookie jars.
 //
-// Thread Safety Requirement:
-// Implementations MUST be thread-safe for concurrent read and write operations across goroutines.
+// # Thread Safety
+//
+// Implementations MUST be thread-safe for concurrent read and write operations across arbitrary goroutines.
 type Storage interface {
 	Save(key string, cookies []Cookie) error
 	Load(key string) ([]Cookie, error)
 }
 
 // JSONFileStorage implements thread-safe [Storage] using atomic file writes to disk.
+//
 // Writes are performed via temporary file creation and atomic OS file swaps (`os.Rename`),
-// guaranteeing zero file corruption even in the event of abrupt process termination.
-// Safe for concurrent use across multiple goroutines.
+// guaranteeing zero file corruption even during abrupt process termination or power loss.
+//
+// # Thread Safety
+//
+// 100% thread-safe for concurrent reads and writes across multiple goroutines.
+//
+// # Example
+//
+//	storage := cookie.NewJSONFileStorage("./data/cookies.json")
+//	jar := cookie.NewProxyIsolatedJar().WithStorageBackend(storage)
 type JSONFileStorage struct {
 	filePath string
 	data     generic.Safe[fileStorageData]
@@ -38,7 +48,8 @@ type JSONFileStorage struct {
 type fileStorageData map[string][]Cookie
 
 // NewJSONFileStorage instantiates a [JSONFileStorage] bound to the specified filePath.
-// Automatically loads cookies into memory if filePath exists and contains valid JSON, or initializes empty storage.
+//
+// Automatically loads existing cookies from disk into memory if filePath exists and contains valid JSON.
 func NewJSONFileStorage(filePath string) *JSONFileStorage {
 	initialData := make(fileStorageData)
 	if fileBytes, err := os.ReadFile(filePath); err == nil {

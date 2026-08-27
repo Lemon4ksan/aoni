@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/async/logkit"
 
 	"github.com/lemon4ksan/aoni/realtime/socket"
 )
@@ -34,21 +34,21 @@ type DecodeFunc[Packet any] func(data []byte) (Packet, error)
 // Config configures worker count and buffering for the processor.
 type Config struct {
 	WorkerCount int
-	Logger      log.Logger
+	Logger      logkit.Logger
 }
 
 // DefaultConfig returns recommended worker pool configuration based on CPU core count.
 func DefaultConfig() Config {
 	return Config{
 		WorkerCount: max(runtime.NumCPU(), 2),
-		Logger:      log.Discard,
+		Logger:      logkit.Discard,
 	}
 }
 
 // Processor manages background worker goroutines to parse incoming byte frames concurrently.
 type Processor[Packet any] struct {
 	cfg      Config
-	logger   log.Logger
+	logger   logkit.Logger
 	consumer Consumer[Packet]
 	decode   DecodeFunc[Packet]
 
@@ -72,7 +72,7 @@ func New[Packet any](
 
 	l := cfg.Logger
 	if l == nil {
-		l = log.Discard
+		l = logkit.Discard
 	}
 
 	if cfg.WorkerCount <= 0 {
@@ -81,7 +81,7 @@ func New[Packet any](
 
 	return &Processor[Packet]{
 		cfg:      cfg,
-		logger:   l.With(log.Component("processor")),
+		logger:   l.With(logkit.Component("processor")),
 		consumer: consumer,
 		decode:   decode,
 		input:    input,
@@ -93,7 +93,7 @@ func New[Packet any](
 // Start spawns worker pool goroutines. Safe to call multiple times.
 func (p *Processor[Packet]) Start() {
 	p.isStarted.Do(func() {
-		p.logger.Debug("Starting socket packet processor", log.Int("workers", p.cfg.WorkerCount))
+		p.logger.Debug("Starting socket packet processor", logkit.Int("workers", p.cfg.WorkerCount))
 
 		for range p.cfg.WorkerCount {
 			p.wg.Go(p.worker)
@@ -138,7 +138,7 @@ func (p *Processor[Packet]) processFrame(fb *socket.FrameBuffer) {
 
 	pkt, err := p.decode(fb.Bytes())
 	if err != nil {
-		p.logger.Warn("Failed to decode frame", log.Err(err))
+		p.logger.Warn("Failed to decode frame", logkit.Err(err))
 		return
 	}
 

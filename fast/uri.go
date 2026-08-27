@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"

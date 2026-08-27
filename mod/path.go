@@ -8,15 +8,27 @@ import (
 	"fmt"
 	"net/url"
 
-	furl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 
 	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
-// WithVar constructs an [RequestModifier] that interpolates a single URI template placeholder
-// (e.g. "{key}") with a percent-encoded value according to RFC 6570 Level 1, RFC 3986 §2.1, and RFC 8820 §3.
+// WithVar replaces a single URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).
+//
+// Automatically applies URL path percent-encoding to the value.
+//
+// # Example
+//
+//	// Performs GET to "/users/42/details"
+//	resp, err := client.Get(ctx, "/users/{id}/details",
+//	    mod.WithVar("id", 42),
+//	)
+//
+// # RFC Compliance
+//
+// Conforms to RFC 6570 (URI Template), RFC 3986 (Uniform Resource Identifier: Generic Syntax), and RFC 8820.
 func WithVar(key string, value any) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -28,9 +40,18 @@ func WithVar(key string, value any) RequestModifier {
 	}
 }
 
-// WithVars constructs an [RequestModifier] replacing multiple path template placeholders using key-value pairs
-// per RFC 6570 URI Template variable substitution (RFC 8820 §3) and RFC 3986 §2.1 / §3.3 path segment encoding.
-// Requires an even number of arguments (alternating key and value pairs).
+// WithVars replaces multiple URI template placeholders using alternating key-value pairs.
+//
+// # Example
+//
+//	// Performs GET to "/orgs/golang/repos/go/issues"
+//	resp, err := client.Get(ctx, "/orgs/{org}/repos/{repo}/issues",
+//	    mod.WithVars("org", "golang", "repo", "go"),
+//	)
+//
+// # Invariants
+//
+// Requires an even number of arguments; otherwise records an error on the request config.
 func WithVars(pairs ...any) RequestModifier {
 	if len(pairs)%2 != 0 {
 		return RequestModifier{
@@ -53,7 +74,13 @@ func WithVars(pairs ...any) RequestModifier {
 	}
 }
 
-// WithBaseURL constructs an [RequestModifier] overriding the target request Base URI (RFC 3986 §5.1).
+// WithBaseURL overrides the client's default Base URI for this specific request (RFC 3986 §5.1).
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/metrics",
+//	    mod.WithBaseURL("https://telemetry.internal.net"),
+//	)
 func WithBaseURL(baseURL string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -63,7 +90,7 @@ func WithBaseURL(baseURL string) RequestModifier {
 	}
 }
 
-// WithoutBaseURL constructs an [RequestModifier] resetting target request URL to the local path (RFC 3986 §5.1.4).
+// WithoutBaseURL resets the request target URL to the raw relative path, bypassing client BaseURL prepending.
 func WithoutBaseURL() RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -73,8 +100,18 @@ func WithoutBaseURL() RequestModifier {
 	}
 }
 
-// WithQuery constructs an [RequestModifier] appending query parameters to the request URL (RFC 3986 §3.4).
-// Accepts either (key, value) pairs or a single struct/map query payload.
+// WithQuery appends URL query parameters to the request URL (RFC 3986 §3.4).
+//
+// Supports two calling conventions:
+//  1. Single struct or map: `mod.WithQuery(SearchParams{Query: "go", Page: 1})`
+//  2. Key-value pair: `mod.WithQuery("limit", 20)`
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/items",
+//	    mod.WithQuery("sort", "desc"),
+//	    mod.WithQuery("limit", 50),
+//	)
 func WithQuery(args ...any) RequestModifier {
 	if len(args) == 1 {
 		return WithQueryParams(args[0])
@@ -94,7 +131,18 @@ func WithQuery(args ...any) RequestModifier {
 	return RequestModifier{}
 }
 
-// WithQueryParams constructs an [RequestModifier] encoding structure or map query into URL query parameters (RFC 3986 §3.4).
+// WithQueryParams encodes a struct, map, or raw query string into URL query parameters.
+//
+// # Example
+//
+//	type Filter struct {
+//	    Category string   `query:"category"`
+//	    Tags     []string `query:"tags"`
+//	}
+//
+//	resp, err := client.Get(ctx, "/products",
+//	    mod.WithQueryParams(Filter{Category: "books", Tags: []string{"go", "tech"}}),
+//	)
 func WithQueryParams(query any) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,

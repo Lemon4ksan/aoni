@@ -1,22 +1,34 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// Package ja4 provides pure-Go computation of JA4 (TLS) and JA4H (HTTP) client fingerprints.
-// Core implementation is located in [github.com/lemon4ksan/foundation/net/tls/ja4].
+// Package ja4 provides pure-Go computation of JA4 (TLS ClientHello) and JA4H (HTTP Request) fingerprints.
+//
+// # Architectural Context
+//
+// JA4 is a standard fingerprinting specification that categorizes TLS and HTTP client implementations
+// based on cipher suites, extensions, ALPN values, and HTTP header ordering.
+//
+// # RFC Compliance
+//
+// Conforms to the FoxIO JA4+ Network Fingerprinting Specification.
 package ja4
 
 import (
 	fja4 "github.com/lemon4ksan/foundation/net/tls/ja4"
 )
 
-// ErrInvalidJA4Input indicates corrupted or truncated ClientHello byte payloads.
+// ErrInvalidJA4Input indicates corrupted, incomplete, or truncated ClientHello byte payloads.
 var ErrInvalidJA4Input = fja4.ErrInvalidJA4Input
 
-// Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside TLS metadata.
+// Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside parsed TLS metadata.
 type Report = fja4.Report
 
-// ComputeJA4 evaluates a TLS client fingerprint string in 'a_b_c' format.
+// ComputeJA4 evaluates a TLS client fingerprint string in canonical 'a_b_c' format.
+//
+// # Wire Representation
+//
+//	t13d1516h2_8daaf6152771_016657550a2e
+//
+// # Example
+//
+//	rawFingerprint := ja4.ComputeJA4(ciphers, extensions, versions, true, []string{"h2", "http/1.1"}, sigAlgs)
 func ComputeJA4(
 	cipherSuites []uint16,
 	extensions []uint16,
@@ -28,7 +40,11 @@ func ComputeJA4(
 	return fja4.ComputeJA4(cipherSuites, extensions, supportedVersions, sni, alpnProtocols, sigAlgorithms)
 }
 
-// ComputeJA4H evaluates an HTTP client fingerprint string in 'a_b_c_d' format.
+// ComputeJA4H evaluates an HTTP client fingerprint string in canonical 'a_b_c_d' format based on headers and method.
+//
+// # Example
+//
+//	hFingerprint := ja4.ComputeJA4H("GET", "2.0", []string{"Host", "User-Agent", "Accept"}, true, false, "en-US", cookieNames, cookieVals)
 func ComputeJA4H(
 	method, proto string,
 	headers []string,

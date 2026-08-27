@@ -24,14 +24,12 @@ import (
 // IOUringConn implements [net.Conn] by routing asynchronous socket reads and writes
 // directly through a dedicated Linux io_uring instance.
 type IOUringConn struct {
-	mu         sync.Mutex
-	fd         int
-	ring       *Ring
-	laddr      net.Addr
-	raddr      net.Addr
-	closed     atomic.Bool
-	readTimer  *time.Timer
-	writeTimer *time.Timer
+	mu     sync.Mutex
+	fd     int
+	ring   *Ring
+	laddr  net.Addr
+	raddr  net.Addr
+	closed atomic.Bool
 }
 
 // DialIOUring connects to a remote TCP target using a non-blocking socket and io_uring.
@@ -41,13 +39,14 @@ func DialIOUring(ctx context.Context, network, address string) (*IOUringConn, er
 		return nil, err
 	}
 
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
 		return nil, fmt.Errorf("aoni/iouring: resolve host failed: %w", err)
 	}
 
 	ip := ips[0]
-	port, err := net.LookupPort(network, portStr)
+
+	port, err := net.DefaultResolver.LookupPort(ctx, network, portStr)
 	if err != nil {
 		return nil, err
 	}
@@ -71,11 +70,13 @@ func DialIOUring(ctx context.Context, network, address string) (*IOUringConn, er
 	var sa unix.Sockaddr
 	if family == unix.AF_INET {
 		var sa4 unix.SockaddrInet4
+
 		sa4.Port = port
 		copy(sa4.Addr[:], ip.To4())
 		sa = &sa4
 	} else {
 		var sa6 unix.SockaddrInet6
+
 		sa6.Port = port
 		copy(sa6.Addr[:], ip.To16())
 		sa = &sa6
@@ -89,6 +90,7 @@ func DialIOUring(ctx context.Context, network, address string) (*IOUringConn, er
 	}
 
 	lsa, _ := unix.Getsockname(fd)
+
 	var localAddr net.Addr
 	if lsa != nil {
 		localAddr = sockaddrToAddr(lsa)
@@ -202,6 +204,7 @@ func (c *IOUringConn) Close() error {
 	defer c.mu.Unlock()
 
 	_ = c.ring.Close()
+
 	return unix.Close(c.fd)
 }
 
@@ -238,5 +241,6 @@ func sockaddrToAddr(sa unix.Sockaddr) net.Addr {
 	case *unix.SockaddrInet6:
 		return &net.TCPAddr{IP: s.Addr[:], Port: s.Port}
 	}
+
 	return &net.TCPAddr{IP: netip.IPv4Unspecified().AsSlice(), Port: 0}
 }

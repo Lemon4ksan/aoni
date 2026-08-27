@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"

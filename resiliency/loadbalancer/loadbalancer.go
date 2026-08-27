@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/silicon/rand"
+	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/health"
@@ -415,7 +415,7 @@ func (b *Balancer) buildBackendIndices(indices []int, backends []*Backend) {
 	switch b.config.Strategy {
 	case Random:
 		for i := len(indices) - 1; i > 0; i-- {
-			j := rand.Intn(i + 1)
+			j := randkit.Intn(i + 1)
 			indices[i], indices[j] = indices[j], indices[i]
 		}
 

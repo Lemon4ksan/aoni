@@ -9,7 +9,7 @@ import (
 	"io"
 	"reflect"
 
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/refkit"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

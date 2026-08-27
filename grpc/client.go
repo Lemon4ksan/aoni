@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	asyncctx "github.com/lemon4ksan/foundation/async/contextkit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/pathkit"
 	"google.golang.org/protobuf/proto"
@@ -30,13 +30,24 @@ import (
 // Metadata represents Custom-Metadata key-value headers per PROTOCOL-HTTP2.md.
 type Metadata map[string]string
 
-// Invoke executes a native gRPC call over aoni's stealth HTTP/2 transport.
+// Invoke executes a native gRPC unary call over aoni's stealth HTTP/2 transport.
 //
-// Zero-Dependency gRPC:
-// Operates directly on raw HTTP/2 frames without dragging in google.golang.org/grpc.
-// Inherits aoni's uTLS Chrome fingerprints, p0f OS spoofing, and HPACK header ordering.
+// # Architectural Context: Zero-Dependency Pure-Go gRPC
 //
-// Preconditions:
+// Operates directly on raw HTTP/2 frames without importing the heavyweight `google.golang.org/grpc` dependency.
+// Automatically inherits uTLS browser fingerprints, p0f OS stack spoofing, and HPACK header casing.
+//
+// # Wire Representation
+//
+// Encapsulates message bytes into a 5-byte framed payload (`[0 (compression flag), length (uint32 big-endian), data...]`)
+// and validates trailers (`grpc-status: 0`, `grpc-message`).
+//
+// # Example
+//
+//	resp, err := grpc.Invoke[pb.UserResponse](ctx, client, "/service.UserService/GetUser", &pb.UserRequest{Id: 42})
+//
+// # Preconditions
+//
 //   - ctx and reqMsg must be non-nil.
 //   - Resp must be a pointer or struct type implementing [proto.Message].
 func Invoke[Resp any](
@@ -162,18 +173,6 @@ func prepareGRPCModifiers(
 	grpcMods = append(grpcMods, mods...)
 
 	return grpcMods
-}
-
-// unmarshalFastGRPCFrame decodes Protobuf payload bytes from a fast client response.
-func unmarshalFastGRPCFrame(resp core.Response, msg proto.Message) error {
-	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
-		_, err := UnmarshalFrame(stream, msg)
-		return err
-	}
-
-	_, err := UnmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
-
-	return err
 }
 
 // validateInitialHeaders verifies that HTTP status is 200 and Content-Type starts with application/grpc.

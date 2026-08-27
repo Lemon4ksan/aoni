@@ -12,8 +12,13 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
 )
 
-// WithHTTPSignature constructs an [RequestModifier] signing request components per RFC 9421.
-// Injects the "Signature-Input" and "Signature" HTTP headers.
+// WithHTTPSignature signs request components according to RFC 9421 (HTTP Message Signatures).
+//
+// Automatically injects the "Signature-Input" and "Signature" HTTP headers.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9421 (HTTP Message Signatures).
 func WithHTTPSignature(cfg httpsig.SignConfig) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -65,8 +70,7 @@ func WithHTTPSignature(cfg httpsig.SignConfig) RequestModifier {
 	}
 }
 
-// WithHTTPSigner constructs an [RequestModifier] applying an RFC 9421 HTTP Message Signature
-// using the provided [httpsig.Signer].
+// WithHTTPSigner applies an RFC 9421 HTTP Message Signature using a concrete [httpsig.Signer].
 func WithHTTPSigner(signer httpsig.Signer, components ...string) RequestModifier {
 	cfg := httpsig.SignConfig{
 		Signer:     signer,
@@ -76,8 +80,15 @@ func WithHTTPSigner(signer httpsig.Signer, components ...string) RequestModifier
 	return WithHTTPSignature(cfg)
 }
 
-// WithHTTPSignatureKey constructs an [RequestModifier] signing the request using an asymmetric
-// private key (Ed25519, ECDSA, RSA) or HMAC shared secret with automatic algorithm detection.
+// WithHTTPSignatureKey signs the request using an asymmetric private key (Ed25519, ECDSA, RSA) or HMAC secret.
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/signed-webhook",
+//	    mod.WithHTTPSignatureKey("key-1", ed25519PrivateKey, "@method", "@target-uri", "content-digest"),
+//	    mod.WithContentDigest("sha-256"),
+//	    mod.WithJSONBody(payload),
+//	)
 func WithHTTPSignatureKey(keyID string, privKey any, components ...string) RequestModifier {
 	signer, err := httpsig.NewSignerFromKey(keyID, privKey)
 	if err != nil {
@@ -87,8 +98,13 @@ func WithHTTPSignatureKey(keyID string, privKey any, components ...string) Reque
 	return WithHTTPSigner(signer, components...)
 }
 
-// WithContentDigest constructs an [RequestModifier] calculating and injecting an RFC 9530
-// "Content-Digest" header (e.g. "sha-256=:...:") over the request body payload.
+// WithContentDigest calculates and injects an RFC 9530 "Content-Digest" header over the request body bytes.
+//
+// Supported algorithms: "sha-256", "sha-512".
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9530 (Digest Fields).
 func WithContentDigest(algs ...string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,

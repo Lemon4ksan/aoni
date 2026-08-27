@@ -21,7 +21,7 @@ import (
 // Option is an alias for [aoni.ClientOption].
 type Option = aoni.ClientOption
 
-// WithConfig returns an [aoni.ClientOption] that replaces the entire client configuration at once.
+// WithConfig replaces the entire client configuration with a pre-configured [aoni.Config] snapshot.
 func WithConfig(cfg aoni.Config) aoni.ClientOption {
 	return func(c *aoni.Config) {
 		c.Network = cfg.Network.Clone()
@@ -31,29 +31,37 @@ func WithConfig(cfg aoni.Config) aoni.ClientOption {
 	}
 }
 
-// WithDefaultsBlock returns an [aoni.ClientOption] replacing only the [aoni.ClientDefaults] configuration layer.
+// WithDefaultsBlock replaces only the [aoni.ClientDefaults] configuration layer.
 func WithDefaultsBlock(defaults aoni.ClientDefaults) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults = defaults.Clone()
 	}
 }
 
-// WithNetworkBlock returns an [aoni.ClientOption] replacing only the [aoni.NetworkConfig] configuration layer.
+// WithNetworkBlock replaces only the [aoni.NetworkConfig] configuration layer.
 func WithNetworkBlock(network aoni.NetworkConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network = network.Clone()
 	}
 }
 
-// WithFingerprintBlock returns an [aoni.ClientOption] replacing only the [aoni.FingerprintConfig] configuration layer.
+// WithFingerprintBlock replaces only the [aoni.FingerprintConfig] configuration layer.
 func WithFingerprintBlock(fingerprint aoni.FingerprintConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint = fingerprint.Clone()
 	}
 }
 
-// WithBaremetal switches the client to maximum-speed ("bare-metal") mode:
-// it disables background rotation, HTML tag validation, copying of default headers, and unnecessary wrappers.
+// WithBaremetal switches the client into zero-allocation fast-path mode.
+//
+// Disables middleware pipelines, automatic decompression wrappers, and validation overhead
+// for extreme raw HTTP throughput.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithBaremetal(),
+//	)
 func WithBaremetal() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Pipeline.Decompress = false
@@ -66,14 +74,20 @@ func WithBaremetal() aoni.ClientOption {
 	}
 }
 
-// WithEngine returns an [aoni.ClientOption] replacing the underlying [aoni.HTTPDoer] engine (e.g. custom [*http.Client]).
+// WithEngine attaches a custom [aoni.HTTPDoer] execution engine (e.g. customized [*http.Client]).
 func WithEngine(engine aoni.HTTPDoer) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CustomEngine = engine
 	}
 }
 
-// WithProtocol registers a custom [http.RoundTripper] handler for non-HTTP schemes (e.g. aoni.ProtocolFile, aoni.ProtocolS3, or raw string).
+// WithProtocol registers a custom [http.RoundTripper] transport handler for specific URI schemes (e.g. "file://", "s3://").
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithProtocol("file", http.NewFileTransport(http.Dir("/tmp"))),
+//	)
 func WithProtocol[T ~string](scheme T, handler http.RoundTripper) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Engine.Protocols == nil {

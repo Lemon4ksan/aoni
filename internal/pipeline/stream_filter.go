@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/netutil/dict"

@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"

@@ -17,7 +17,7 @@ import (
 	"os"
 	"strings"
 
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -48,13 +48,42 @@ const stackModCapacity = 16
 
 // --- Generic HTTP Methods on *Client ---
 
-// Get performs an HTTP GET request and unmarshals the response payload into a newly allocated *Resp.
+// Get executes an HTTP GET request and automatically decodes the response body into type Resp.
+//
+// Selects the optimal unmarshaling strategy based on the response Content-Type (JSON, XML, or Protobuf).
+// On non-2xx HTTP responses, returns an [*APIError] containing the status code, response headers, and error body.
+//
+// # Resource Management
+//
+// The underlying response body stream is automatically drained and closed. Callers do NOT need to call Body.Close().
+//
+// # Example: Simple Typed Fetch
+//
+//	type User struct {
+//	    ID   int    `json:"id"`
+//	    Name string `json:"name"`
+//	}
+//
+//	user, err := client.Get[User](ctx, "/users/42")
+//	if err != nil {
+//	    if aoni.IsNotFound(err) {
+//	        // Handle HTTP 404
+//	    }
+//	    return err
+//	}
+//
+// # Example: Modifiers & Authentication
+//
+//	user, err := client.Get[User](ctx, "/me",
+//	    mod.WithBearer(token),
+//	    mod.WithQuery("fields", "id,name,email"),
+//	)
 func (c *Client) Get[Resp any](
 	ctx context.Context,
 	path string,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose // body is closed inside decodeResponseTo
 	if err != nil {
 		return nil, err
 	}
@@ -62,14 +91,19 @@ func (c *Client) Get[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// GetInto performs an HTTP GET request and unmarshals the response body directly into target, eliminating allocations.
+// GetInto executes an HTTP GET request and decodes the response directly into target without heap allocations.
+//
+// # Example
+//
+//	var user User
+//	err := client.GetInto(ctx, "/users/42", &user)
 func (c *Client) GetInto[Resp any](
 	ctx context.Context,
 	path string,
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose // body is closed inside HandleResponse
 	if err != nil {
 		return err
 	}
@@ -77,7 +111,7 @@ func (c *Client) GetInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// GetEx performs an HTTP GET request and returns both the unmarshaled *Resp and raw [*http.Response].
+// GetEx executes an HTTP GET request and returns both the unmarshaled *Resp and the raw [*http.Response] metadata.
 func (c *Client) GetEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -86,7 +120,17 @@ func (c *Client) GetEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodGet, path, nil, mods)
 }
 
-// Post performs an HTTP POST request carrying body marshaled as JSON and unmarshals the response into *Resp.
+// Post executes an HTTP POST request carrying body and unmarshals the response into *Resp.
+//
+// The body argument is automatically detected and serialized:
+//   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
+//   - [proto.Message] -> Protobuf binary payload with "Content-Type: application/x-protobuf"
+//   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
+//   - `[]byte` / `string` -> Raw payload
+//
+// # Example
+//
+//	created, err := client.Post[User](ctx, "/users", CreateUserReq{Name: "Bob"})
 func (c *Client) Post[Resp any](
 	ctx context.Context,
 	path string,
@@ -110,7 +154,7 @@ func (c *Client) Post[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// PostInto performs an HTTP POST request and unmarshals the response payload directly into target.
+// PostInto executes an HTTP POST request and unmarshals the response payload directly into target.
 func (c *Client) PostInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -135,7 +179,7 @@ func (c *Client) PostInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// PostEx performs an HTTP POST request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PostEx executes an HTTP POST request and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PostEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -145,7 +189,11 @@ func (c *Client) PostEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPost, path, body, mods)
 }
 
-// Put performs an HTTP PUT request carrying body marshaled as JSON and unmarshals the response into *Resp.
+// Put executes an HTTP PUT request carrying body and unmarshals the response into *Resp.
+//
+// # Example
+//
+//	updated, err := client.Put[User](ctx, "/users/42", UpdateUserReq{Name: "Robert"})
 func (c *Client) Put[Resp any](
 	ctx context.Context,
 	path string,
@@ -169,7 +217,7 @@ func (c *Client) Put[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// PutInto performs an HTTP PUT request and unmarshals the response payload directly into target.
+// PutInto executes an HTTP PUT request and unmarshals the response payload directly into target.
 func (c *Client) PutInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -194,7 +242,7 @@ func (c *Client) PutInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// PutEx performs an HTTP PUT request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PutEx executes an HTTP PUT request and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PutEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -204,7 +252,11 @@ func (c *Client) PutEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPut, path, body, mods)
 }
 
-// Patch performs an HTTP PATCH request carrying body marshaled as JSON and unmarshals the response into *Resp.
+// Patch executes an HTTP PATCH request carrying body and unmarshals the response into *Resp.
+//
+// # Example
+//
+//	patched, err := client.Patch[User](ctx, "/users/42", map[string]any{"status": "active"})
 func (c *Client) Patch[Resp any](
 	ctx context.Context,
 	path string,
@@ -228,7 +280,7 @@ func (c *Client) Patch[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// PatchInto performs an HTTP PATCH request and unmarshals the response payload directly into target.
+// PatchInto executes an HTTP PATCH request and unmarshals the response payload directly into target.
 func (c *Client) PatchInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -253,7 +305,7 @@ func (c *Client) PatchInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// PatchEx performs an HTTP PATCH request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PatchEx executes an HTTP PATCH request and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PatchEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -263,7 +315,11 @@ func (c *Client) PatchEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPatch, path, body, mods)
 }
 
-// Delete performs an HTTP DELETE request and unmarshals the response into *Resp.
+// Delete executes an HTTP DELETE request and unmarshals any returned response payload into *Resp.
+//
+// # Example
+//
+//	status, err := client.Delete[DeleteStatus](ctx, "/users/42")
 func (c *Client) Delete[Resp any](
 	ctx context.Context,
 	path string,
@@ -277,7 +333,7 @@ func (c *Client) Delete[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// DeleteInto performs an HTTP DELETE request and unmarshals the response directly into target.
+// DeleteInto executes an HTTP DELETE request and unmarshals the response directly into target.
 func (c *Client) DeleteInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -292,7 +348,7 @@ func (c *Client) DeleteInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// DeleteEx performs an HTTP DELETE request and returns both the unmarshaled *Resp and raw [*http.Response].
+// DeleteEx executes an HTTP DELETE request and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) DeleteEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -301,7 +357,7 @@ func (c *Client) DeleteEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodDelete, path, nil, mods)
 }
 
-// Options performs an HTTP OPTIONS request and unmarshals the response into *Resp.
+// Options executes an HTTP OPTIONS request and unmarshals the response into *Resp.
 func (c *Client) Options[Resp any](
 	ctx context.Context,
 	path string,
@@ -315,7 +371,7 @@ func (c *Client) Options[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// Fetch performs an arbitrary HTTP request, marshaling body if provided, and unmarshals the response into *Resp.
+// Fetch executes an arbitrary HTTP method request, marshaling body if provided, and unmarshals the response into *Resp.
 func (c *Client) Fetch[Resp any](
 	ctx context.Context,
 	method, path string,
@@ -341,7 +397,7 @@ func (c *Client) Fetch[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// FetchInto performs an arbitrary HTTP request, marshaling body if provided, and unmarshals response directly into target.
+// FetchInto executes an arbitrary HTTP method request, marshaling body if provided, and unmarshals response into target.
 func (c *Client) FetchInto[Resp any](
 	ctx context.Context,
 	method, path string,

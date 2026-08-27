@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	asyncctx "github.com/lemon4ksan/foundation/async/contextkit"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/core"

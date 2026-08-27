@@ -13,11 +13,11 @@ import (
 	"net/url"
 	"time"
 
-	flog "github.com/lemon4ksan/foundation/async/log"
+	flog "github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"

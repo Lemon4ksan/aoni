@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -298,8 +298,16 @@ func (e *APIError) Category() HTTPStatusCategory {
 	return HTTPStatusCategory(e.StatusCode / 100)
 }
 
-// AsTypedResult bridges a value-error tuple into a strongly typed [generic.TypedResult]
-// wrapping [*APIError], conforming to Swift-like Typed Throws error models.
+// AsTypedResult converts a standard `(T, error)` tuple into a Swift-style typed `generic.TypedResult[T, *APIError]`.
+//
+// If err is non-nil and not already an [*APIError], it is wrapped into a 500 Internal Server Error [APIError].
+//
+// # Example
+//
+//	result := aoni.AsTypedResult(client.Get[User](ctx, "/users/1"))
+//	if result.IsFailure() {
+//	    log.Printf("Failed: %v", result.Error())
+//	}
 func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 	if err == nil {
 		return generic.SuccessTyped[T, *APIError](val)
@@ -316,24 +324,39 @@ func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 }
 
 // IsNotFound reports whether err represents an HTTP 404 Not Found response.
+//
+// # Example
+//
+//	user, err := client.Get[User](ctx, "/users/unknown")
+//	if aoni.IsNotFound(err) {
+//	    // Handle missing user resource
+//	}
 func IsNotFound(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsNotFound()
 }
 
-// IsUnauthorized reports whether err represents an HTTP 401 Unauthorized response.
+// IsUnauthorized reports whether err represents an HTTP 401 Unauthorized response (e.g. invalid or expired credentials).
 func IsUnauthorized(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsUnauthorized()
 }
 
-// IsForbidden reports whether err represents an HTTP 403 Forbidden response.
+// IsForbidden reports whether err represents an HTTP 403 Forbidden response (e.g. insufficient permissions or WAF block).
 func IsForbidden(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsForbidden()
 }
 
 // IsRateLimited reports whether err represents an HTTP 429 Too Many Requests response.
+//
+// Inspect the response headers via `err.(*APIError).Headers` (e.g. `Retry-After`) to calculate backoff.
+//
+// # Example
+//
+//	if aoni.IsRateLimited(err) {
+//	    time.Sleep(5 * time.Second)
+//	}
 func IsRateLimited(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsRateLimited()
@@ -344,7 +367,7 @@ func IsTooManyRequests(err error) bool {
 	return IsRateLimited(err)
 }
 
-// IsConflict reports whether err represents an HTTP 409 Conflict response.
+// IsConflict reports whether err represents an HTTP 409 Conflict response (e.g. optimistic locking or resource collision).
 func IsConflict(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsConflict()
@@ -356,7 +379,8 @@ func IsBadRequest(err error) bool {
 	return ok && apiErr.IsBadRequest()
 }
 
-// IsTimeout reports whether err represents an HTTP 408/504 Timeout or context deadline exceeded.
+// IsTimeout reports whether err represents an HTTP 408 Request Timeout, HTTP 504 Gateway Timeout,
+// or a context deadline cancellation ([context.DeadlineExceeded]).
 func IsTimeout(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
@@ -367,13 +391,13 @@ func IsTimeout(err error) bool {
 	return ok && apiErr.IsTimeout()
 }
 
-// IsServerError reports whether err represents an HTTP 5xx server-side response.
+// IsServerError reports whether err represents an HTTP 5xx Server Error status code (500-599).
 func IsServerError(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsServerError()
 }
 
-// IsClientError reports whether err represents an HTTP 4xx client-side response.
+// IsClientError reports whether err represents an HTTP 4xx Client Error status code (400-499).
 func IsClientError(err error) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	return ok && apiErr.IsClientError()

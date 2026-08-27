@@ -32,7 +32,6 @@ type StaleOptions struct {
 
 type staleEntry struct {
 	addrs     []net.IPAddr
-	netAddrs  []netip.Addr
 	expiresAt time.Time
 	fetchedAt time.Time
 }

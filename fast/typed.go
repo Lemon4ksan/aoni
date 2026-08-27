@@ -90,17 +90,32 @@ func (g *FastGRPCClient) Invoke[Resp any](
 	return result, nil
 }
 
-// Get performs a fast HTTP GET request and decodes the response payload directly into *Resp.
+// Get executes a zero-allocation HTTP GET request on the fast engine and decodes the response into *Resp.
+//
+// Automatically releases pooled buffers upon completion.
+//
+// # Example
+//
+//	user, err := fastClient.Get[User](ctx, "/users/42")
 func (c *Client) Get[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
 	return c.Fetch[Resp](ctx, http.MethodGet, path, nil, mods...)
 }
 
-// GetInto performs a fast HTTP GET request and decodes the response payload directly into target without allocations.
+// GetInto executes a fast HTTP GET request and decodes the payload directly into target with 0 heap allocations.
+//
+// # Example
+//
+//	var user User
+//	err := fastClient.GetInto(ctx, "/users/42", &user)
 func (c *Client) GetInto[Resp any](ctx context.Context, path string, target *Resp, mods ...aoni.RequestModifier) error {
 	return c.FetchInto[Resp](ctx, http.MethodGet, path, nil, target, mods...)
 }
 
-// Post performs a fast HTTP POST request with payload body and decodes response into *Resp.
+// Post executes a fast HTTP POST request carrying body and decodes the response into *Resp.
+//
+// # Example
+//
+//	created, err := fastClient.Post[User](ctx, "/users", CreateUserReq{Name: "Alice"})
 func (c *Client) Post[Resp any](
 	ctx context.Context,
 	path string,
@@ -110,7 +125,7 @@ func (c *Client) Post[Resp any](
 	return c.Fetch[Resp](ctx, http.MethodPost, path, body, mods...)
 }
 
-// PostInto performs a fast HTTP POST request with payload body and decodes response directly into target without allocations.
+// PostInto executes a fast HTTP POST request and decodes response directly into target with 0 heap allocations.
 func (c *Client) PostInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -121,7 +136,7 @@ func (c *Client) PostInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPost, path, body, target, mods...)
 }
 
-// Put performs a fast HTTP PUT request with payload body and decodes response into *Resp.
+// Put executes a fast HTTP PUT request carrying body and decodes the response into *Resp.
 func (c *Client) Put[Resp any](
 	ctx context.Context,
 	path string,
@@ -131,7 +146,7 @@ func (c *Client) Put[Resp any](
 	return c.Fetch[Resp](ctx, http.MethodPut, path, body, mods...)
 }
 
-// PutInto performs a fast HTTP PUT request with payload body and decodes response directly into target without allocations.
+// PutInto executes a fast HTTP PUT request and decodes response directly into target with 0 heap allocations.
 func (c *Client) PutInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -142,7 +157,7 @@ func (c *Client) PutInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPut, path, body, target, mods...)
 }
 
-// Patch performs a fast HTTP PATCH request with payload body and decodes response into *Resp.
+// Patch executes a fast HTTP PATCH request carrying body and decodes the response into *Resp.
 func (c *Client) Patch[Resp any](
 	ctx context.Context,
 	path string,
@@ -152,7 +167,7 @@ func (c *Client) Patch[Resp any](
 	return c.Fetch[Resp](ctx, http.MethodPatch, path, body, mods...)
 }
 
-// PatchInto performs a fast HTTP PATCH request with payload body and decodes response directly into target without allocations.
+// PatchInto executes a fast HTTP PATCH request and decodes response directly into target with 0 heap allocations.
 func (c *Client) PatchInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -163,12 +178,12 @@ func (c *Client) PatchInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPatch, path, body, target, mods...)
 }
 
-// Delete performs a fast HTTP DELETE request and decodes response into *Resp.
+// Delete executes a fast HTTP DELETE request and decodes any returned payload into *Resp.
 func (c *Client) Delete[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
 	return c.Fetch[Resp](ctx, http.MethodDelete, path, nil, mods...)
 }
 
-// DeleteInto performs a fast HTTP DELETE request and decodes response directly into target without allocations.
+// DeleteInto executes a fast HTTP DELETE request and decodes response directly into target with 0 heap allocations.
 func (c *Client) DeleteInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -178,7 +193,7 @@ func (c *Client) DeleteInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodDelete, path, nil, target, mods...)
 }
 
-// Fetch performs an HTTP request on the fast engine and decodes response into *Resp.
+// Fetch executes an arbitrary HTTP method request on the fast engine and decodes the response into *Resp.
 func (c *Client) Fetch[Resp any](
 	ctx context.Context,
 	method, path string,
@@ -203,7 +218,7 @@ func (c *Client) Fetch[Resp any](
 	return result, nil
 }
 
-// FetchInto performs an HTTP request on the fast engine and decodes response directly into target without allocations.
+// FetchInto executes an arbitrary HTTP method request and decodes response directly into target with 0 heap allocations.
 func (c *Client) FetchInto[Resp any](
 	ctx context.Context,
 	method, path string,
@@ -224,7 +239,7 @@ func (c *Client) FetchInto[Resp any](
 	return decode.Payload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), target)
 }
 
-// DoInto is an alias for FetchInto.
+// DoInto is an alias for [Client.FetchInto].
 func (c *Client) DoInto[Resp any](
 	ctx context.Context,
 	method, path string,

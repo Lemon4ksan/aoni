@@ -9,7 +9,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/silicon/hex"
+	"github.com/lemon4ksan/foundation/silicon/hexkit"
 )
 
 // Standard W3C TraceContext Header Names.
@@ -45,7 +45,7 @@ func (f TraceFlags) IsSampled() bool {
 func (f TraceFlags) String() string {
 	var buf [2]byte
 	var src = [1]byte{byte(f)}
-	hex.Encode(buf[:], src[:])
+	hexkit.Encode(buf[:], src[:])
 	return string(buf[:])
 }
 
@@ -72,7 +72,7 @@ func ParseTraceID(s string) (TraceID, error) {
 		return id, ErrInvalidTraceID
 	}
 
-	if !hex.Decode32(&id, s) {
+	if !hexkit.Decode32(&id, s) {
 		return id, ErrInvalidTraceID
 	}
 
@@ -91,7 +91,7 @@ func (t TraceID) IsValid() bool {
 // String encodes the TraceID as a 32-character lowercase hex string.
 func (t TraceID) String() string {
 	var buf [32]byte
-	hex.Encode16(&buf, t)
+	hexkit.Encode16(&buf, t)
 	return string(buf[:])
 }
 
@@ -118,7 +118,7 @@ func ParseSpanID(s string) (SpanID, error) {
 		return id, ErrInvalidSpanID
 	}
 
-	if !hex.Decode16(&id, s) {
+	if !hexkit.Decode16(&id, s) {
 		return id, ErrInvalidSpanID
 	}
 
@@ -137,7 +137,7 @@ func (s SpanID) IsValid() bool {
 // String encodes the SpanID as a 16-character lowercase hex string.
 func (s SpanID) String() string {
 	var buf [16]byte
-	hex.Encode8(&buf, s)
+	hexkit.Encode8(&buf, s)
 	return string(buf[:])
 }
 
@@ -209,18 +209,18 @@ func (sc SpanContext) TraceParent() string {
 	buf[2] = '-'
 
 	var traceBuf [32]byte
-	hex.Encode16(&traceBuf, sc.traceID)
+	hexkit.Encode16(&traceBuf, sc.traceID)
 	copy(buf[3:35], traceBuf[:])
 	buf[35] = '-'
 
 	var spanBuf [16]byte
-	hex.Encode8(&spanBuf, sc.spanID)
+	hexkit.Encode8(&spanBuf, sc.spanID)
 	copy(buf[36:52], spanBuf[:])
 	buf[52] = '-'
 
 	var flagsBuf [2]byte
 	var flagsSrc = [1]byte{byte(sc.traceFlags)}
-	hex.Encode(flagsBuf[:], flagsSrc[:])
+	hexkit.Encode(flagsBuf[:], flagsSrc[:])
 	buf[53] = flagsBuf[0]
 	buf[54] = flagsBuf[1]
 
@@ -255,17 +255,17 @@ func ParseTraceParent(header string) (SpanContext, error) {
 	}
 
 	var traceID TraceID
-	if !hex.Decode32(&traceID, header[3:35]) || !traceID.IsValid() {
+	if !hexkit.Decode32(&traceID, header[3:35]) || !traceID.IsValid() {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
 	var spanID SpanID
-	if !hex.Decode16(&spanID, header[36:52]) || !spanID.IsValid() {
+	if !hexkit.Decode16(&spanID, header[36:52]) || !spanID.IsValid() {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	f1, ok1 := hex.FromHexChar(header[53])
-	f2, ok2 := hex.FromHexChar(header[54])
+	f1, ok1 := hexkit.FromHexChar(header[53])
+	f2, ok2 := hexkit.FromHexChar(header[54])
 	if !ok1 || !ok2 {
 		return SpanContext{}, ErrInvalidTraceParent
 	}

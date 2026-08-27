@@ -1,8 +1,17 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// Package challenge provides WAF/DDoS challenge detection and automated solving integration.
+// Package challenge provides automated detection and solving hooks for WAF/DDoS interstitial challenge pages
+// (e.g. Cloudflare Turnstile, JavaScript challenges, or CAPTCHAs).
+//
+// # Architectural Philosophy: Transparent Challenge Resolution
+//
+// When anti-bot systems intercept requests with challenge HTML payloads, standard HTTP clients fail or return 403 Forbidden.
+// The challenge subsystem non-destructively inspects buffered response prefixes and passes detected challenges
+// to pluggable [Solver] implementations to retrieve clearance cookies or solve proofs without breaking client code.
+//
+// # Example
+//
+//	client := aoni.New(
+//	    option.WithChallengeSolver(myTurnstileSolver),
+//	)
 package challenge
 
 import (
@@ -17,10 +26,10 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
-// Detector determines whether an incoming HTTP response represents a WAF/DDoS challenge page.
+// Detector inspects an HTTP response and returns whether it constitutes an anti-bot challenge page.
 type Detector func(resp *http.Response) (bool, error)
 
-// Solver delegates WAF/DDoS challenge page resolution to automated headless or external solver drivers.
+// Solver provides an automated driver for solving anti-bot challenge pages and retrying the request.
 type Solver interface {
 	// Solve resolves a WAF challenge response and retries the request.
 	Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error)

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -90,7 +91,7 @@ func main() {
 	if updated {
 		fmt.Println("\n=== Verifying Profiles & Tests ===")
 
-		cmd := exec.Command("go", "test", "./fingerprint/profiles/...")
+		cmd := exec.CommandContext(context.Background(), "go", "test", "./fingerprint/profiles/...") // #nosec G204
 		cmd.Stdout = os.Stdout
 
 		cmd.Stderr = os.Stderr
@@ -111,7 +112,7 @@ func writeGitHubOutput(info versionInfo, updated bool) {
 		return
 	}
 
-	f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -234,11 +235,12 @@ func fetchIOS(client *http.Client) string {
 }
 
 func fetchAndroid(client *http.Client) string {
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(
+		context.Background(),
 		fheader.MethodGet,
 		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
 		nil,
-	) //nolint:noctx
+	)
 	if err != nil {
 		return ""
 	}
@@ -323,7 +325,7 @@ func updateChrome(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(chromeFile, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(chromeFile, []byte(content), 0o600); err != nil { // #nosec G703
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", chromeFile, err)
 				return false
 			}
@@ -366,7 +368,7 @@ func updateFirefox(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(firefoxFile, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(firefoxFile, []byte(content), 0o600); err != nil { // #nosec G703
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", firefoxFile, err)
 				return false
 			}
@@ -398,7 +400,7 @@ func updateSafari(info versionInfo, dryRun bool) bool {
 
 	if content != original {
 		if !dryRun {
-			if err := os.WriteFile(safariFile, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(safariFile, []byte(content), 0o600); err != nil { // #nosec G703
 				fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", safariFile, err)
 				return false
 			}

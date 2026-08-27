@@ -19,9 +19,9 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/iokit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
 
@@ -159,22 +159,41 @@ type RequestBuilder struct {
 	useYAMLDecoder    bool
 }
 
-// R returns a pooled [RequestBuilder] bound to this [Client] instance.
+// R acquires a pooled, zero-allocation fluent [RequestBuilder] bound to this [Client] instance.
+//
+// Automatically recycled back to the core-pinned free-list upon request execution or explicit [RequestBuilder.Release].
+//
+// # Example
+//
+//	var user User
+//	resp, err := client.R().
+//	    SetHeader("Accept", "application/json").
+//	    SetQueryParam("version", "2").
+//	    SetResult(&user).
+//	    Get("/users/42")
 func (c *Client) R() *RequestBuilder {
 	return acquireRequestBuilder(c)
 }
 
-// NewRequest returns a pooled [RequestBuilder] bound to this [Client] instance (alias for R).
+// NewRequest returns a pooled [RequestBuilder] bound to this [Client] instance (alias for [Client.R]).
 func (c *Client) NewRequest() *RequestBuilder {
 	return acquireRequestBuilder(c)
 }
 
-// R returns a pooled [RequestBuilder] bound to the shared [DefaultClient].
+// R acquires a pooled, zero-allocation fluent [RequestBuilder] bound to the shared [DefaultClient].
+//
+// # Example
+//
+//	var profile Profile
+//	resp, err := aoni.R().
+//	    SetBearerToken(token).
+//	    SetResult(&profile).
+//	    Get("https://api.example.com/me")
 func R() *RequestBuilder {
 	return acquireRequestBuilder(DefaultClient)
 }
 
-// NewRequest returns a pooled [RequestBuilder] bound to the shared [DefaultClient].
+// NewRequest returns a pooled [RequestBuilder] bound to the shared [DefaultClient] (alias for [aoni.R]).
 func NewRequest() *RequestBuilder {
 	return acquireRequestBuilder(DefaultClient)
 }
@@ -471,6 +490,12 @@ func (r *RequestBuilder) SetOutputFromHeader(targetDir string) *RequestBuilder {
 }
 
 // SetBody sets the payload body to be serialized into the request.
+//
+// Automatically detects the appropriate serialization:
+//   - Struct / Map / Slice -> JSON
+//   - [proto.Message] -> Protobuf
+//   - [url.Values] -> Form urlencoded
+//   - `[]byte` / `string` / `io.Reader` -> Raw stream
 func (r *RequestBuilder) SetBody(body any) *RequestBuilder {
 	r.body = body
 	return r
@@ -501,6 +526,11 @@ func (r *RequestBuilder) SetGRPCWebBody(msg proto.Message) *RequestBuilder {
 }
 
 // SetResult sets the target structure pointer for unmarshaling 2xx response bodies.
+//
+// # Example
+//
+//	var user User
+//	resp, err := client.R().SetResult(&user).Get("/users/1")
 func (r *RequestBuilder) SetResult(result any) *RequestBuilder {
 	r.result = result
 	return r
@@ -534,13 +564,21 @@ func (r *RequestBuilder) SetGRPCWebResult(result any) *RequestBuilder {
 	return r
 }
 
-// SetError sets the target structure pointer for non-2xx response unmarshaling.
+// SetError sets the target structure pointer for unmarshaling non-2xx error response bodies.
+//
+// # Example
+//
+//	var errResp ErrorResponse
+//	resp, err := client.R().
+//	    SetResult(&user).
+//	    SetError(&errResp).
+//	    Post("/users", req)
 func (r *RequestBuilder) SetError(errResult any) *RequestBuilder {
 	r.resultError = errResult
 	return r
 }
 
-// SetOutput sets the local disk file path to stream and save the response payload directly.
+// SetOutput sets the local disk file path where the response body stream is saved directly.
 func (r *RequestBuilder) SetOutput(filePath string) *RequestBuilder {
 	r.outputFile = filePath
 	return r
@@ -664,7 +702,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 
 	defer r.Release()
 
-	finalPath := furl.BuildPath(path, r.pathParams, nil)
+	finalPath := urlkit.BuildPath(path, r.pathParams, nil)
 
 	ctx := r.ctx
 	if ctx == nil {
@@ -945,7 +983,7 @@ func (r *RequestBuilder) executeDownload(
 				return nil, err
 			}
 
-			_, copyErr := fio.CopyZeroAlloc(out, resp.Body)
+			_, copyErr := iokit.CopyZeroAlloc(out, resp.Body)
 			_ = out.Close()
 			_ = resp.Body.Close()
 
@@ -970,6 +1008,7 @@ func (r *RequestBuilder) FetchTo[T any](method, path string) (T, *http.Response,
 	var target T
 
 	resp, err := r.SetResult(&target).Execute(method, path)
+
 	return target, resp, err
 }
 

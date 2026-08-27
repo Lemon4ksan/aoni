@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -113,11 +114,12 @@ type wikiResponse struct {
 }
 
 func fetchAndroidVersion(client *http.Client) string {
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(
+		context.Background(),
 		fheader.MethodGet,
 		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
 		nil,
-	) //nolint:noctx
+	)
 	if err != nil {
 		return ""
 	}

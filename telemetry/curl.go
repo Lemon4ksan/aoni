@@ -31,12 +31,26 @@ var defaultSensitiveHeaders = []string{
 	"set-cookie",
 }
 
-// CurlFromRequest converts an [*http.Request] and optional body payload into a shell-escaped cURL command.
+// CurlFromRequest converts an [*http.Request] and optional body bytes into an executable, shell-escaped cURL command.
+//
+// Automatically masks sensitive authentication headers (Authorization, X-Api-Key, Cookies) with default redaction markers.
+//
+// # Example
+//
+//	cmd := telemetry.CurlFromRequest(req, bodyBytes)
+//	fmt.Println(cmd) // curl -X POST https://api.com/items -H 'Authorization: *****REDACTED*****' ...
 func CurlFromRequest(req *http.Request, body []byte) string {
 	return CurlFromRequestWithOptions(req, body, nil)
 }
 
-// CurlFromRequestWithOptions converts an [*http.Request] into cURL applying custom [CurlOptions].
+// CurlFromRequestWithOptions converts an [*http.Request] into a shell-escaped cURL command applying custom [CurlOptions].
+//
+// # Example
+//
+//	cmd := telemetry.CurlFromRequestWithOptions(req, body, &telemetry.CurlOptions{
+//	    RedactSecret: "[SECRET]",
+//	    RedactHeaders: []string{"X-Custom-Token"},
+//	})
 func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOptions) string {
 	if req == nil {
 		return "curl"

@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 

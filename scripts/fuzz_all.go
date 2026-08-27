@@ -93,7 +93,18 @@ func main() {
 
 		start := time.Now()
 
-		cmd := exec.Command("go", "test", "-fuzz=^"+tgt.name+"$", "-fuzztime="+*fuzzDuration, tgt.pkg)
+		pkg := tgt.pkg
+		var dir string
+
+		if strings.HasPrefix(pkg, "./x/") {
+			dir = "x"
+			pkg = "." + strings.TrimPrefix(pkg, "./x")
+		}
+
+		cmd := exec.Command("go", "test", "-fuzz=^"+tgt.name+"$", "-fuzztime="+*fuzzDuration, pkg) // #nosec G204
+		if dir != "" {
+			cmd.Dir = dir
+		}
 
 		var outBuf bytes.Buffer
 

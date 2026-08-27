@@ -16,13 +16,13 @@ import (
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/pkce"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
@@ -87,58 +87,93 @@ func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Resp
 	return DefaultClient.Request(ctx, http.MethodHead, path, mods...)
 }
 
-// GetTo executes a GET request using [DefaultClient] and decodes the response payload into a new instance of T.
+// GetTo executes a 1-line typed GET request using [DefaultClient] and decodes the response into a newly allocated T.
 //
-// Resource Management:
+// Automatically handles decompression (gzip, brotli, zstd) and Content-Type negotiation.
+//
+// # Resource Management
+//
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 //
-// Error Handling:
-// Returns an [*APIError] on non-2xx status codes (4xx/5xx). Use [IsNotFound], [IsRateLimited],
-// or standard [errors.Is] to inspect the returned error.
+// # Error Handling
+//
+// Returns an [*APIError] on non-2xx status codes (4xx/5xx). Use single-line predicate helpers
+// like [IsNotFound], [IsRateLimited], or standard [errors.Is] to inspect the error.
+//
+// # Example
+//
+//	type User struct {
+//	    ID   int    `json:"id"`
+//	    Name string `json:"name"`
+//	}
+//
+//	user, err := aoni.GetTo[User](ctx, "https://api.github.com/users/octocat")
+//	if err != nil {
+//	    if aoni.IsNotFound(err) {
+//	        log.Fatal("User not found")
+//	    }
+//	    log.Fatal(err)
+//	}
 func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.Get[T](ctx, path, mods...)
 }
 
-// PostTo executes a POST request with payload using [DefaultClient] and decodes the response payload into T.
+// PostTo executes a 1-line typed POST request carrying body using [DefaultClient] and decodes the response into T.
 //
-// Smart Body Handling:
-// The body argument is automatically detected and serialized (struct/map to JSON,
-// proto.Message to protobuf, url.Values to form-urlencoded, string/bytes as raw payload).
+// The body argument is automatically serialized based on its type:
+//   - Struct / Map / Slice -> JSON with "Content-Type: application/json"
+//   - [proto.Message] -> Protobuf with "Content-Type: application/x-protobuf"
+//   - [url.Values] -> Form data with "Content-Type: application/x-www-form-urlencoded"
+//   - `[]byte` / `string` -> Raw payload
 //
-// Resource Management:
+// # Resource Management
+//
 // The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
+//
+// # Example
+//
+//	newUser, err := aoni.PostTo[User](ctx, "https://api.example.com/users", CreateUserReq{Name: "Alice"})
 func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.Post[T](ctx, path, body, mods...)
 }
 
-// PutTo executes a PUT request with payload using [DefaultClient] and decodes the response payload into T.
+// PutTo executes a 1-line typed PUT request carrying body using [DefaultClient] and decodes the response into T.
 //
-// Resource Management:
-// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
+// # Example
+//
+//	updated, err := aoni.PutTo[User](ctx, "https://api.example.com/users/42", UpdateUserReq{Name: "Alice B."})
 func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.Put[T](ctx, path, body, mods...)
 }
 
-// PatchTo executes a PATCH request with payload using [DefaultClient] and decodes the response payload into T.
+// PatchTo executes a 1-line typed PATCH request carrying body using [DefaultClient] and decodes the response into T.
 //
-// Resource Management:
-// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
+// # Example
+//
+//	patched, err := aoni.PatchTo[User](ctx, "https://api.example.com/users/42", map[string]string{"status": "online"})
 func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.Patch[T](ctx, path, body, mods...)
 }
 
-// DeleteTo executes a DELETE request using [DefaultClient] and decodes any returned response payload into T.
+// DeleteTo executes a 1-line typed DELETE request using [DefaultClient] and decodes any returned payload into T.
 //
-// Resource Management:
-// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
+// # Example
+//
+//	status, err := aoni.DeleteTo[DeleteStatus](ctx, "https://api.example.com/users/42")
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.Delete[T](ctx, path, mods...)
 }
 
 // Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.
 //
-// This is particularly useful in functional error-handling pipelines (e.g. railway-oriented programming)
-// where callers want to inspect Success/Failure states without multiple if-err guards.
+// Enables Railway-Oriented Programming (ROP) and functional error handling without repetitive if-err checks.
+//
+// # Example
+//
+//	result, resp := aoni.Fetch[User](ctx, "https://api.github.com/users/octocat")
+//	if result.IsSuccess() {
+//	    fmt.Printf("User: %s\n", result.Value().Name)
+//	}
 func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (generic.Result[T], *http.Response) {
 	val, resp, err := DefaultClient.GetEx[T](ctx, path, mods...)
 	if err != nil {
@@ -148,8 +183,16 @@ func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (ge
 	return generic.Success(*val), resp
 }
 
-// FetchTyped executes a GET request using the shared default client and returns a [generic.TypedResult]
-// wrapping the unmarshaled response or a structured [*APIError], conforming to Swift-style Typed Throws.
+// FetchTyped executes a GET request and returns a strongly-typed [generic.TypedResult] wrapping [*APIError],
+// conforming to Swift-style Typed Throws error models.
+//
+// # Example
+//
+//	result, _ := aoni.FetchTyped[User](ctx, "https://api.example.com/users/42")
+//	if result.IsFailure() {
+//	    apiErr := result.Error()
+//	    log.Printf("API Error %d: %s", apiErr.StatusCode, apiErr.BodyString())
+//	}
 func FetchTyped[T any](
 	ctx context.Context,
 	path string,
@@ -163,8 +206,15 @@ func FetchTyped[T any](
 	return generic.SuccessTyped[T, *APIError](*val), resp
 }
 
-// Scoped executes fn within an isolated, ephemeral [Client] scope configured with opts.
-// The ephemeral client is deep-copied from client (or [DefaultClient] if nil) and cleanly closed after execution.
+// Scoped executes fn within an isolated, ephemeral [Client] instance configured with opts.
+//
+// The ephemeral client is deep-copied from client (or [DefaultClient] if nil) and automatically closed after fn finishes.
+//
+// # Example
+//
+//	user, err := aoni.Scoped(nil, func(c *aoni.Client) (*User, error) {
+//	    return c.Get[User](ctx, "/users/1")
+//	}, option.WithChrome(), option.WithTimeout(5*time.Second))
 func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOption) (T, error) {
 	base := client
 	if base == nil {
@@ -223,12 +273,12 @@ func WithBasicAuth(username, password string) RequestModifier {
 // parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
 // If method is omitted or empty, S256 is used by default.
 func WithPKCE(verifier string, method ...string) RequestModifier {
-	m := fpkce.MethodS256
+	m := pkce.MethodS256
 	if len(method) > 0 && method[0] != "" {
 		m = method[0]
 	}
 
-	if challenge, err := fpkce.ComputeChallenge(verifier, m); err == nil {
+	if challenge, err := pkce.ComputeChallenge(verifier, m); err == nil {
 		verifier = challenge
 	}
 

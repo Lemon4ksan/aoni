@@ -22,21 +22,50 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// WithNetwork sets the default L4 or IPC network protocol for socket dialing (e.g. aoni.NetworkTCP, aoni.NetworkUnix).
+// WithNetwork sets the default L4 transport or IPC protocol for socket dialing.
+//
+// Common networks: [aoni.NetworkTCP], [aoni.NetworkUDP], [aoni.NetworkUnix].
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithNetwork(aoni.NetworkTCP),
+//	)
 func WithNetwork(network aoni.Network) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.Network = network
 	}
 }
 
-// WithNetworkString sets the default L4 or IPC network protocol from a raw string (e.g. "tcp", "unix").
+// WithNetworkString sets the default L4 or IPC network protocol from a raw string.
+//
+// Supported values include "tcp", "tcp4", "tcp6", "udp", and "unix".
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithNetworkString("tcp4"),
+//	)
 func WithNetworkString(network string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.Network = aoni.Network(network)
 	}
 }
 
-// WithInterface binds outgoing TCP sockets directly to a specific network interface (e.g. "eth0", "wg0").
+// WithInterface binds outgoing TCP/UDP sockets directly to a specific OS network interface.
+//
+// Useful for multi-homed servers, VPN egress binding, or forcing cellular/Wi-Fi routes.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithInterface("eth0"),
+//	)
+//
+// # Invariants & OS Requirements
+//
+// Requires `SO_BINDTODEVICE` (Linux) or `IP_BOUND_IF` (macOS/BSD). On Linux, may require
+// elevated capabilities (`CAP_NET_RAW`).
 func WithInterface(iface string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.InterfaceName = iface
@@ -44,27 +73,45 @@ func WithInterface(iface string) aoni.ClientOption {
 }
 
 // WithSocketMark assigns a Linux netfilter socket mark (SO_MARK) for policy-based routing.
+//
+// Packets emitted by this socket will carry the specified mark, enabling `iptables` / `nftables`
+// and policy routing tables (`ip rule`) to select specific routing tables.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithSocketMark(0x100),
+//	)
 func WithSocketMark(mark uint32) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.SocketMark = mark
 	}
 }
 
-// WithCustomNetworkDriver returns an [aoni.ClientOption] attaching a custom L3/L4 network stack driver.
+// WithCustomNetworkDriver attaches a custom L3/L4 network stack driver.
+//
+// Enables userspace network stacks (such as gVisor Netstack or DPDK) to intercept and manage
+// all underlying packet flows.
 func WithCustomNetworkDriver(driver netdial.RawStackDriver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.StackDriver = driver
 	}
 }
 
-// WithL2Device returns an [aoni.ClientOption] attaching a custom Data Link Layer (Ethernet) L2Device driver.
+// WithL2Device attaches a custom Data Link Layer (Ethernet) device driver for raw frame injection.
 func WithL2Device(device netdial.L2Device) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.L2Device = device
 	}
 }
 
-// WithLocalAddr returns an [aoni.ClientOption] binding outgoing TCP connections to a single local IP address.
+// WithLocalAddr binds outgoing TCP connections to a single local IP address.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithLocalAddr("192.168.1.50"),
+//	)
 func WithLocalAddr(addr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		rotator, err := ip.NewSourceIPRotator([]string{addr})
@@ -74,7 +121,13 @@ func WithLocalAddr(addr string) aoni.ClientOption {
 	}
 }
 
-// WithLocalAddrPool returns an [aoni.ClientOption] registering a pool of local IP addresses to cycle through.
+// WithLocalAddrPool registers a pool of local IP addresses to cycle through across outgoing requests.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithLocalAddrPool([]string{"10.0.0.2", "10.0.0.3", "10.0.0.4"}),
+//	)
 func WithLocalAddrPool(addrs []string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		rotator, err := ip.NewSourceIPRotator(addrs)
@@ -84,7 +137,16 @@ func WithLocalAddrPool(addrs []string) aoni.ClientOption {
 	}
 }
 
-// WithProxy returns an [aoni.ClientOption] configuring a proxy server URL.
+// WithProxy configures an upstream proxy server URL.
+//
+// Supported schemes: "http://", "https://", "socks5://", "socks5h://".
+//
+// # Example
+//
+//	proxyURL, _ := url.Parse("socks5://127.0.0.1:9050")
+//	client := aoni.NewClient(nil,
+//	    option.WithProxy(proxyURL),
+//	)
 func WithProxy(proxyURL *url.URL) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.ProxyAddr = proxyURL
@@ -94,7 +156,17 @@ func WithProxy(proxyURL *url.URL) aoni.ClientOption {
 	}
 }
 
-// WithProxyString returns an [aoni.ClientOption] parsing and setting a proxy URL string.
+// WithProxyString parses a proxy URL and sets it as the default upstream proxy.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithProxyString("socks5h://user:pass@127.0.0.1:1080"),
+//	)
+//
+// # Invariants
+//
+// If proxyStr is malformed, the option is safely ignored without panicking.
 func WithProxyString(proxyStr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		u, err := proxy.Parse(proxyStr)
@@ -109,7 +181,15 @@ func WithProxyString(proxyStr string) aoni.ClientOption {
 	}
 }
 
-// WithProxyDNS returns an [aoni.ClientOption] routing DNS resolutions through SOCKS5 or HTTP CONNECT proxies.
+// WithProxyDNS routes DNS hostname lookups through the configured SOCKS5 or HTTP CONNECT proxy
+// instead of resolving locally, eliminating DNS leaks.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithProxyString("socks5://127.0.0.1:1080"),
+//	    option.WithProxyDNS(),
+//	)
 func WithProxyDNS() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.ProxyDNS = true
@@ -118,6 +198,8 @@ func WithProxyDNS() aoni.ClientOption {
 
 // WithAdaptiveProxyTimeout enables dynamic proxy connection timeout calculation
 // based on observed network round-trip time (RTT) metrics.
+//
+// Automatically adjusts handshake deadlines according to moving network EWMA percentiles.
 func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOption {
 	activeCfg := proxy.DefaultAdaptiveTimeoutConfig()
 	if len(cfg) > 0 {
@@ -138,35 +220,64 @@ func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOpt
 	}
 }
 
-// WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with a [netutil.DNSResolver].
+// WithDNSResolver replaces the default system DNS resolver with a custom [netutil.DNSResolver].
+//
+// Allows integration with DoH (DNS over HTTPS), DoT (DNS over TLS), or DoQ (DNS over QUIC).
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithDNSResolver(dohResolver),
+//	)
 func WithDNSResolver(resolver netutil.DNSResolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.DNSResolver = resolver
 	}
 }
 
-// WithHostRewrite returns an [aoni.ClientOption] configuring DNS hostname-to-IP remapping rules.
+// WithHostRewrite configures static hostname-to-IP remapping rules, overriding DNS resolution.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithHostRewrite(map[string]string{
+//	        "api.internal.com": "10.0.4.15",
+//	    }),
+//	)
 func WithHostRewrite(rules map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.HostRewrite = &netutil.HostRewriteConfig{Rules: rules}
 	}
 }
 
-// WithHappyEyeballs returns an [aoni.ClientOption] configuring IPv4/IPv6 stagger delay.
+// WithHappyEyeballs configures the dual-stack IPv4/IPv6 connection racing delay (RFC 8305).
+//
+// Defaults to 300ms if not explicitly overridden.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 8305 (Happy Eyeballs Version 2: Better Connectivity Using Concurrency).
 func WithHappyEyeballs(delay time.Duration) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.HappyEyeballsDelay = delay
 	}
 }
 
-// WithSSRFGuard returns an [aoni.ClientOption] enabling SSRF safeguards against private and loopback IP addresses.
+// WithSSRFGuard enables anti-SSRF protections, preventing requests to private, loopback,
+// carrier-grade NAT, or cloud metadata IP addresses (e.g. 169.254.169.254).
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithSSRFGuard(),
+//	)
 func WithSSRFGuard() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.SSRFGuard = true
 	}
 }
 
-// WithTCPDelay returns an [aoni.ClientOption] setting default pre-dial TCP delay jitter bounds.
+// WithTCPDelay sets default pre-dial TCP delay jitter bounds to randomize connection timing against traffic analysis.
 func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
 	minDelay, maxDelay := min, max
 	if minDelay > maxDelay {
@@ -178,63 +289,114 @@ func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
 	}
 }
 
-// WithFragmentation returns an [aoni.ClientOption] configuring TCP packet fragmentation parameters.
+// WithFragmentation configures TCP packet fragmentation parameters for DPI evasion.
 func WithFragmentation(frag fragment.Config) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.FragmentConfig = &frag
 	}
 }
 
-// WithSocketController returns an [aoni.ClientOption] registering an [aoni.SocketController] socket control hook.
+// WithSocketController registers a custom socket control hook invoked prior to connect/bind.
 func WithSocketController(controller netutil.SocketController) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.SocketController = controller
 	}
 }
 
-// WithTimeout returns an [aoni.ClientOption] setting the end-to-end request transaction deadline duration.
+// WithTimeout sets the overall end-to-end request deadline (including dial, TLS handshake, and body read).
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithTimeout(10 * time.Second),
+//	)
 func WithTimeout(d time.Duration) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.Timeout = d
 	}
 }
 
-// WithRedirectLimit returns an [aoni.ClientOption] setting the maximum number of HTTP redirects followed.
+// WithRedirectLimit sets the maximum number of consecutive HTTP redirects followed before failing.
+//
+// Set to 0 to disable automatic redirect following completely.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithRedirectLimit(5),
+//	)
 func WithRedirectLimit(max int) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.RedirectLimit = max
 	}
 }
 
-// WithAllowedRedirectDomains returns an [aoni.ClientOption] restricting HTTP redirects to trusted domain patterns.
+// WithAllowedRedirectDomains restricts HTTP redirect navigation exclusively to trusted domain names.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithAllowedRedirectDomains("auth.example.com", "app.example.com"),
+//	)
 func WithAllowedRedirectDomains(domains ...string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CheckRedirect = aoni.AllowedDomainsRedirectPolicy(domains...)
 	}
 }
 
-// WithBlockRedirectTo returns an [aoni.ClientOption] that halts redirects to matching URLs (e.g. "/login").
+// WithBlockRedirectTo halts redirect chains immediately if the target URL path matches any of patterns.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithBlockRedirectTo("/login", "/challenge"),
+//	)
 func WithBlockRedirectTo(patterns ...string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CheckRedirect = aoni.BlockPathRedirectPolicy(patterns...)
 	}
 }
 
-// WithConnectionPool returns an [aoni.ClientOption] configuring keep-alive connection boundaries on the transport.
+// WithConnectionPool configures idle connection pool limits, max idle conns per host, and idle timeouts.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithConnectionPool(aoni.ConnectionPoolConfig{
+//	        MaxIdleConns:        1000,
+//	        MaxIdleConnsPerHost: 100,
+//	        IdleConnTimeout:     90 * time.Second,
+//	    }),
+//	)
 func WithConnectionPool(pool aoni.ConnectionPoolConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.ConnectionPool = &pool
 	}
 }
 
-// WithInsecureSkipVerify returns an [aoni.ClientOption] bypassing TLS certificate verification globally on the transport.
+// WithInsecureSkipVerify disables remote TLS certificate verification globally on the transport.
+//
+// > [!WARNING]
+// > Use only in testing or internal development environments. Bypasses MITM attack defenses.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithInsecureSkipVerify(),
+//	)
 func WithInsecureSkipVerify() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.InsecureSkipVerify = true
 	}
 }
 
-// WithUnixSocket binds the client transport directly to a local Unix domain socket (e.g., "/var/run/docker.sock").
+// WithUnixSocket binds the client transport directly to a local Unix domain socket.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithUnixSocket("/var/run/docker.sock"),
+//	)
 func WithUnixSocket(socketPath string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CustomEngine = &http.Client{
@@ -243,7 +405,13 @@ func WithUnixSocket(socketPath string) aoni.ClientOption {
 	}
 }
 
-// WithNamedPipe binds the client transport to a Windows Named Pipe (e.g., "\\.\pipe\docker_engine").
+// WithNamedPipe binds the client transport to a Windows Named Pipe.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithNamedPipe(`\\.\pipe\docker_engine`),
+//	)
 func WithNamedPipe(pipePath string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CustomEngine = &http.Client{
@@ -252,14 +420,14 @@ func WithNamedPipe(pipePath string) aoni.ClientOption {
 	}
 }
 
-// WithCoreAffinity returns an [aoni.ClientOption] locking calling threads to target physical CPU cores.
+// WithCoreAffinity locks client worker and network polling threads to specific physical CPU cores.
 func WithCoreAffinity(cores ...int) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.CPUAffinityCores = cores
 	}
 }
 
-// WithPACEngine returns an [aoni.ClientOption] configuring a dynamic PAC (Proxy Auto-Config) engine for routing requests.
+// WithPACEngine attaches a dynamic Proxy Auto-Configuration (PAC) routing engine.
 func WithPACEngine(engine *proxy.PACEngine) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if engine != nil {
@@ -268,7 +436,15 @@ func WithPACEngine(engine *proxy.PACEngine) aoni.ClientOption {
 	}
 }
 
-// WithPACRules returns an [aoni.ClientOption] creating and attaching a [proxy.PACEngine] with declarative rules.
+// WithPACRules creates and attaches a [proxy.PACEngine] initialized with declarative routing rules.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithPACRules("DIRECT",
+//	        proxy.NewDomainPACRule("*.internal.net", "PROXY proxy.corp:8080"),
+//	    ),
+//	)
 func WithPACRules(defaultRoute string, rules ...proxy.PACRule) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		engine := proxy.NewPACEngine(defaultRoute)

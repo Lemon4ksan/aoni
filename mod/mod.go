@@ -32,7 +32,7 @@ func Apply(req Request, mods ...RequestModifier) {
 	}
 }
 
-// WithAutoDecode constructs an [RequestModifier] enabling content-type header detection for response parsing.
+// WithAutoDecode instructs the client engine to detect the response Content-Type and select the optimal decoder.
 func WithAutoDecode() RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -43,6 +43,14 @@ func WithAutoDecode() RequestModifier {
 }
 
 // Custom constructs a custom [RequestModifier] wrapping an arbitrary closure function.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/resource",
+//	    mod.Custom(func(req aoni.Request) {
+//	        req.SetHeader("X-Custom", "value")
+//	    }),
+//	)
 func Custom(fn func(Request)) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,

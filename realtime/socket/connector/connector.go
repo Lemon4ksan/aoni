@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/async/logkit"
 
 	"github.com/lemon4ksan/aoni/realtime/socket"
 )
@@ -173,7 +173,7 @@ type Config[Endpoint any] struct {
 	Cipher          socket.Cipher
 	ReconnectPolicy ReconnectPolicy[Endpoint]
 	ConnectTimeout  time.Duration
-	Logger          log.Logger
+	Logger          logkit.Logger
 }
 
 // Connector maintains active socket connection states and executes automatic reconnections on transport failures.
@@ -184,7 +184,7 @@ type Connector[Endpoint any] struct {
 	cancel context.CancelFunc
 	closed atomic.Bool
 
-	logger   log.Logger
+	logger   logkit.Logger
 	incoming chan *socket.FrameBuffer
 
 	conn            Connection
@@ -202,7 +202,7 @@ func New[Endpoint any](cfg Config[Endpoint]) *Connector[Endpoint] {
 
 	l := cfg.Logger
 	if l == nil {
-		l = log.Discard
+		l = logkit.Discard
 	}
 
 	if cfg.ConnectTimeout == 0 {
@@ -218,7 +218,7 @@ func New[Endpoint any](cfg Config[Endpoint]) *Connector[Endpoint] {
 		ctx:       ctx,
 		cancel:    cancel,
 		incoming:  make(chan *socket.FrameBuffer, 1024),
-		logger:    l.With(log.Component("connector")),
+		logger:    l.With(logkit.Component("connector")),
 		endpoints: make([]Endpoint, 0),
 		cipher:    cfg.Cipher,
 	}

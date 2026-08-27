@@ -1,9 +1,8 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// Package etag implements RFC 9111 conditional HTTP caching and 304 Not Modified automation.
-// Core implementation is located in [github.com/lemon4ksan/foundation/net/http/etag].
+// Package etag implements RFC 9111 conditional HTTP caching and automatic 304 Not Modified body reconstruction.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9110 §8.8.3 (Entity Tags) and RFC 9111 §4.3 (Conditional Requests).
 package etag
 
 import (

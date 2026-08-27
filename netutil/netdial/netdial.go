@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 

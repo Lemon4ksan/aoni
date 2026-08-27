@@ -22,7 +22,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/hpack"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
-	"github.com/lemon4ksan/foundation/silicon/rand"
+	"github.com/lemon4ksan/foundation/silicon/randkit"
 	"github.com/lemon4ksan/foundation/silicon/simd"
 	"golang.org/x/net/http2"
 
@@ -633,7 +633,7 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 }
 
 func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
-	binary.LittleEndian.PutUint32(c.writeMask[:], rand.Uint32())
+	binary.LittleEndian.PutUint32(c.writeMask[:], randkit.Uint32())
 
 	neededLen := len(header) + 4 + len(payload)
 	if cap(c.writeBuf) < neededLen {

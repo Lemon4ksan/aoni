@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	fio "github.com/lemon4ksan/foundation/iokit"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	frand "github.com/lemon4ksan/foundation/silicon/rand"
+	frand "github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"

@@ -171,56 +171,54 @@ Imports must be grouped in exactly 3 sections separated by empty lines, enforced
 
 ## 5. Documentation & Commenting Style
 
-`aoni` follows **Go-Native Documentation Standards** enhanced with structural elegance. 
+`aoni` follows the **Gold Standard Documentation Blueprint** — combining the architectural rigor and invariant precision of **Swift (DocC)**, the developer experience and instant actionable utility of **Elysia.js**, and the idiomatic markdown conventions of **Go 1.19+**.
 
 > [!IMPORTANT]
-> Documentation must remain **100% compliant with standard `godoc` and `pkgsite`**. Go documentation prioritizes natural, readable prose.
+> Documentation must remain **100% compliant with standard `godoc`, `pkgsite`, and IDE language servers (`gopls`)**. Avoid un-idiomatic JSDoc/Doxygen `@param` and `@return` annotations; rely on Go-native prose, bracketed symbol links `[...]`, and Markdown section headers `#`.
 
-### 5.1 Rules for Exported Identifiers
+### 5.1 The 5-Point Gold Standard Blueprint
+
+Every exported function, method, option, and modifier should follow this structured anatomy:
+
+1. **Summary Line**: Begins with the symbol name and concisely states the primary action/purpose in 1–2 sentences.
+2. **Context & Rationale**: Explains *why* this exists, when to use it vs alternatives, and what happens under the hood (e.g. socket pooling, TLS grease, WAF bypass).
+3. **Wire Representation / Protocol Notes** (when applicable): Visually illustrates what bytes, headers, or frames are sent over the wire.
+4. **Actionable Code Example (`# Example`)**: A copy-paste ready snippet showing immediate usage in context (Elysia DX).
+5. **Invariants & Guarantees (`# Invariants & Allocation` / `# RFC Compliance` / `# Thread Safety`)**: Explicitly documents zero-allocation paths, bounds/clamping behavior, concurrency properties, and authoritative IETF RFC / W3C specifications.
+
+```go
+// WithPriority configures RFC 9218 extensible request priority headers and HTTP/2-3 stream scheduling.
+//
+// Urgency defines the relative processing precedence (0 = highest/critical, 7 = lowest/background).
+// When incremental is true, the server is instructed to stream partial chunks of the response
+// concurrently rather than buffering the entire payload before delivery.
+//
+// # Wire Representation
+//
+//	Priority: u=1, i
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/hero-banner.webp",
+//	    mod.WithPriority(1, true),
+//	)
+//
+// # Invariants & Allocations
+//
+//   - Zero-Allocation: Operates on pre-allocated static strings for standard urgencies.
+//   - Clamping: Values outside [0..7] are clamped automatically without returning an error.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9218 (Extensible Prioritization Scheme for HTTP), Section 3.1.
+func WithPriority(urgency int, incremental bool) RequestModifier
+```
+
+### 5.2 Rules for Exported Identifiers
 - **100% Coverage**: Every exported struct, interface, type, method, function, field, constant, variable, and sentinel error **must** have a doc comment.
 - **First Sentence Rule**: The doc comment **must** begin with the name of the exported symbol being documented.
-
-### 5.2 Doc Comment Structure
-For complex types or methods, structure doc comments into clear narrative paragraphs, using Markdown formatting supported by `godoc`:
-
-1. **Summary Line**: Starts with symbol name and describes primary behavior concisely.
-2. **Discussion Paragraph**: Details architectural rationale, progressive disclosure, background mechanics, or edge cases.
-3. **Structured Markdown Headers** (when necessary for complex operations):
-   - `# Concurrency`: Thread-safety guarantees and goroutine considerations.
-   - `# Performance`: Zero-alloc behavior, pool notes, or throughput tips.
-   - `# Example`: Short, runnable code snippet demonstrating typical usage.
-
-```go
-// Client is an immutable, thread-safe, multi-protocol HTTP, WebSockets, and gRPC client facade.
-// It acts as a high-level public interface hiding low-level protocol orchestration
-// (uTLS fingerprints, HTTP/2-3 framing, proxy rotation, anti-DPI packet fragmentation, and p0f OS spoofing).
-//
-// Designed around Progressive Disclosure of Complexity: simple REST API calls execute
-// with 0-alloc fast-path performance, while advanced enterprise features are available via options
-// without breaking application code contracts or requiring service rewrites.
-//
-// # Concurrency
-// Client instances are 100% thread-safe and safe for concurrent invocation across goroutines.
-// Methods such as With() and Clone() return new Client instances with isolated configuration DTOs.
-type Client struct {
-    ...
-}
-```
-
-```go
-// FetchTo executes a request with method, path, and optional modifiers, unmarshaling the response into T.
-//
-// # Performance
-// Utilizes pooled request builders to eliminate heap allocations during request construction.
-func FetchTo[T any](
-    ctx context.Context,
-    c *aoni.Client,
-    method, path string,
-    mods ...aoni.RequestModifier,
-) (T, *http.Response, error) {
-    ...
-}
-```
+- **Doc Links**: Link to related types and methods using Go 1.19+ bracketed links (e.g., `[Client]`, `[mod.WithHeader]`, `[http.CookieJar]`).
+- **No Dry One-Liners**: Avoid vacuous single-line comments (e.g., `// WithProxy sets proxy`). Explain default values, error modes, and interaction with other components.
 
 ## 6. Function Responsibility & Granularity
 

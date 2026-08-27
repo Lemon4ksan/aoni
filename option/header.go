@@ -24,32 +24,50 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/secret"
 )
 
-// WithPriority returns an [aoni.ClientOption] setting a default RFC 9218 "Priority" header on every request.
+// WithPriority sets the default RFC 9218 "Priority" header on every outbound request.
+//
+// Urgency ranges from 0 (highest/critical) to 7 (lowest/background). Incremental specifies whether
+// the response can be streamed incrementally.
+//
+// # Wire Representation
+//
+//	Priority: u=1, i
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9218 (Extensible Prioritization Scheme for HTTP).
 func WithPriority(urgency int, incremental bool) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithPriority(urgency, incremental))
 	}
 }
 
-// WithPriorityPreset returns an [aoni.ClientOption] setting a default RFC 9218 "Priority" header from a preset.
+// WithPriorityPreset sets a default RFC 9218 "Priority" header from a structured [priority.Priority] preset.
 func WithPriorityPreset(p priority.Priority) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithPriorityPreset(p))
 	}
 }
 
-// WithBaseURL returns an [aoni.ClientOption] setting the default Base URI for resolving relative request paths (RFC 3986 §5.1).
+// WithBaseURL sets the default Base URI for resolving relative request paths (RFC 3986 §5.1).
 //
 // # RFC 3986 Resolution & Slash Normalization
 //
 // Under RFC 3986 §5.2, a Base URI should ideally include a trailing slash (e.g. "https://api.example.com/v1/")
 // to signify a directory component, ensuring relative paths (e.g. "users") do not displace the final path segment.
 //
-// To prevent common routing errors and 404s, aoni automatically normalizes slashes:
-//   - If raw lacks a trailing slash, aoni appends it for RFC reference resolution.
-//   - If a request specifies a leading slash (e.g. "/users") against a subpath base (e.g. ".../v1/"),
-//     aoni concatenates them safely into ".../v1/users" rather than resetting to domain root.
-//   - Duplicate boundary slashes ("//") are automatically deduplicated with zero heap allocations.
+// aoni automatically normalizes slashes to prevent common routing errors:
+//   - Appends a trailing slash if missing when parsing base URLs.
+//   - Concatenates leading-slash request paths ("/users") onto subpath bases (".../v1/") safely into ".../v1/users".
+//   - Deduplicates boundary slashes ("//") on the zero-allocation fast path.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithBaseURL("https://api.github.com"),
+//	)
+//	// Performs GET to "https://api.github.com/users/octocat"
+//	res, err := client.Get[User](ctx, "/users/octocat")
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {
@@ -71,7 +89,13 @@ func WithBaseURL(raw string) aoni.ClientOption {
 	}
 }
 
-// WithHeader returns an [aoni.ClientOption] adding a default header key-value pair sent with every request.
+// WithHeader sets a static default HTTP header key-value pair sent with every request.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithHeader("X-App-Version", "1.4.2"),
+//	)
 func WithHeader(key, value string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -82,7 +106,17 @@ func WithHeader(key, value string) aoni.ClientOption {
 	}
 }
 
-// WithHeaderFunc returns an [aoni.ClientOption] setting a dynamic header evaluated via provider on every request.
+// WithHeaderFunc configures a dynamic header value evaluated dynamically at request execution time.
+//
+// Useful for rotating tokens, timestamp nonces, or dynamic tracing identifiers.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithHeaderFunc("X-Timestamp", func() string {
+//	        return strconv.FormatInt(time.Now().Unix(), 10)
+//	    }),
+//	)
 func WithHeaderFunc(key string, provider func() string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if key == "" || provider == nil {
@@ -93,7 +127,16 @@ func WithHeaderFunc(key string, provider func() string) aoni.ClientOption {
 	}
 }
 
-// WithHeaders returns an [aoni.ClientOption] merging a map of default headers into the client configuration.
+// WithHeaders merges a map of default HTTP headers into the client configuration.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithHeaders(map[string]string{
+//	        "Accept": "application/json",
+//	        "X-Environment": "production",
+//	    }),
+//	)
 func WithHeaders(headers map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -106,14 +149,20 @@ func WithHeaders(headers map[string]string) aoni.ClientOption {
 	}
 }
 
-// WithoutHeaders returns an [aoni.ClientOption] purging all default request headers.
+// WithoutHeaders purges all default request headers, providing a clean baseline.
 func WithoutHeaders() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Headers = make(http.Header)
 	}
 }
 
-// WithUserAgent returns an [aoni.ClientOption] overriding the default User-Agent header field.
+// WithUserAgent overrides the default User-Agent request header string.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithUserAgent("MyBot/1.0 (+https://example.com/bot)"),
+//	)
 func WithUserAgent(ua string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -124,14 +173,14 @@ func WithUserAgent(ua string) aoni.ClientOption {
 	}
 }
 
-// WithUARotationProfiles returns an [aoni.ClientOption] configuring browser profiles for automatic User-Agent rotation.
+// WithUARotationProfiles registers a slice of browser profiles for automated per-request User-Agent rotation.
 func WithUARotationProfiles(profiles []aoni.BrowserProfile) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.UARotationProfiles = profiles
 	}
 }
 
-// WithOrigin returns an [aoni.ClientOption] setting a default Origin header.
+// WithOrigin sets a static default Origin header field.
 func WithOrigin(origin string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -142,7 +191,17 @@ func WithOrigin(origin string) aoni.ClientOption {
 	}
 }
 
-// WithBearer returns an [aoni.ClientOption] setting a default "Authorization: Bearer <token>" header (RFC 6750 §2.1).
+// WithBearer sets a static default HTTP Authorization Bearer token (RFC 6750 §2.1).
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithBearer("ghp_secret_access_token_123"),
+//	)
+//
+// # RFC Compliance
+//
+// Conforms to RFC 6750 (OAuth 2.0 Bearer Token Usage).
 func WithBearer(token string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -153,12 +212,18 @@ func WithBearer(token string) aoni.ClientOption {
 	}
 }
 
-// WithSecretBearer returns an [aoni.ClientOption] setting a default Bearer token from a protected [secret.Secret].
+// WithSecretBearer sets a default Bearer token extracted from a protected [secret.Secret] memory container.
 func WithSecretBearer(token secret.Secret[string]) aoni.ClientOption {
 	return WithBearer(token.Value())
 }
 
-// WithBasicAuth returns an [aoni.ClientOption] setting default HTTP Basic Authentication credentials (RFC 7617).
+// WithBasicAuth sets static HTTP Basic Authentication credentials (RFC 7617).
+//
+// Automatically base64 encodes the credentials and injects "Authorization: Basic <base64>".
+//
+// # RFC Compliance
+//
+// Conforms to RFC 7617 (The 'Basic' HTTP Authentication Scheme).
 func WithBasicAuth(username, password string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -169,13 +234,17 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 	}
 }
 
-// WithSecretBasicAuth returns an [aoni.ClientOption] setting default Basic Authentication with a protected password [secret.Secret].
+// WithSecretBasicAuth sets default HTTP Basic Authentication with password protected by [secret.Secret].
 func WithSecretBasicAuth(username string, password secret.Secret[string]) aoni.ClientOption {
 	return WithBasicAuth(username, password.Value())
 }
 
-// WithDigestAuth returns an [aoni.ClientOption] enabling RFC 7616 HTTP Digest Access Authentication
-// for transparently resolving HTTP 401 Digest challenges.
+// WithDigestAuth enables RFC 7616 HTTP Digest Access Authentication
+// for transparently resolving HTTP 401 Digest challenges across requests.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 7616 (HTTP Digest Access Authentication).
 func WithDigestAuth(username, password string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.DigestAuth = &aoni.DigestAuthConfig{
@@ -185,30 +254,40 @@ func WithDigestAuth(username, password string) aoni.ClientOption {
 	}
 }
 
-// WithHTTPSignature returns an [aoni.ClientOption] applying an RFC 9421 HTTP Message Signature
-// to every outbound request.
+// WithHTTPSignature applies an RFC 9421 HTTP Message Signature to every outbound request.
+//
+// Cryptographically signs specified headers, method, path, and body digest using asymmetric or symmetric keys.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9421 (HTTP Message Signatures).
 func WithHTTPSignature(sigCfg httpsig.SignConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithHTTPSignature(sigCfg))
 	}
 }
 
-// WithDPoPToken returns an [aoni.ClientOption] setting a default DPoP-bound access token
-// ("Authorization: DPoP <token>") and calculating the DPoP Proof JWT per RFC 9449 §7.1.
+// WithDPoPToken sets a default OAuth 2.0 DPoP-bound access token (RFC 9449 §7.1).
+//
+// Generates and attaches a fresh DPoP Proof JWT signed with privKey for every request.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9449 (OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer).
 func WithDPoPToken(accessToken string, privKey crypto.PrivateKey, opts ...dpop.ProofOptions) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithDPoPToken(accessToken, privKey, opts...))
 	}
 }
 
-// WithRefererAutomaton returns an [aoni.ClientOption] toggling automatic Referer header tracking across requests.
+// WithRefererAutomaton toggles automatic Referer header tracking, simulating browser navigation chains.
 func WithRefererAutomaton(enabled bool) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.RefererAutomaton = enabled
 	}
 }
 
-// WithEnvHeader returns an [aoni.ClientOption] setting a request header from an environment variable if present.
+// WithEnvHeader reads an environment variable and sets it as a default header if present.
 func WithEnvHeader(headerName, envVarName string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		val := os.Getenv(envVarName)
@@ -224,7 +303,7 @@ func WithEnvHeader(headerName, envVarName string) aoni.ClientOption {
 	}
 }
 
-// WithEnvBearer returns an [aoni.ClientOption] setting "Authorization: Bearer <val>" from an environment variable if present.
+// WithEnvBearer reads an environment variable and injects it as "Authorization: Bearer <val>" if present.
 func WithEnvBearer(envVarName string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		val := os.Getenv(envVarName)
@@ -240,7 +319,7 @@ func WithEnvBearer(envVarName string) aoni.ClientOption {
 	}
 }
 
-// FromVortexCache returns an [aoni.ClientOption] discovering and injecting credentials from .vortex/cache/secrets.json.
+// FromVortexCache searches parent directories for .vortex/cache/secrets.json and injects credentials.
 func FromVortexCache(startDirs ...string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		startDir := "."

@@ -50,6 +50,8 @@ func NewVAPIDKeys(privateKeyBase64, publicKeyBase64 string) (*VAPIDKeys, error) 
 }
 
 // NewVAPIDKeysFromRaw constructs [VAPIDKeys] from a 32-byte scalar private key.
+//
+//nolint:staticcheck // RFC 8292 VAPID requires raw P-256 scalar multiplication
 func NewVAPIDKeysFromRaw(privBytes []byte) (*VAPIDKeys, error) {
 	if len(privBytes) != 32 {
 		return nil, ErrInvalidVAPIDKeys
@@ -79,6 +81,8 @@ func NewVAPIDKeysFromRaw(privBytes []byte) (*VAPIDKeys, error) {
 }
 
 // PublicKeyBase64 returns the uncompressed 65-byte P-256 public key encoded in base64url (RFC 8292 §3.2).
+//
+//nolint:staticcheck // RFC 8292 VAPID public key export
 func (k *VAPIDKeys) PublicKeyBase64() string {
 	if k == nil || k.PublicKey == nil {
 		return ""
@@ -90,6 +94,8 @@ func (k *VAPIDKeys) PublicKeyBase64() string {
 }
 
 // PrivateKeyBase64 returns the 32-byte scalar private key encoded in base64url.
+//
+//nolint:staticcheck // RFC 8292 VAPID private key scalar export
 func (k *VAPIDKeys) PrivateKeyBase64() string {
 	if k == nil || k.PrivateKey == nil || k.PrivateKey.D == nil {
 		return ""

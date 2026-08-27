@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"

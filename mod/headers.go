@@ -11,34 +11,61 @@ import (
 	"time"
 
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
+	"github.com/lemon4ksan/aoni/netutil/pkce"
 	"github.com/lemon4ksan/aoni/netutil/priority"
 	"github.com/lemon4ksan/aoni/netutil/privacypass"
 	"github.com/lemon4ksan/aoni/netutil/secret"
 )
 
-// WithPriority constructs an [RequestModifier] setting the RFC 9218 "Priority" header (e.g. "u=1, i" or "u=0").
+// WithPriority configures RFC 9218 extensible request priority headers and HTTP/2-3 stream scheduling.
+//
+// Urgency defines the relative processing precedence (0 = highest/critical, 7 = lowest/background).
+// When incremental is true, the server is instructed to stream partial chunks of the response
+// concurrently rather than buffering the entire payload before delivery.
+//
+// # Wire Representation
+//
+//	Priority: u=1, i
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/hero-banner.webp",
+//	    mod.WithPriority(1, true),
+//	)
+//
+// # Invariants & Allocations
+//
+//   - Zero-Allocation: Operates on pre-allocated static strings for standard urgencies.
+//   - Clamping: Values outside [0..7] are clamped automatically without returning an error.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9218 (Extensible Prioritization Scheme for HTTP), Section 3.1.
 func WithPriority(urgency int, incremental bool) RequestModifier {
 	return WithHeader(priority.HeaderPriority, priority.New(urgency, incremental).Format())
 }
 
-// WithPriorityPreset constructs an [RequestModifier] setting the RFC 9218 "Priority" header using a predefined [priority.Priority] preset.
+// WithPriorityPreset configures RFC 9218 request priority using a structured [priority.Priority] preset.
 func WithPriorityPreset(p priority.Priority) RequestModifier {
 	return WithHeader(priority.HeaderPriority, p.Format())
 }
 
-// WithGRPCWebTimeout constructs an [RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
+// WithGRPCWebTimeout sets standard gRPC-Web timeout headers ("grpc-timeout").
+//
+// # Wire Representation
+//
+//	grpc-timeout: 5000m
 func WithGRPCWebTimeout(d time.Duration) RequestModifier {
 	return WithHeader(fheader.GRPCTimeout, formatGRPCTimeout(d))
 }
 
-// WithGRPCMetadata constructs an [RequestModifier] injecting gRPC-Web binary metadata headers.
+// WithGRPCMetadata injects custom gRPC-Web binary and text metadata headers.
 func WithGRPCMetadata(md map[string]string) RequestModifier {
 	return WithHeaders(md)
 }
@@ -48,7 +75,13 @@ func formatGRPCTimeout(d time.Duration) string {
 	return requestutil.FormatGRPCTimeout(d)
 }
 
-// WithHeader constructs an [RequestModifier] setting a single request header key to value.
+// WithHeader sets or overwrites a single HTTP header key-value pair on the request.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/api/data",
+//	    mod.WithHeader("X-Request-ID", "req_9f81a"),
+//	)
 func WithHeader(key, value string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModHeader,
@@ -57,7 +90,7 @@ func WithHeader(key, value string) RequestModifier {
 	}
 }
 
-// WithHeaderBytes constructs an [RequestModifier] setting a request header using byte slices for zero-allocation setup.
+// WithHeaderBytes sets a request header using byte slices along the zero-allocation fast path.
 func WithHeaderBytes(key, value []byte) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModHeader,
@@ -66,7 +99,15 @@ func WithHeaderBytes(key, value []byte) RequestModifier {
 	}
 }
 
-// WithHeaderFunc constructs an [RequestModifier] evaluating provider dynamically at request execution time to set key header.
+// WithHeaderFunc dynamically evaluates a provider function at request dispatch time to populate key.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/status",
+//	    mod.WithHeaderFunc("X-Trace-Time", func() string {
+//	        return time.Now().UTC().Format(time.RFC3339Nano)
+//	    }),
+//	)
 func WithHeaderFunc(key string, provider func() string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -85,7 +126,16 @@ func WithDynamicHeader(key string, provider func() string) RequestModifier {
 	return WithHeaderFunc(key, provider)
 }
 
-// WithHeaders constructs an [RequestModifier] bulk-setting multiple HTTP request headers from a map.
+// WithHeaders bulk-sets multiple HTTP headers from a key-value map.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/v1/items",
+//	    mod.WithHeaders(map[string]string{
+//	        "Accept": "application/json",
+//	        "X-Tenant-ID": "acme_corp",
+//	    }),
+//	)
 func WithHeaders(headers map[string]string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -97,7 +147,7 @@ func WithHeaders(headers map[string]string) RequestModifier {
 	}
 }
 
-// ResetHeaders constructs an [RequestModifier] clearing all headers from the request.
+// ResetHeaders clears all previously configured headers from the request.
 func ResetHeaders() RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -107,8 +157,21 @@ func ResetHeaders() RequestModifier {
 	}
 }
 
-// WithBearer constructs an [RequestModifier] setting an "Authorization: Bearer <token>" header
-// per RFC 6750 §2.1 (The OAuth 2.0 Authorization Framework: Bearer Token Usage).
+// WithBearer injects an OAuth 2.0 Bearer authentication token (RFC 6750 §2.1).
+//
+// # Wire Representation
+//
+//	Authorization: Bearer <token>
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/user/profile",
+//	    mod.WithBearer("eyJh...token"),
+//	)
+//
+// # RFC Compliance
+//
+// Conforms to RFC 6750 (OAuth 2.0 Bearer Token Usage).
 func WithBearer(token string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModBearer,
@@ -116,13 +179,28 @@ func WithBearer(token string) RequestModifier {
 	}
 }
 
-// WithSecretBearer constructs an [RequestModifier] setting a Bearer token from a protected [secret.Secret].
+// WithSecretBearer injects a Bearer token stored in a protected [secret.Secret] memory container.
 func WithSecretBearer(token secret.Secret[string]) RequestModifier {
 	return WithBearer(token.Value())
 }
 
-// WithBasicAuth constructs an [RequestModifier] setting HTTP Basic Authentication credentials
-// per RFC 7617 (The 'Basic' HTTP Authentication Scheme).
+// WithBasicAuth injects HTTP Basic Authentication credentials (RFC 7617).
+//
+// Automatically encodes username and password into base64 format.
+//
+// # Wire Representation
+//
+//	Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/admin",
+//	    mod.WithBasicAuth("admin", "secret123"),
+//	)
+//
+// # RFC Compliance
+//
+// Conforms to RFC 7617 (The 'Basic' HTTP Authentication Scheme).
 func WithBasicAuth(username, password string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModBasicAuth,
@@ -131,21 +209,25 @@ func WithBasicAuth(username, password string) RequestModifier {
 	}
 }
 
-// WithSecretBasicAuth constructs an [RequestModifier] setting Basic Authentication credentials with a protected password [secret.Secret].
+// WithSecretBasicAuth injects Basic Authentication credentials with password protected by [secret.Secret].
 func WithSecretBasicAuth(username string, password secret.Secret[string]) RequestModifier {
 	return WithBasicAuth(username, password.Value())
 }
 
-// WithPKCE constructs an [RequestModifier] adding PKCE code_challenge and code_challenge_method
-// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
-// If method is omitted or empty, S256 is used by default.
+// WithPKCE adds OAuth 2.0 PKCE code_challenge and code_challenge_method query parameters (RFC 7636).
+//
+// If method is omitted or empty, SHA-256 ("S256") is used by default.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 7636 (Proof Key for Code Exchange by OAuth Public Clients).
 func WithPKCE(verifier string, method ...string) RequestModifier {
-	m := fpkce.MethodS256
+	m := pkce.MethodS256
 	if len(method) > 0 && method[0] != "" {
 		m = method[0]
 	}
 
-	challenge, err := fpkce.ComputeChallenge(verifier, m)
+	challenge, err := pkce.ComputeChallenge(verifier, m)
 	if err != nil {
 		challenge = verifier
 	}
@@ -159,8 +241,7 @@ func WithPKCE(verifier string, method ...string) RequestModifier {
 	}
 }
 
-// WithPKCEVerifier constructs an [RequestModifier] adding the code_verifier parameter
-// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
+// WithPKCEVerifier adds the OAuth 2.0 code_verifier parameter for token endpoint requests (RFC 7636 §4.5).
 func WithPKCEVerifier(verifier string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -170,47 +251,74 @@ func WithPKCEVerifier(verifier string) RequestModifier {
 	}
 }
 
-// WithUserAgent constructs an [RequestModifier] overriding the standard User-Agent header (RFC 9110 §10.1.5).
+// WithUserAgent overrides the standard User-Agent header field (RFC 9110 §10.1.5).
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/feed",
+//	    mod.WithUserAgent("FeedFetcher/2.0"),
+//	)
 func WithUserAgent(ua string) RequestModifier {
 	return WithHeader(fheader.UserAgent, ua)
 }
 
-// WithContentType constructs an [RequestModifier] overriding the standard Content-Type header (RFC 9110 §8.3).
+// WithContentType sets the Content-Type entity header (RFC 9110 §8.3).
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/graphql",
+//	    mod.WithContentType("application/graphql"),
+//	)
 func WithContentType(ct string) RequestModifier {
 	return WithHeader(fheader.ContentType, ct)
 }
 
-// WithAccept constructs an [RequestModifier] overriding the standard Accept header (RFC 9110 §12.5.1).
+// WithAccept sets the Accept content negotiation header (RFC 9110 §12.5.1).
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/data",
+//	    mod.WithAccept("application/vnd.api+json"),
+//	)
 func WithAccept(accept string) RequestModifier {
 	return WithHeader(fheader.Accept, accept)
 }
 
-// WithOrigin constructs an [RequestModifier] overriding the standard Origin header (RFC 6454 §7).
+// WithOrigin sets the Origin CORS header (RFC 6454 §7).
 func WithOrigin(origin string) RequestModifier {
 	return WithHeader(fheader.Origin, origin)
 }
 
-// WithIfNoneMatch constructs an [RequestModifier] setting the If-None-Match conditional header (RFC 9110 §13.1.2).
+// WithIfNoneMatch sets the If-None-Match conditional validator header (RFC 9110 §13.1.2) for ETag caching.
 func WithIfNoneMatch(etag string) RequestModifier {
 	return WithHeader(fheader.IfNoneMatch, etag)
 }
 
-// WithIfMatch constructs an [RequestModifier] setting the If-Match conditional header (RFC 9110 §13.1.1).
+// WithIfMatch sets the If-Match conditional header (RFC 9110 §13.1.1) to prevent mid-air collision updates.
 func WithIfMatch(etag string) RequestModifier {
 	return WithHeader(fheader.IfMatch, etag)
 }
 
-// WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since conditional header (RFC 9110 §5.6.7 & §13.1.3).
+// WithIfModifiedSince sets the If-Modified-Since conditional validator header (RFC 9110 §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
 	return WithHeader(fheader.IfModifiedSince, timekit.FormatHTTPDate(t))
 }
 
-// WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since conditional header (RFC 9110 §5.6.7 & §13.1.4).
+// WithIfUnmodifiedSince sets the If-Unmodified-Since conditional header (RFC 9110 §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
 	return WithHeader(fheader.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
 }
 
-// WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
+// WithRange sets the Range header for partial byte-range requests (RFC 9110 §14.2).
+//
+// If start < 0, requests the suffix range (e.g. "bytes=-500").
+// If end < 0, requests from start to EOF (e.g. "bytes=1000-").
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/large-file.iso",
+//	    mod.WithRange(0, 1048575), // First 1 MB
+//	)
 func WithRange(start, end int64) RequestModifier {
 	if start < 0 {
 		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10))
@@ -223,27 +331,33 @@ func WithRange(start, end int64) RequestModifier {
 	return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 }
 
-// WithIfRangeETag constructs an [RequestModifier] setting the If-Range header with an entity tag (RFC 9110 §13.1.5).
+// WithIfRangeETag sets the If-Range conditional header with an entity tag validator (RFC 9110 §13.1.5).
 func WithIfRangeETag(etag string) RequestModifier {
 	return WithHeader(fheader.IfRange, etag)
 }
 
-// WithIfRangeDate constructs an [RequestModifier] setting the If-Range header with an HTTP date (RFC 9110 §5.6.7 & §13.1.5).
+// WithIfRangeDate sets the If-Range conditional header with an HTTP timestamp date (RFC 9110 §13.1.5).
 func WithIfRangeDate(t time.Time) RequestModifier {
 	return WithHeader(fheader.IfRange, timekit.FormatHTTPDate(t))
 }
 
-// WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
+// WithCacheControl sets Cache-Control request directives (RFC 9111 §5.2.1).
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/resource",
+//	    mod.WithCacheControl("no-cache", "max-age=0"),
+//	)
 func WithCacheControl(directives ...string) RequestModifier {
 	return WithHeader(fheader.CacheControl, strings.Join(directives, ", "))
 }
 
-// WithNoCache constructs an [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
+// WithNoCache forces intermediate proxies and origin servers to revalidate cached content via "Cache-Control: no-cache".
 func WithNoCache() RequestModifier {
 	return WithHeader(fheader.CacheControl, fheader.ValueNoCache)
 }
 
-// WithNoStore constructs an [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
+// WithNoStore directs caches never to persist request or response data via "Cache-Control: no-store".
 func WithNoStore() RequestModifier {
 	return WithHeader(fheader.CacheControl, fheader.ValueNoStore)
 }
@@ -252,25 +366,22 @@ func WithNoStore() RequestModifier {
 // WEBSOCKET MODIFIERS (RFC 6455, RFC 7692, RFC 7936, RFC 8441)
 // ============================================================================
 
-// WithSecWebSocketProtocol constructs an [RequestModifier] requesting one or more WebSocket subprotocols
-// per RFC 6455 §11.3.4, RFC 7936 §2, and RFC 8441 §5.
+// WithSecWebSocketProtocol requests one or more WebSocket subprotocols during upgrade (RFC 6455 §11.3.4).
 func WithSecWebSocketProtocol(protocols ...string) RequestModifier {
 	return WithHeader(fheader.SecWebSocketProtocol, strings.Join(protocols, ", "))
 }
 
-// WithSecWebSocketExtensions constructs an [RequestModifier] requesting WebSocket extensions
-// per RFC 6455 §11.3.2, RFC 7692 §5, and RFC 8441 §5.
+// WithSecWebSocketExtensions requests WebSocket framing extensions (RFC 6455 §11.3.2).
 func WithSecWebSocketExtensions(extensions ...string) RequestModifier {
 	return WithHeader(fheader.SecWebSocketExtensions, strings.Join(extensions, ", "))
 }
 
-// WithSecWebSocketVersion constructs an [RequestModifier] setting the Sec-WebSocket-Version header (RFC 6455 §11.3.5 & RFC 8441 §5).
+// WithSecWebSocketVersion sets the Sec-WebSocket-Version header (RFC 6455 §11.3.5).
 func WithSecWebSocketVersion(version string) RequestModifier {
 	return WithHeader(fheader.SecWebSocketVersion, version)
 }
 
-// WithPermessageDeflate constructs an [RequestModifier] requesting the permessage-deflate compression extension
-// with optional parameters (RFC 7692 §7 & RFC 8441 §5).
+// WithPermessageDeflate requests the permessage-deflate WebSocket compression extension (RFC 7692 §7).
 func WithPermessageDeflate(params ...string) RequestModifier {
 	if len(params) == 0 {
 		return WithHeader(fheader.SecWebSocketExtensions, "permessage-deflate; client_max_window_bits")
@@ -283,7 +394,13 @@ func WithPermessageDeflate(params ...string) RequestModifier {
 // COOKIE MODIFIERS
 // ============================================================================
 
-// WithCookie constructs an [RequestModifier] attaching a single [*http.Cookie] to the request.
+// WithCookie attaches a single [*http.Cookie] to the request's "Cookie" header.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/dashboard",
+//	    mod.WithCookie(&http.Cookie{Name: "session", Value: "xyz123"}),
+//	)
 func WithCookie(c *http.Cookie) RequestModifier {
 	if c == nil {
 		return RequestModifier{}
@@ -296,7 +413,7 @@ func WithCookie(c *http.Cookie) RequestModifier {
 	}
 }
 
-// WithCookies constructs an [RequestModifier] attaching multiple cookie key-value pairs to the request.
+// WithCookies attaches multiple cookie key-value pairs to the request.
 func WithCookies(kv map[string]string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -308,7 +425,9 @@ func WithCookies(kv map[string]string) RequestModifier {
 	}
 }
 
-// WithPartitionKey constructs an [RequestModifier] attaching a CHIPS (RFC 6265bis) partition key for iFrame/widget context.
+// WithPartitionKey sets a CHIPS (RFC 6265bis) top-level site partition key on the request context.
+//
+// Conforms to RFC 6265bis CHIPS (Cookies Having Independent Partitioned State).
 func WithPartitionKey(key string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -318,7 +437,7 @@ func WithPartitionKey(key string) RequestModifier {
 	}
 }
 
-// WithHeaderIf conditionally constructs an [RequestModifier] if condition is true.
+// WithHeaderIf conditionally attaches a header only when condition evaluates to true.
 func WithHeaderIf(condition bool, key, value string) RequestModifier {
 	if !condition {
 		return RequestModifier{}
@@ -327,7 +446,7 @@ func WithHeaderIf(condition bool, key, value string) RequestModifier {
 	return WithHeader(key, value)
 }
 
-// WithHeadersIf conditionally constructs an [RequestModifier] if condition is true.
+// WithHeadersIf conditionally attaches a map of headers only when condition evaluates to true.
 func WithHeadersIf(condition bool, headers map[string]string) RequestModifier {
 	if !condition || len(headers) == 0 {
 		return RequestModifier{}
@@ -336,7 +455,11 @@ func WithHeadersIf(condition bool, headers map[string]string) RequestModifier {
 	return WithHeaders(headers)
 }
 
-// WithPrivateToken constructs an [RequestModifier] injecting an RFC 9577 Privacy Pass redemption header ("Authorization: PrivateToken token=...").
+// WithPrivateToken injects an RFC 9577 Privacy Pass authentication redemption header ("Authorization: PrivateToken token=...").
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9577 (Privacy Pass HTTP Authentication Scheme).
 func WithPrivateToken(token string) RequestModifier {
 	if !strings.HasPrefix(token, privacypass.SchemePrivateToken) {
 		token = privacypass.SchemePrivateToken + " token=\"" + token + "\""
@@ -345,12 +468,12 @@ func WithPrivateToken(token string) RequestModifier {
 	return WithHeader(privacypass.HeaderAuthorization, token)
 }
 
-// WithPrivateStateToken constructs an [RequestModifier] injecting a W3C Private State Token ("Sec-Private-State-Token").
+// WithPrivateStateToken injects a W3C Private State Token header ("Sec-Private-State-Token").
 func WithPrivateStateToken(token string) RequestModifier {
 	return WithHeader(privacypass.HeaderSecPrivateStateToken, token)
 }
 
-// WithWebPushTTL constructs an [RequestModifier] setting RFC 8030 WebPush TTL retention header in seconds.
+// WithWebPushTTL sets the RFC 8030 WebPush message time-to-live retention duration header.
 func WithWebPushTTL(d time.Duration) RequestModifier {
 	seconds := int64(d.Seconds())
 	if seconds < 0 {
@@ -360,17 +483,17 @@ func WithWebPushTTL(d time.Duration) RequestModifier {
 	return WithHeader("TTL", strconv.FormatInt(seconds, 10))
 }
 
-// WithWebPushUrgency constructs an [RequestModifier] setting RFC 8030 WebPush Urgency header.
+// WithWebPushUrgency sets the RFC 8030 WebPush message Urgency header ("very-low", "low", "normal", "high").
 func WithWebPushUrgency(urgency string) RequestModifier {
 	return WithHeader("Urgency", urgency)
 }
 
-// WithWebPushTopic constructs an [RequestModifier] setting RFC 8030 WebPush correlation Topic header.
+// WithWebPushTopic sets the RFC 8030 WebPush correlation Topic header for message replacement.
 func WithWebPushTopic(topic string) RequestModifier {
 	return WithHeader("Topic", topic)
 }
 
-// WithVAPIDAuth constructs an [RequestModifier] injecting an RFC 8292 VAPID Authorization header ("Authorization: vapid t=..., k=...").
+// WithVAPIDAuth injects an RFC 8292 Voluntary Application Server Identification (VAPID) Authorization header.
 func WithVAPIDAuth(vapidAuth string) RequestModifier {
 	return WithHeader(fheader.Authorization, vapidAuth)
 }

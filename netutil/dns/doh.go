@@ -17,7 +17,7 @@ import (
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	"github.com/lemon4ksan/foundation/silicon/rand"
+	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -165,7 +165,7 @@ func (r *DoHResolver) LookupSVCB(ctx context.Context, scheme, service string, po
 
 // LookupWireRecord queries a raw DNS wire format response over DoH for a specific query type.
 func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype uint16) ([]byte, error) {
-	queryID := uint16(rand.Uint32())
+	queryID := uint16(randkit.Uint32())
 
 	edns := r.EDNS
 	if edns.PadToBlock <= 0 {
@@ -211,7 +211,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 }
 
 func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) ([]wire.DNSRecord, error) {
-	queryID := uint16(rand.Uint32())
+	queryID := uint16(randkit.Uint32())
 
 	edns := r.EDNS
 	if edns.PadToBlock <= 0 {

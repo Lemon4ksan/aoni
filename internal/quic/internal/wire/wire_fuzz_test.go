@@ -44,13 +44,14 @@ func FuzzQUICFrameParser(f *testing.F) {
 		if err == nil && frameType != 0 && consumed <= len(data) {
 			remaining := data[consumed:]
 
-			if frameType.IsStreamFrameType() {
+			switch {
+			case frameType.IsStreamFrameType():
 				_, _, _ = parser.ParseStreamFrame(frameType, remaining, protocol.Version1)
-			} else if frameType.IsAckFrameType() {
+			case frameType.IsAckFrameType():
 				_, _, _ = parser.ParseAckFrame(frameType, remaining, encLevel, protocol.Version1)
-			} else if frameType.IsDatagramFrameType() {
+			case frameType.IsDatagramFrameType():
 				_, _, _ = parser.ParseDatagramFrame(frameType, remaining, protocol.Version1)
-			} else {
+			default:
 				_, _, _ = parser.ParseLessCommonFrame(frameType, remaining, protocol.Version1)
 			}
 		}

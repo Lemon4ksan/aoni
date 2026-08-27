@@ -62,8 +62,7 @@ func TestStaleResolver_BasicAndStale(t *testing.T) {
 	}
 
 	// 2. Immediate second lookup (fresh cache -> mock not called)
-	addrs, err = res.LookupIPAddr(ctx, "example.com")
-	if err != nil {
+	if _, err = res.LookupIPAddr(ctx, "example.com"); err != nil {
 		t.Fatalf("LookupIPAddr second failed: %v", err)
 	}
 

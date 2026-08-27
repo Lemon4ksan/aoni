@@ -6,6 +6,7 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -242,7 +243,7 @@ func (e *PACEngine) matchesRule(rule PACRule, rawURL, host string) bool {
 	if rule.Subnet != nil {
 		ip := net.ParseIP(host)
 		if ip == nil {
-			ips, err := net.LookupIP(host)
+			ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", host)
 			if err == nil && len(ips) > 0 {
 				ip = ips[0]
 			}

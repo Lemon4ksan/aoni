@@ -17,7 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	fip "github.com/lemon4ksan/foundation/net/ip"
-	furl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/urlkit"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"

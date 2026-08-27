@@ -23,7 +23,20 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
-// WithBody constructs an [RequestModifier] replacing the request body with the provided stream reader.
+// WithBody replaces the request body with the provided [io.Reader] stream.
+//
+// Automatically detects and optimizes in-memory buffers ([bytes.Buffer], [bytes.Reader], [strings.Reader])
+// to avoid heap allocations.
+//
+// # Example
+//
+//	file, _ := os.Open("payload.bin")
+//	defer file.Close()
+//
+//	resp, err := client.Post(ctx, "/upload",
+//	    mod.WithBody(file),
+//	    mod.WithContentType("application/octet-stream"),
+//	)
 func WithBody(r io.Reader) RequestModifier {
 	if r == nil {
 		return RequestModifier{}
@@ -62,7 +75,16 @@ func WithBody(r io.Reader) RequestModifier {
 	}
 }
 
-// WithBodyBytes constructs an [RequestModifier] setting raw byte slice payload directly as the request body.
+// WithBodyBytes sets a raw byte slice directly as the request payload.
+//
+// Operates on the zero-allocation fast path without buffer copying.
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/raw",
+//	    mod.WithBodyBytes([]byte("hello world")),
+//	    mod.WithContentType("text/plain"),
+//	)
 func WithBodyBytes(b []byte) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModBodyBytes,
@@ -70,7 +92,18 @@ func WithBodyBytes(b []byte) RequestModifier {
 	}
 }
 
-// WithJSONBody constructs an [RequestModifier] marshaling payload to JSON and setting Content-Type to application/json.
+// WithJSONBody marshals payload into JSON, sets Content-Type to "application/json", and attaches it as body.
+//
+// # Example
+//
+//	type CreateUserReq struct {
+//	    Name  string `json:"name"`
+//	    Email string `json:"email"`
+//	}
+//
+//	resp, err := client.Post(ctx, "/users",
+//	    mod.WithJSONBody(CreateUserReq{Name: "Alice", Email: "alice@example.com"}),
+//	)
 func WithJSONBody(payload any) RequestModifier {
 	if payload == nil {
 		return RequestModifier{}
@@ -98,13 +131,20 @@ func WithJSON(payload any) RequestModifier {
 	return WithJSONBody(payload)
 }
 
-// WithSmartBody constructs an [RequestModifier] that automatically detects the payload type:
-//   - proto.Message -> Protobuf payload with application/x-protobuf
-//   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
-//   - io.Reader -> Streamed request body
-//   - []byte -> Raw byte slice payload
-//   - string -> UTF-8 text payload with text/plain; charset=utf-8
-//   - Struct / Map / Slice -> JSON-marshaled payload with application/json
+// WithSmartBody automatically infers the correct encoding and Content-Type based on payload type:
+//   - [proto.Message]: Protobuf binary encoding ("application/x-protobuf")
+//   - [url.Values]: Form URL-encoding ("application/x-www-form-urlencoded")
+//   - [io.Reader]: Streamed payload
+//   - `[]byte`: Raw byte payload
+//   - `string`: UTF-8 text ("text/plain; charset=utf-8")
+//   - Struct / Map / Slice: JSON marshaling ("application/json")
+//
+// # Example
+//
+//	// Automatically encoded as JSON with application/json
+//	resp, err := client.Post(ctx, "/items",
+//	    mod.WithSmartBody(map[string]int{"count": 42}),
+//	)
 func WithSmartBody(body any) RequestModifier {
 	if body == nil {
 		return RequestModifier{}
@@ -141,7 +181,13 @@ func WithSmartBody(body any) RequestModifier {
 	return WithJSONBody(body)
 }
 
-// WithXMLBody constructs an [RequestModifier] marshaling payload to XML and setting Content-Type to application/xml.
+// WithXMLBody marshals payload to XML and sets Content-Type to "application/xml".
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/soap-endpoint",
+//	    mod.WithXMLBody(myXMLStruct),
+//	)
 func WithXMLBody(payload any) RequestModifier {
 	if payload == nil {
 		return RequestModifier{}
@@ -164,7 +210,7 @@ func WithXMLBody(payload any) RequestModifier {
 	}
 }
 
-// WithYAMLBody constructs an [RequestModifier] marshaling payload to YAML and setting Content-Type to application/yaml.
+// WithYAMLBody marshals payload to YAML and sets Content-Type to "application/yaml".
 func WithYAMLBody(payload any) RequestModifier {
 	if payload == nil {
 		return RequestModifier{}
@@ -187,7 +233,13 @@ func WithYAMLBody(payload any) RequestModifier {
 	}
 }
 
-// WithProtoBody constructs an [RequestModifier] serializing a [proto.Message] into binary Protocol Buffer bytes.
+// WithProtoBody serializes a [proto.Message] into binary Protocol Buffer bytes ("application/x-protobuf").
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/v1/rpc",
+//	    mod.WithProtoBody(protoReq),
+//	)
 func WithProtoBody(msg proto.Message) RequestModifier {
 	if msg == nil {
 		return RequestModifier{}
@@ -210,7 +262,7 @@ func WithProtoBody(msg proto.Message) RequestModifier {
 	}
 }
 
-// WithGRPCWebBody constructs an [RequestModifier] serializing a [proto.Message] into 5-byte gRPC-Web framed bytes.
+// WithGRPCWebBody serializes a [proto.Message] with the standard 5-byte gRPC-Web framing header (1-byte flag + 4-byte length).
 func WithGRPCWebBody(msg proto.Message) RequestModifier {
 	if msg == nil {
 		return RequestModifier{}
@@ -243,7 +295,17 @@ func WithGRPCWebBody(msg proto.Message) RequestModifier {
 	}
 }
 
-// WithFormValues constructs an [RequestModifier] encoding [url.Values] into the request body as application/x-www-form-urlencoded.
+// WithFormValues encodes [url.Values] into the request body with "application/x-www-form-urlencoded".
+//
+// # Example
+//
+//	form := url.Values{}
+//	form.Set("grant_type", "client_credentials")
+//	form.Set("client_id", "my_id")
+//
+//	resp, err := client.Post(ctx, "/oauth/token",
+//	    mod.WithFormValues(form),
+//	)
 func WithFormValues(values url.Values) RequestModifier {
 	encoded := values.Encode()
 
@@ -254,7 +316,18 @@ func WithFormValues(values url.Values) RequestModifier {
 	}
 }
 
-// WithFormBody constructs an [RequestModifier] encoding a struct or map into URL-encoded form values.
+// WithFormBody serializes a struct or map into URL-encoded form values.
+//
+// # Example
+//
+//	type LoginForm struct {
+//	    User string `form:"user"`
+//	    Pass string `form:"pass"`
+//	}
+//
+//	resp, err := client.Post(ctx, "/login",
+//	    mod.WithFormBody(LoginForm{User: "john", Pass: "secret"}),
+//	)
 func WithFormBody(payload any) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,

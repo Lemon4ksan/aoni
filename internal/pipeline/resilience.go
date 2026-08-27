@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/cookie"

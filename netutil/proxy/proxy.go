@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	flog "github.com/lemon4ksan/foundation/async/log"
+	flog "github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/generic"
 	fproxy "github.com/lemon4ksan/foundation/net/proxy"
 	"github.com/lemon4ksan/foundation/silicon/trie"

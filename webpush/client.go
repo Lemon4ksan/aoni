@@ -49,6 +49,15 @@ func WithVAPID(vapid *VAPIDConfig) MessageOption {
 }
 
 // Client provides high-throughput, zero-allocation WebPush notification delivery to Apple APNs, Google FCM, and Mozilla Push Services.
+//
+// Encrypts payloads via ECDH over curve P-256 and HKDF-SHA256 (RFC 8291) with RFC 8292 VAPID JWT authentication.
+//
+// # Example
+//
+//	wpClient := webpush.NewClient(client, vapidConfig)
+//	resp, err := wpClient.Send(ctx, subscription, &webpush.Message{
+//	    Payload: []byte(`{"title":"Hello"}`),
+//	})
 type Client struct {
 	httpClient *aoni.Client
 	vapid      *VAPIDConfig
@@ -67,6 +76,11 @@ func NewClient(httpClient *aoni.Client, defaultVAPID *VAPIDConfig) *Client {
 }
 
 // Send sends an encrypted WebPush notification to the designated subscriber per RFC 8030 and RFC 8291.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 8030 (Generic Event Delivery Using HTTP Push), RFC 8291 (Message Encryption for Web Push),
+// and RFC 8292 (Voluntary Application Server Identification: VAPID).
 func (c *Client) Send(ctx context.Context, sub *Subscription, msg *Message) (*http.Response, error) {
 	if sub == nil || sub.Endpoint == "" {
 		return nil, ErrInvalidSubscription

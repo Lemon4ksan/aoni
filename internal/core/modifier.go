@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"net/url"
 
-	fio "github.com/lemon4ksan/foundation/io"
+	fio "github.com/lemon4ksan/foundation/iokit"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 

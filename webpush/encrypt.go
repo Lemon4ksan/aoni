@@ -126,7 +126,7 @@ func encryptWithKeys(plaintext []byte, uaPub *ecdh.PublicKey, authSecret []byte,
 	nonce := hmacSHA256(prk, nonceInfo)[:12]
 
 	// 7. Construct ECE header: salt(16) + rs(4) + idlen(1) + keyid(65) = 86 octets
-	header := make([]byte, HeaderLength)
+	header := make([]byte, HeaderLength, HeaderLength+len(plaintext)+1+16)
 	copy(header[0:16], salt)
 	binary.BigEndian.PutUint32(header[16:20], rs)
 	header[20] = byte(len(asPubBytes))
@@ -148,10 +148,8 @@ func encryptWithKeys(plaintext []byte, uaPub *ecdh.PublicKey, authSecret []byte,
 		return nil, err
 	}
 
-	ciphertext := gcm.Seal(nil, nonce, padded, nil)
-
 	// Return Header || Ciphertext
-	return append(header, ciphertext...), nil
+	return gcm.Seal(header, nonce, padded, nil), nil
 }
 
 // Decrypt decrypts an RFC 8291 WebPush payload using the recipient's ECDH private key and auth secret.

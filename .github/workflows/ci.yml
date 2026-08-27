@@ -109,7 +109,7 @@ jobs:
           go build . ./codec/... ./cookie/... ./fingerprint/... ./fast/... ./mod/... ./netutil/... ./option/... ./realtime/... ./resiliency/... ./webpush/... ./internal/fast/... ./internal/quic/...
 
   fuzz-heavy:
-    name: Wire Security Fuzzing (curl-level 55 targets)
+    name: Wire Security Fuzzing
     runs-on: ubuntu-latest
     env:
       GOEXPERIMENT: "simd"

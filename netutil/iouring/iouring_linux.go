@@ -38,7 +38,6 @@ type sqRing struct {
 	kdropped     *uint32
 	array        []uint32
 	sqes         []SQE
-	sqeHead      uint32
 	sqeTail      uint32
 	ringPtr      uintptr
 	ringSize     uintptr
@@ -80,6 +79,7 @@ func New(entries uint32, flags ...uint32) (*Ring, error) {
 	}
 
 	var p ioUringParams
+
 	p.flags = setupFlags
 
 	r1, _, err := unix.Syscall(sysIOUringSetup, uintptr(entries), uintptr(unsafe.Pointer(&p)), 0)
@@ -111,6 +111,7 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 		if cqSize > sqSize {
 			sqSize = cqSize
 		}
+
 		cqSize = sqSize
 	}
 
@@ -119,17 +120,18 @@ func (r *Ring) mmapRings(p *ioUringParams) error {
 		return fmt.Errorf("mmap SQ ring: %w", err)
 	}
 
-	r.sq.ringPtr = uintptr(unsafe.Pointer(&sqPtr[0]))
+	basePtr := unsafe.Pointer(&sqPtr[0])
+	r.sq.ringPtr = uintptr(basePtr)
 	r.sq.ringSize = sqSize
 
-	r.sq.khead = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.head)))
-	r.sq.ktail = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.tail)))
-	r.sq.kringMask = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.ringMask)))
-	r.sq.kringEntries = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.ringEntries)))
-	r.sq.kflags = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.flags)))
-	r.sq.kdropped = (*uint32)(unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.dropped)))
+	r.sq.khead = (*uint32)(unsafe.Add(basePtr, p.sqOff.head))
+	r.sq.ktail = (*uint32)(unsafe.Add(basePtr, p.sqOff.tail))
+	r.sq.kringMask = (*uint32)(unsafe.Add(basePtr, p.sqOff.ringMask))
+	r.sq.kringEntries = (*uint32)(unsafe.Add(basePtr, p.sqOff.ringEntries))
+	r.sq.kflags = (*uint32)(unsafe.Add(basePtr, p.sqOff.flags))
+	r.sq.kdropped = (*uint32)(unsafe.Add(basePtr, p.sqOff.dropped))
 
-	arrayPtr := unsafe.Pointer(r.sq.ringPtr + uintptr(p.sqOff.array))
+	arrayPtr := unsafe.Add(basePtr, p.sqOff.array)
 	r.sq.array = unsafe.Slice((*uint32)(arrayPtr), p.sqEntries)
 
 	// Map SQEs
@@ -254,6 +256,7 @@ func (r *Ring) WaitCQE() (CQE, error) {
 			if errors.Is(err, syscall.EINTR) {
 				continue
 			}
+
 			return CQE{}, err
 		}
 	}
@@ -271,9 +274,11 @@ func (r *Ring) Close() error {
 	if r.sq.sqesPtr != 0 {
 		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.sq.sqesPtr)), r.sq.sqesSize))
 	}
+
 	if r.sq.ringPtr != 0 {
 		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.sq.ringPtr)), r.sq.ringSize))
 	}
+
 	if r.cq.ringPtr != 0 && r.cq.ringPtr != r.sq.ringPtr {
 		_ = unix.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(r.cq.ringPtr)), r.cq.ringSize))
 	}

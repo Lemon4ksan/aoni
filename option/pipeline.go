@@ -19,7 +19,20 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// WithRetry attaches an automated retry and backoff policy constructed via [resiliency.RetryBuilder].
+// WithRetry attaches an automated retry and backoff middleware constructed via [resiliency.RetryBuilder].
+//
+// Automatically handles transient network dropouts, HTTP 429 rate limits, and server 5xx errors.
+//
+// # Example
+//
+//	retryPolicy := resiliency.NewRetry().
+//	    MaxAttempts(3).
+//	    ExponentialBackoff(100*time.Millisecond, 2*time.Second).
+//	    RetryOnStatus(http.StatusTooManyRequests, http.StatusBadGateway)
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithRetry(retryPolicy),
+//	)
 func WithRetry(builder *resiliency.RetryBuilder) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if builder != nil {
@@ -34,7 +47,15 @@ func WithRetry(builder *resiliency.RetryBuilder) aoni.ClientOption {
 	}
 }
 
-// WithMiddleware registers one or more [aoni.Middleware] decorators wrapping the client execution engine.
+// WithMiddleware registers one or more [aoni.Middleware] interceptors in the execution chain.
+//
+// Middlewares wrap the core transport and execute sequentially around each HTTP transaction.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithMiddleware(loggingMiddleware, rateLimitingMiddleware),
+//	)
 func WithMiddleware(middlewares ...aoni.Middleware) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if len(middlewares) == 0 {
@@ -51,21 +72,24 @@ func WithMiddleware(middlewares ...aoni.Middleware) aoni.ClientOption {
 	}
 }
 
-// WithPipeline returns an [aoni.ClientOption] setting default pipeline configurations.
+// WithPipeline sets the default 5-stage pipeline processing parameters (compression, caching, validation).
 func WithPipeline(pipe aoni.PipelineConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Pipeline = pipe
 	}
 }
 
-// WithHedging returns an [aoni.ClientOption] configuring request hedging delay.
+// WithHedging configures speculative request hedging with a static delay.
+//
+// If the primary request does not produce first response bytes within delay d, a speculative secondary
+// request is fired concurrently on an alternate connection, and the winner is returned.
 func WithHedging(d time.Duration) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.HedgingDelay = d
 	}
 }
 
-// WithDynamicHedging returns an [aoni.ClientOption] configuring dynamic RTT-percentile request hedging.
+// WithDynamicHedging configures dynamic EWMA percentile request hedging (e.g. hedging at p95 latency).
 func WithDynamicHedging(config *telemetry.DynamicHedgingConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if config == nil {
@@ -78,51 +102,62 @@ func WithDynamicHedging(config *telemetry.DynamicHedgingConfig) aoni.ClientOptio
 	}
 }
 
-// WithMaxResponseSize returns an [aoni.ClientOption] limiting response body consumption in bytes.
+// WithMaxResponseSize limits the maximum response body consumption in bytes to prevent out-of-memory DoS.
+//
+// Defaults to 10 MB (10 * 1024 * 1024). Set to -1 to disable limits.
 func WithMaxResponseSize(size int64) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.MaxResponseSize = size
 	}
 }
 
-// WithMultiReadBodyThreshold returns an [aoni.ClientOption] setting RAM buffering bounds for replayable reads.
+// WithMultiReadBodyThreshold sets the maximum in-memory buffer threshold for replayable response body reads.
 func WithMultiReadBodyThreshold(threshold int64) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.MultiReadThreshold = threshold
 	}
 }
 
-// WithMultiReadDisableDisk returns an [aoni.ClientOption] disabling temporary file disk backing on multi-read buffer overflows.
+// WithMultiReadDisableDisk disables spilling replayable response bodies to temporary disk files when RAM threshold is exceeded.
 func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.MultiReadDisableDisk = disable
 	}
 }
 
-// WithResponseValidator returns an [aoni.ClientOption] setting default response validation functions.
+// WithResponseValidator registers a global response validator executed immediately after receiving headers.
+//
+// If the validator returns an error, decoding is aborted and the error is propagated to the caller.
 func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.ResponseValidator = fn
 	}
 }
 
-// WithSoftErrorDetector returns an [aoni.ClientOption] registering callbacks that sniff initial
-// response body bytes to catch application-level soft errors (e.g. 200 OK containing an HTML error)
-// without draining or consuming the body stream.
+// WithSoftErrorDetector registers detectors that sniff initial response bytes to catch application-level errors
+// (e.g. HTTP 200 containing `{ "error": "auth_failed" }`) without consuming the response stream.
 func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.SoftErrorDetectors = append(cfg.Defaults.SoftErrorDetectors, detectors...)
 	}
 }
 
-// WithCookieJar returns an [aoni.ClientOption] overriding default cookie storage.
+// WithCookieJar overrides the default cookie storage jar.
+//
+// Defaults to [cookie.ProxyIsolatedJar] for secure multi-tenant proxy isolation.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithCookieJar(cookie.NewProxyIsolatedJar()),
+//	)
 func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CookieJar = jar
 	}
 }
 
-// WithCookieJanitor returns an [aoni.ClientOption] enabling background cookie purging for [cookie.ProxyIsolatedJar].
+// WithCookieJanitor enables a background goroutine to periodically purge expired cookies from [cookie.ProxyIsolatedJar].
 func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if pJar, ok := cfg.Engine.CookieJar.(*cookie.ProxyIsolatedJar); ok {
@@ -131,8 +166,8 @@ func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientO
 	}
 }
 
-// WithCookieIndices enables selective cookie-based response caching, hashing only specified
-// cookie names (e.g., "theme", "lang") into the cache key to maximize hit rates for static pages.
+// WithCookieIndices enables selective cookie-based response caching, including only specified
+// cookie names in cache hash keys to maximize cache hit rates for anonymous users.
 func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
 	return func(c *aoni.Config) {
 		if c.Defaults.Pipeline.Cache == nil {
@@ -143,8 +178,7 @@ func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
 	}
 }
 
-// WithDuplicateRequestGuard enables ring-buffer duplicate request detection,
-// triggering a diagnostic alert if the same URL is fetched within the window (e.g. 10s).
+// WithDuplicateRequestGuard enables ring-buffer duplicate request detection to detect accidental infinite request loops.
 func WithDuplicateRequestGuard(window time.Duration, logger core.Logger) aoni.ClientOption {
 	if window <= 0 {
 		window = 10 * time.Second
@@ -167,14 +201,18 @@ func WithDuplicateRequestGuard(window time.Duration, logger core.Logger) aoni.Cl
 	}
 }
 
-// WithDictionaryStore returns an [aoni.ClientOption] configuring a custom RFC 9842 dictionary cache.
+// WithDictionaryStore configures a custom RFC 9842 Shared Compression Dictionary cache store.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9842 (Compression Dictionary Transport).
 func WithDictionaryStore(store *dict.Store) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DictionaryStore = store
 	}
 }
 
-// WithDisableDictionaryCompression returns an [aoni.ClientOption] disabling RFC 9842 compression dictionary negotiation.
+// WithDisableDictionaryCompression disables RFC 9842 compression dictionary negotiation ("Available-Dictionary" / "Use-As-Dictionary").
 func WithDisableDictionaryCompression(disable bool) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.DisableDictionaryCompression = disable

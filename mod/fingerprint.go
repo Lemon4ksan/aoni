@@ -12,21 +12,21 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/spki"
 )
 
-// WithP0fSignature constructs an [RequestModifier] setting p0f TCP stack signature parameters.
+// WithP0fSignature configures TCP/IP SYN packet fingerprint spoofing (TTL, Window Size, MSS, WScale, ECN) for this request.
 func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).P0fSignature = sig
 	})
 }
 
-// WithSessionCache constructs an [RequestModifier] assigning an isolated proxy-aware TLS [fingerprint.SessionCache].
+// WithSessionCache assigns an isolated TLS session cache for TLS 1.2/1.3 session resumption for this request.
 func WithSessionCache(cache fingerprint.SessionCache) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).SessionCache = cache
 	})
 }
 
-// WithCertificatePin constructs an [RequestModifier] pinning SHA-256 public key hashes for target domains (RFC 7469).
+// WithCertificatePin pins a SHA-256 certificate public key hash for a target domain (RFC 7469).
 func WithCertificatePin(domain, hash string) RequestModifier {
 	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
@@ -38,12 +38,12 @@ func WithCertificatePin(domain, hash string) RequestModifier {
 	})
 }
 
-// WithSPKIPin constructs an [RequestModifier] pinning an SPKI SHA-256 fingerprint hash for target domain (RFC 7469 §2.4).
+// WithSPKIPin pins an SPKI SHA-256 fingerprint hash for a target domain (RFC 7469 §2.4).
 func WithSPKIPin(domain, pin string) RequestModifier {
 	return WithCertificatePin(domain, spki.NormalizePin(pin))
 }
 
-// WithPadding constructs an [RequestModifier] injecting random packet padding headers to confuse DPI length analysis.
+// WithPadding injects pseudo-random HTTP padding headers to confuse DPI packet length analysis.
 func WithPadding(cfg fingerprint.PaddingConfig) RequestModifier {
 	return Custom(func(req Request) {
 		if padding := fingerprint.GeneratePadding(cfg); len(padding) > 0 {
@@ -53,7 +53,7 @@ func WithPadding(cfg fingerprint.PaddingConfig) RequestModifier {
 	})
 }
 
-// WithClientHelloSpecProvider constructs an [RequestModifier] assigning a dynamic uTLS spec provider.
+// WithClientHelloSpecProvider assigns a dynamic uTLS spec provider callback for customizing the TLS handshake.
 func WithClientHelloSpecProvider(provider fingerprint.ClientHelloSpecProvider) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).ClientHelloSpecProvider = provider

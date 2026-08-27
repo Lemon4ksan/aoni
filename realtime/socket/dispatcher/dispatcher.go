@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/async/task"
 )
 
@@ -40,14 +40,14 @@ type Extractor[OpCode comparable, JobID comparable, Packet any] struct {
 // Config configures the Dispatcher.
 type Config struct {
 	MaxJobs int
-	Logger  log.Logger
+	Logger  logkit.Logger
 }
 
 // DefaultConfig builds default dispatcher settings.
 func DefaultConfig() Config {
 	return Config{
 		MaxJobs: 1000,
-		Logger:  log.Discard,
+		Logger:  logkit.Discard,
 	}
 }
 
@@ -57,7 +57,7 @@ type Dispatcher[OpCode comparable, JobID comparable, Packet any] struct {
 	writer    Writer
 	extractor Extractor[OpCode, JobID, Packet]
 	tasks     *task.Manager[JobID, Packet]
-	logger    log.Logger
+	logger    logkit.Logger
 
 	mu             sync.RWMutex
 	opcodeHandlers map[OpCode]Handler[Packet]
@@ -75,7 +75,7 @@ func New[OpCode, JobID comparable, Packet any](
 ) *Dispatcher[OpCode, JobID, Packet] {
 	l := cfg.Logger
 	if l == nil {
-		l = log.Discard
+		l = logkit.Discard
 	}
 
 	maxJ := cfg.MaxJobs
@@ -88,7 +88,7 @@ func New[OpCode, JobID comparable, Packet any](
 		writer:         writer,
 		extractor:      extractor,
 		tasks:          task.NewManager[JobID, Packet](maxJ),
-		logger:         l.With(log.Component("dispatcher")),
+		logger:         l.With(logkit.Component("dispatcher")),
 		opcodeHandlers: make(map[OpCode]Handler[Packet]),
 		methodHandlers: make(map[string]Handler[Packet]),
 	}

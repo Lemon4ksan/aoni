@@ -11,8 +11,14 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dpop"
 )
 
-// WithDPoP constructs an [RequestModifier] injecting an RFC 9449 DPoP Proof JWT
+// WithDPoP generates and injects an RFC 9449 Demonstrating Proof-of-Possession (DPoP) Proof JWT
 // into the "DPoP" request header.
+//
+// Signs the HTTP method and full URI using the provided asymmetric private key.
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9449 (OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer).
 func WithDPoP(privKey crypto.PrivateKey, opts ...dpop.ProofOptions) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -27,9 +33,18 @@ func WithDPoP(privKey crypto.PrivateKey, opts ...dpop.ProofOptions) RequestModif
 	}
 }
 
-// WithDPoPToken constructs an [RequestModifier] attaching a DPoP-bound OAuth 2.0 access token
-// to the "Authorization" header ("DPoP <accessToken>") and calculating the DPoP Proof JWT with
-// the access token hash ("ath" claim) into the "DPoP" header per RFC 9449 §7.1.
+// WithDPoPToken attaches a DPoP-bound OAuth 2.0 access token ("Authorization: DPoP <token>")
+// and generates a matching DPoP Proof JWT with the access token hash ("ath" claim) into "DPoP" (RFC 9449 §7.1).
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/protected/resource",
+//	    mod.WithDPoPToken(accessToken, privateKey),
+//	)
+//
+// # RFC Compliance
+//
+// Conforms to RFC 9449 Section 7.1.
 func WithDPoPToken(accessToken string, privKey crypto.PrivateKey, opts ...dpop.ProofOptions) RequestModifier {
 	var opt dpop.ProofOptions
 	if len(opts) > 0 {
@@ -52,7 +67,7 @@ func WithDPoPToken(accessToken string, privKey crypto.PrivateKey, opts ...dpop.P
 	}
 }
 
-// WithDPoPProof constructs an [RequestModifier] attaching a pre-computed DPoP Proof JWT string.
+// WithDPoPProof attaches a pre-computed RFC 9449 DPoP Proof JWT string directly into the "DPoP" header.
 func WithDPoPProof(proofJWT string) RequestModifier {
 	return WithHeader(dpop.HeaderDPoP, proofJWT)
 }
