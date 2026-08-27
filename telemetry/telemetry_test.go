@@ -341,8 +341,11 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 func TestDuplicateRequestGuard(t *testing.T) {
 	t.Parallel()
 
-	var duplicateDetected bool
-	var detectedMethod, detectedURL string
+	var (
+		duplicateDetected bool
+		detectedMethod    string
+		detectedURL       string
+	)
 
 	guard := telemetry.NewDuplicateRequestGuard(10, 5*time.Second, func(method, rawURL string, elapsed time.Duration) {
 		duplicateDetected = true
@@ -391,4 +394,3 @@ func TestTelemetry_DynamicHedgingConfig_And_Trace(t *testing.T) {
 	}
 	assert.False(t, telemetry.IsStreamingResponse(respJSON))
 }
-

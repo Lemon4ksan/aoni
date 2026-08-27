@@ -242,6 +242,7 @@ func TestClientGRPC(t *testing.T) {
 func TestFastClientTyped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
 		switch r.Method {
 		case http.MethodGet:
 			_ = json.NewEncoder(w).Encode(UserDTO{ID: 55, Name: "Fast Gordon"})
@@ -269,6 +270,7 @@ func TestFastClientTyped(t *testing.T) {
 	}
 
 	var userInto UserDTO
+
 	err = fastClient.GetInto(ctx, "/users/55", &userInto)
 	if err != nil || userInto.ID != 55 {
 		t.Fatalf("fast get into failed: %v", err)
@@ -341,6 +343,7 @@ func TestFastClientTyped(t *testing.T) {
 func TestStandardClient_AllMethods_And_PackageLevel(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
 		switch r.Method {
 		case http.MethodGet:
 			_ = json.NewEncoder(w).Encode(UserDTO{ID: 1, Name: "Get"})
@@ -446,4 +449,3 @@ func TestStandardClient_AllMethods_And_PackageLevel(t *testing.T) {
 		t.Fatalf("pkg delete failed: %v", err)
 	}
 }
-

@@ -9,4 +9,7 @@
 //   - [github.com/lemon4ksan/aoni/resiliency/cache]: HTTP response caching with RFC 9211 No-Vary-Search normalization.
 //   - [github.com/lemon4ksan/aoni/resiliency/loadbalancer]: Client load balancers with health checks and failover strategies.
 //   - [github.com/lemon4ksan/aoni/resiliency/challenge]: WAF challenge detection and solver engines (Cloudflare, AWS WAF, Akamai).
+//   - [github.com/lemon4ksan/aoni/resiliency/etag]: ETag validation automaton with 304 Not Modified reconstruction.
+//   - [github.com/lemon4ksan/aoni/resiliency/coalesce]: Singleflight inflight duplicate request suppression.
+//   - [github.com/lemon4ksan/aoni/resiliency/backoff]: Jittered backoff strategies (Exponential, Linear, Constant).
 package resiliency

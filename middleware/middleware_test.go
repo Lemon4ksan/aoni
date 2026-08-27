@@ -832,8 +832,10 @@ func TestMiddleware_Log_And_MaskURLString(t *testing.T) {
 	logMw := Log(telemetry.NewSlogAdapter(nil))
 	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example.com/items", nil)
 	require.NoError(t, err)
+
 	req := aoni.NewStdRequest(httpReq)
 	next := &mockDoer{}
+
 	resp, err := logMw(next).Do(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode())
@@ -873,5 +875,3 @@ func TestMiddleware_Predicates_And_RetryPresets(t *testing.T) {
 	predGRPC := RetryOnGRPCStatus("14")
 	assert.False(t, predGRPC(nil, nil))
 }
-
-

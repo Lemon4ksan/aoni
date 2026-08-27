@@ -222,4 +222,3 @@ func TestCookieTransport_RoundTrip_And_PartitionKey(t *testing.T) {
 	cookies := pJar.Cookies(u)
 	assert.NotEmpty(t, cookies)
 }
-

@@ -382,6 +382,7 @@ func TestOption_AllBrowserProfiles_And_Evasion(t *testing.T) {
 	// BrowserProfile variants
 	cfgBP1 := &aoni.Config{}
 	option.WithBrowserProfile(aoni.BrowserFirefox, 0)(cfgBP1)
+
 	cfgBP2 := &aoni.Config{}
 	option.WithBrowserProfile(aoni.BrowserChrome, 0)(cfgBP2)
 
@@ -469,6 +470,7 @@ func TestOption_MoreHooks_And_Pipeline(t *testing.T) {
 	// Hooks
 	beforeFn := func(req *http.Request) {}
 	afterFn := func(resp *http.Response, err error) {}
+
 	option.WithBeforeRequest(beforeFn)(cfg)
 	option.WithAfterResponse(afterFn)(cfg)
 	assert.NotEmpty(t, cfg.Defaults.BeforeRequest)
@@ -498,4 +500,3 @@ func TestOption_MoreHooks_And_Pipeline(t *testing.T) {
 	option.WithHTTP2Config(aoni.HTTP2Config{PingTimeout: 5 * time.Second})(cfg)
 	assert.NotNil(t, cfg.Engine.HTTP2Config)
 }
-

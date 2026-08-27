@@ -122,18 +122,21 @@ func TestCodec_Strategies(t *testing.T) {
 	// JSONCodec
 	modJSONEnc := codec.JSONCodec.Encode(TestUser{Name: "Alice"})
 	assert.NotNil(t, modJSONEnc)
+
 	modJSONDec := codec.JSONCodec.Decode()
 	assert.NotNil(t, modJSONDec)
 
 	// XMLCodec
 	modXMLEnc := codec.XMLCodec.Encode(TestUser{Name: "Bob"})
 	assert.NotNil(t, modXMLEnc)
+
 	modXMLDec := codec.XMLCodec.Decode()
 	assert.NotNil(t, modXMLDec)
 
 	// YAMLCodec
 	modYAMLEnc := codec.YAMLCodec.Encode(TestUser{Name: "Charlie"})
 	assert.NotNil(t, modYAMLEnc)
+
 	modYAMLDec := codec.YAMLCodec.Decode()
 	assert.NotNil(t, modYAMLDec)
 
@@ -141,6 +144,7 @@ func TestCodec_Strategies(t *testing.T) {
 	strMsg := wrapperspb.String("test-payload")
 	modProtoEnc := codec.ProtoCodec.Encode(strMsg)
 	assert.NotNil(t, modProtoEnc)
+
 	modProtoDec := codec.ProtoCodec.Decode()
 	assert.NotNil(t, modProtoDec)
 
@@ -151,6 +155,7 @@ func TestCodec_Strategies(t *testing.T) {
 	// GRPCWebCodec
 	modGRPCEnc := codec.GRPCWebCodec.Encode(strMsg)
 	assert.NotNil(t, modGRPCEnc)
+
 	modGRPCDec := codec.GRPCWebCodec.Decode()
 	assert.NotNil(t, modGRPCDec)
 
@@ -164,8 +169,8 @@ func TestCodec_Strategies(t *testing.T) {
 
 	// Payload
 	var uPayload TestUser
+
 	err = codec.Payload("application/json", []byte(`{"name":"Eve","age":22}`), &uPayload)
 	require.NoError(t, err)
 	assert.Equal(t, "Eve", uPayload.Name)
 }
-

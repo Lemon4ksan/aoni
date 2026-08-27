@@ -290,14 +290,15 @@ func TestEncode_SliceFormats_And_TextMarshaler(t *testing.T) {
 
 	// EncodeQueryString
 	var sb strings.Builder
+
 	err = EncodeQueryString(s, &sb)
 	require.NoError(t, err)
 	assert.Contains(t, sb.String(), "comma=a%2Cb%2Cc")
 
 	// EncodeInto
 	targetVals := make(map[string][]string)
+
 	err = EncodeInto(targetVals, s)
 	require.NoError(t, err)
 	assert.Equal(t, "a,b,c", targetVals["comma"][0])
 }
-

@@ -69,4 +69,3 @@ func TestETagAutomaton(t *testing.T) {
 	require.NotNil(t, customAuto)
 	assert.False(t, customAuto.GetETagOptional("none").IsPresent())
 }
-

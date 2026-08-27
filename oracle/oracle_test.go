@@ -84,10 +84,12 @@ func TestOracleClient_MockServer(t *testing.T) {
 				Status: "ok",
 				Ready:  true,
 			})
+
 		case "/init":
 			_ = json.NewEncoder(w).Encode(oracle.InitResponse{
 				Status: "initialized",
 			})
+
 		case "/token":
 			_ = json.NewEncoder(w).Encode(oracle.TokenResponse{
 				Status:  "ok",
@@ -99,6 +101,7 @@ func TestOracleClient_MockServer(t *testing.T) {
 					"Content-Length":          "9999",
 				},
 			})
+
 		default:
 			http.NotFound(w, r)
 		}
