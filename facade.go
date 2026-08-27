@@ -580,3 +580,32 @@ func Custom(fn func(Request)) RequestModifier {
 	return mod.Custom(fn)
 }
 
+// WithModifier registers a default [RequestModifier] or custom modifier function executed on every outbound request.
+//
+// Supported types for fn:
+//   - [RequestModifier]
+//   - func([Request])
+//   - func(*http.Request)
+func WithModifier(fn any) ClientOption {
+	return func(cfg *Config) {
+		switch m := fn.(type) {
+		case RequestModifier:
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, m)
+		case func(Request):
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(m))
+		case func(*http.Request):
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(func(r Request) {
+				m(r.HTTPRequest())
+			}))
+		}
+	}
+}
+
+// WithModifiers registers one or more default [RequestModifier] functions executed on every outbound request.
+func WithModifiers(mods ...RequestModifier) ClientOption {
+	return func(cfg *Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
+	}
+}
+
+
