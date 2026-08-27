@@ -39,7 +39,7 @@ func main() {
 		option.WithUserAgent(chrome.UserAgentWindows),
 	)
 
-	res, err := chromeClient.Get[Response](ctx, "/ip")
+	res, err := chromeClient.GetTo[Response](ctx, "/ip")
 	if err != nil {
 		fmt.Printf("Chrome request failed: %v\n", err)
 	} else {
@@ -61,7 +61,7 @@ func main() {
 		option.WithUserAgent(firefox.UserAgentFirefoxWindows),
 	)
 
-	res, err = firefoxClient.Get[Response](ctx, "/ip")
+	res, err = firefoxClient.GetTo[Response](ctx, "/ip")
 	if err != nil {
 		fmt.Printf("Firefox request failed: %v\n", err)
 	} else {

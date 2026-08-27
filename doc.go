@@ -53,19 +53,19 @@
 //  1. Single-Line Zero Config (Complete Beginner):
 //     Fetch and decode JSON/XML/Protobuf payloads into a typed struct with zero boilerplate or client setup:
 //
-//     user, err := aoni.Get[User](ctx, "https://api.github.com/users/octocat")
+//     user, err := aoni.GetTo[User](ctx, "https://api.github.com/users/octocat")
 //
 //  2. Production-Grade Stealth Client (Standard App):
 //     Configure TLS browser impersonation, base URLs, timeouts, and proxy rotators:
 //
 //     client := aoni.NewClient(nil, option.WithChrome(), option.WithTimeout(10*time.Second), option.WithBaseURL("https://api.github.com"))
-//     user, err := client.Get[User](ctx, "/users/123")
+//     user, err := client.GetTo[User](ctx, "/users/123")
 //
 //  3. Extreme RPS Engine (High-Throughput 2.48M+ RPS):
 //     Use [github.com/lemon4ksan/aoni/fast.Client] for zero-allocation performance:
 //
 //     fastClient := fast.NewClient(option.WithBaseURL("https://api.github.com"))
-//     user, err := fastClient.Get[User](ctx, "/users/123")
+//     user, err := fastClient.GetTo[User](ctx, "/users/123")
 //     defer resp.Close()
 //
 // # Error Inspection Suite

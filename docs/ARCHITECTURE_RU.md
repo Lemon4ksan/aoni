@@ -92,7 +92,7 @@ graph TD
 
 ```go
 // Безопасность из коробки: Лаконично, безопасно и строго типизировано
-users, err := client.Get[[]User](ctx, "https://api.example.com/users")
+users, err := client.GetTo[[]User](ctx, "https://api.example.com/users")
 ```
 
 ### 2. Быстрый путь для высоконагруженных систем (`fast.Client`)
@@ -100,11 +100,11 @@ users, err := client.Get[[]User](ctx, "https://api.example.com/users")
 
 - **Максимальная пропускная способность**: До **2 480 000+ RPS** на одной рабочей станции с субмикросекундными задержками.
 - **Ноль аллокаций**: Полное устранение нагрузки на GC (`0 B/op, 0 allocs/op`) за счёт пулов объектов, подсказок компилятору и внекучевых слэбов памяти.
-- **Ноль дрифта типов**: Универсальные конвейеры generic-декодирования (`fastClient.Get[T]`, `codec.Decode`) без оверхеда на runtime reflection.
+- **Ноль дрифта типов**: Универсальные конвейеры generic-декодирования (`fastClient.GetTo[T]`, `codec.Decode`) без оверхеда на runtime reflection.
 
 ```go
 // Быстрый путь: 0 аллокаций, максимальная скорость
-user, err := fastClient.Get[UserResponse](ctx, "https://api.example.com/v1/data")
+user, err := fastClient.GetTo[UserResponse](ctx, "https://api.example.com/v1/data")
 if err != nil {
     return err
 }
@@ -157,6 +157,8 @@ make fuzz
 │  Независимые экспериментальные модули и адаптеры:        │
 │  • aoni/x/socketio (Socket.IO v5 / Engine.IO v4)         │
 │  • aoni/x/geoip    (База данных MaxMind GeoIP2 MMDB)     │
+│  • aoni/x/otel     (OpenTelemetry без внешних зависимостей)│
+│  • aoni/x/webtransport (WebTransport поверх HTTP/3)      │
 └──────────────────────────────────────────────────────────┘
 ```
 

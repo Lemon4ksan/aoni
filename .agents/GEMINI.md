@@ -26,7 +26,7 @@ This document outlines the architecture, coding standards, build/test commands, 
   - Pure-Go JA3/JA4/JA4H fingerprint calculation and emulation.
   - TCP/IP p0f stack spoofing and HPACK framing control.
 - **Generics-First Ergonomics & Codecs**:
-  - Type-safe single-line calls via `client.Get[T]`, `client.Post[T]`, `client.R()`, and `aoni.Get[T]`.
+  - Type-safe single-line calls via `client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, and `aoni.GetTo[T]`.
   - Native decoders for JSON, XML, Protobuf, and gRPC-Web (5-byte framing & trailer validation).
 - **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streaming (Socket.IO v5 / Engine.IO v4 in `aoni/x/socketio`).
 - **Proxy Isolation & Utilities**: Proxy-isolated Cookie Jars (`ProxyIsolatedCookieJar`), proxy rotators, IPv6 subnet rotators, and DoH/DoT/DoQ DNS resolvers.

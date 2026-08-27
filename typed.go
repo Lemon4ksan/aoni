@@ -46,9 +46,137 @@ type NoResponse struct{}
 
 const stackModCapacity = 16
 
-// --- Generic HTTP Methods on *Client ---
+// --- Raw Non-Generic HTTP Methods on *Client ---
 
-// Get executes an HTTP GET request and automatically decodes the response body into type Resp.
+// Get executes a raw HTTP GET request against path and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+//
+// # Example
+//
+//	resp, err := client.Get(ctx, "/users/42")
+//	if err != nil {
+//	    return err
+//	}
+//	defer resp.Body.Close()
+func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
+}
+
+// Post executes a raw HTTP POST request carrying body and returns the raw [*http.Response].
+//
+// The body argument is automatically detected and serialized:
+//   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
+//   - [proto.Message] -> Protobuf binary payload with "Content-Type: application/x-protobuf"
+//   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
+//   - `[]byte` / `string` -> Raw payload
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+//
+// # Example
+//
+//	resp, err := client.Post(ctx, "/users", CreateUserReq{Name: "Bob"})
+func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		var stackBuf [stackModCapacity]RequestModifier
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	}
+
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// Put executes a raw HTTP PUT request carrying body and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		var stackBuf [stackModCapacity]RequestModifier
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	}
+
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
+// Patch executes a raw HTTP PATCH request carrying body and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		var stackBuf [stackModCapacity]RequestModifier
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	}
+
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
+// Delete executes a raw HTTP DELETE request and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Options executes a raw HTTP OPTIONS request and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Options(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodOptions, path, mods...)
+}
+
+// Fetch executes an arbitrary raw HTTP method request and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Fetch(
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) (*http.Response, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		var stackBuf [stackModCapacity]RequestModifier
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	}
+
+	return c.Request(ctx, method, path, mods...)
+}
+
+// --- Generic Typed HTTP Methods on *Client ---
+
+// GetTo executes an HTTP GET request and automatically decodes the response body into type Resp.
 //
 // Selects the optimal unmarshaling strategy based on the response Content-Type (JSON, XML, or Protobuf).
 // On non-2xx HTTP responses, returns an [*APIError] containing the status code, response headers, and error body.
@@ -64,7 +192,7 @@ const stackModCapacity = 16
 //	    Name string `json:"name"`
 //	}
 //
-//	user, err := client.Get[User](ctx, "/users/42")
+//	user, err := client.GetTo[User](ctx, "/users/42")
 //	if err != nil {
 //	    if aoni.IsNotFound(err) {
 //	        // Handle HTTP 404
@@ -74,11 +202,11 @@ const stackModCapacity = 16
 //
 // # Example: Modifiers & Authentication
 //
-//	user, err := client.Get[User](ctx, "/me",
+//	user, err := client.GetTo[User](ctx, "/me",
 //	    mod.WithBearer(token),
 //	    mod.WithQuery("fields", "id,name,email"),
 //	)
-func (c *Client) Get[Resp any](
+func (c *Client) GetTo[Resp any](
 	ctx context.Context,
 	path string,
 	mods ...RequestModifier,
@@ -122,7 +250,7 @@ func (c *Client) GetEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodGet, path, nil, mods)
 }
 
-// Post executes an HTTP POST request carrying body and unmarshals the response into *Resp.
+// PostTo executes an HTTP POST request carrying body and unmarshals the response into *Resp.
 //
 // The body argument is automatically detected and serialized:
 //   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
@@ -130,10 +258,14 @@ func (c *Client) GetEx[Resp any](
 //   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
 //   - `[]byte` / `string` -> Raw payload
 //
+// # Resource Management
+//
+// The response body is automatically drained and closed. Callers do NOT need to call Body.Close().
+//
 // # Example
 //
-//	created, err := client.Post[User](ctx, "/users", CreateUserReq{Name: "Bob"})
-func (c *Client) Post[Resp any](
+//	created, err := client.PostTo[User](ctx, "/users", CreateUserReq{Name: "Bob"})
+func (c *Client) PostTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
@@ -193,12 +325,12 @@ func (c *Client) PostEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPost, path, body, mods)
 }
 
-// Put executes an HTTP PUT request carrying body and unmarshals the response into *Resp.
+// PutTo executes an HTTP PUT request carrying body and unmarshals the response into *Resp.
 //
 // # Example
 //
-//	updated, err := client.Put[User](ctx, "/users/42", UpdateUserReq{Name: "Robert"})
-func (c *Client) Put[Resp any](
+//	updated, err := client.PutTo[User](ctx, "/users/42", UpdateUserReq{Name: "Robert"})
+func (c *Client) PutTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
@@ -258,12 +390,12 @@ func (c *Client) PutEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPut, path, body, mods)
 }
 
-// Patch executes an HTTP PATCH request carrying body and unmarshals the response into *Resp.
+// PatchTo executes an HTTP PATCH request carrying body and unmarshals the response into *Resp.
 //
 // # Example
 //
-//	patched, err := client.Patch[User](ctx, "/users/42", map[string]any{"status": "active"})
-func (c *Client) Patch[Resp any](
+//	patched, err := client.PatchTo[User](ctx, "/users/42", map[string]any{"status": "active"})
+func (c *Client) PatchTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
@@ -323,12 +455,12 @@ func (c *Client) PatchEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodPatch, path, body, mods)
 }
 
-// Delete executes an HTTP DELETE request and unmarshals any returned response payload into *Resp.
+// DeleteTo executes an HTTP DELETE request and unmarshals any returned response payload into *Resp.
 //
 // # Example
 //
-//	status, err := client.Delete[DeleteStatus](ctx, "/users/42")
-func (c *Client) Delete[Resp any](
+//	status, err := client.DeleteTo[DeleteStatus](ctx, "/users/42")
+func (c *Client) DeleteTo[Resp any](
 	ctx context.Context,
 	path string,
 	mods ...RequestModifier,
@@ -367,23 +499,8 @@ func (c *Client) DeleteEx[Resp any](
 	return executeToEx[Resp](ctx, c, http.MethodDelete, path, nil, mods)
 }
 
-// Options executes an HTTP OPTIONS request and unmarshals the response into *Resp.
-func (c *Client) Options[Resp any](
-	ctx context.Context,
-	path string,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	//nolint:bodyclose // body is closed inside decodeResponseTo
-	resp, err := c.Request(ctx, http.MethodOptions, path, mods...)
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[Resp](c, resp)
-}
-
-// Fetch executes an arbitrary HTTP method request, marshaling body if provided, and unmarshals the response into *Resp.
-func (c *Client) Fetch[Resp any](
+// FetchTo executes an arbitrary HTTP method request, marshaling body if provided, and unmarshals the response into *Resp.
+func (c *Client) FetchTo[Resp any](
 	ctx context.Context,
 	method, path string,
 	body any,
@@ -511,7 +628,7 @@ func executeToEx[Resp any](
 
 	reqMods := withCaptureMod(&stackBuf, &raw, mods)
 
-	result, err := c.Fetch[Resp](ctx, method, path, body, reqMods...)
+	result, err := c.FetchTo[Resp](ctx, method, path, body, reqMods...)
 	if err != nil {
 		if raw != nil && raw.Body != nil {
 			_ = raw.Body.Close()

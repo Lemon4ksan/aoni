@@ -186,7 +186,7 @@ func TestClient_Request_StatusCodesAndErrors(t *testing.T) {
 				_, _ = w.Write([]byte(tt.respBody))
 			})
 
-			res, err := client.Get[testPayload](t.Context(), "/")
+			res, err := client.GetTo[testPayload](t.Context(), "/")
 			if tt.expectErr {
 				require.Error(t, err)
 
@@ -260,7 +260,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 				client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-				result, err := client.Get[testPayload](t.Context(), "/")
+				result, err := client.GetTo[testPayload](t.Context(), "/")
 				if tt.expectErr != "" {
 					assert.ErrorContains(t, err, tt.expectErr)
 				} else {
@@ -280,7 +280,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-		result, err := client.Get[testPayload](t.Context(), "/", mod.WithoutBaseResponse())
+		result, err := client.GetTo[testPayload](t.Context(), "/", mod.WithoutBaseResponse())
 		require.NoError(t, err)
 		assert.Equal(t, "raw_direct_payload", result.Message)
 	})
@@ -334,7 +334,7 @@ func TestClient_ErrorModel(t *testing.T) {
 
 	var errModel errorStruct
 
-	_, err := client.Get[any](t.Context(), "/oauth", mod.WithErrorModel(&errModel))
+	_, err := client.GetTo[any](t.Context(), "/oauth", mod.WithErrorModel(&errModel))
 	require.Error(t, err)
 
 	var apiErr *aoni.APIError
@@ -506,7 +506,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 				return
 			}
 
-			_, err := client.Get[testPayload](t.Context(), "/")
+			_, err := client.GetTo[testPayload](t.Context(), "/")
 			require.Error(t, err)
 			assert.ErrorIs(t, err, tt.expectErr)
 		})
@@ -522,7 +522,7 @@ func TestClient_AutoTranscoding(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "` + "\xef\xf0\xe8\xe2\xe5\xf2" + `"}`))
 	})
 
-	result, err := client.Get[testPayload](t.Context(), "/transcode")
+	result, err := client.GetTo[testPayload](t.Context(), "/transcode")
 	require.NoError(t, err)
 	assert.Equal(t, "привет", result.Message)
 }
@@ -574,7 +574,7 @@ func TestClient_Decompression(t *testing.T) {
 				_, _ = w.Write(buf.Bytes())
 			})
 
-			result, err := client.Get[testPayload](t.Context(), "/")
+			result, err := client.GetTo[testPayload](t.Context(), "/")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, result.Message)
 		})
@@ -1056,7 +1056,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	resChan := make(chan result, 1)
 
 	go func() {
-		res, err := client.Get[testPayload](t.Context(), "/")
+		res, err := client.GetTo[testPayload](t.Context(), "/")
 		resChan <- result{res: res, err: err}
 	}()
 
@@ -1929,7 +1929,7 @@ func TestClient_CustomMIMEDecoders(t *testing.T) {
 			option.WithDecoder("application/x-msgpack", msgpackTestDecoder{}),
 		)
 
-		result, err := client.Get[string](context.Background(), "/")
+		result, err := client.GetTo[string](context.Background(), "/")
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Equal(t, "msgpack:binary_payload", *result)
@@ -2237,7 +2237,7 @@ func TestRFC7616_DigestAuthentication(t *testing.T) {
 		Status string `json:"status"`
 	}
 
-	res, err := client.Get[authResponse](t.Context(), "/protected")
+	res, err := client.GetTo[authResponse](t.Context(), "/protected")
 	require.NoError(t, err)
 	assert.Equal(t, "authenticated", res.Status)
 }

@@ -50,7 +50,7 @@ func main() {
 
 	// Requests will be distributed across backends
 	for i := range 6 {
-		res, err := client.Get[Response](ctx, "/ip")
+		res, err := client.GetTo[Response](ctx, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

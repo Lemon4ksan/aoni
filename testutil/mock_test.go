@@ -39,7 +39,7 @@ func TestMockEngine(t *testing.T) {
 	t.Run("GetTo_Mock", func(t *testing.T) {
 		t.Parallel()
 
-		user, err := client.Get[userResponse](context.Background(), "/api/user/1")
+		user, err := client.GetTo[userResponse](context.Background(), "/api/user/1")
 		require.NoError(t, err)
 		require.NotNil(t, user)
 		assert.Equal(t, 1, user.ID)
@@ -49,7 +49,7 @@ func TestMockEngine(t *testing.T) {
 	t.Run("PostTo_Mock", func(t *testing.T) {
 		t.Parallel()
 
-		created, err := client.Post[userResponse](
+		created, err := client.PostTo[userResponse](
 			context.Background(),
 			"/api/user",
 			userResponse{Name: "Woz"},
@@ -63,7 +63,7 @@ func TestMockEngine(t *testing.T) {
 	t.Run("Unmatched_Route", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := client.Get[userResponse](context.Background(), "/unmatched")
+		_, err := client.GetTo[userResponse](context.Background(), "/unmatched")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected request")
 	})

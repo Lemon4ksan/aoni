@@ -116,7 +116,7 @@ func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Resp
 //	    log.Fatal(err)
 //	}
 func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
-	return DefaultClient.Get[T](ctx, path, mods...)
+	return DefaultClient.GetTo[T](ctx, path, mods...)
 }
 
 // PostTo executes a 1-line typed POST request carrying body using [DefaultClient] and decodes the response into T.
@@ -135,7 +135,7 @@ func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T
 //
 //	newUser, err := aoni.PostTo[User](ctx, "https://api.example.com/users", CreateUserReq{Name: "Alice"})
 func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	return DefaultClient.Post[T](ctx, path, body, mods...)
+	return DefaultClient.PostTo[T](ctx, path, body, mods...)
 }
 
 // PutTo executes a 1-line typed PUT request carrying body using [DefaultClient] and decodes the response into T.
@@ -144,7 +144,7 @@ func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestMo
 //
 //	updated, err := aoni.PutTo[User](ctx, "https://api.example.com/users/42", UpdateUserReq{Name: "Alice B."})
 func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	return DefaultClient.Put[T](ctx, path, body, mods...)
+	return DefaultClient.PutTo[T](ctx, path, body, mods...)
 }
 
 // PatchTo executes a 1-line typed PATCH request carrying body using [DefaultClient] and decodes the response into T.
@@ -153,7 +153,7 @@ func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestMod
 //
 //	patched, err := aoni.PatchTo[User](ctx, "https://api.example.com/users/42", map[string]string{"status": "online"})
 func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
-	return DefaultClient.Patch[T](ctx, path, body, mods...)
+	return DefaultClient.PatchTo[T](ctx, path, body, mods...)
 }
 
 // DeleteTo executes a 1-line typed DELETE request using [DefaultClient] and decodes any returned payload into T.
@@ -162,7 +162,7 @@ func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestM
 //
 //	status, err := aoni.DeleteTo[DeleteStatus](ctx, "https://api.example.com/users/42")
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
-	return DefaultClient.Delete[T](ctx, path, mods...)
+	return DefaultClient.DeleteTo[T](ctx, path, mods...)
 }
 
 // Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.
@@ -214,7 +214,7 @@ func FetchTyped[T any](
 // # Example
 //
 //	user, err := aoni.Scoped(nil, func(c *aoni.Client) (*User, error) {
-//	    return c.Get[User](ctx, "/users/1")
+//	    return c.GetTo[User](ctx, "/users/1")
 //	}, option.WithChrome(), option.WithTimeout(5*time.Second))
 func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOption) (T, error) {
 	base := client
@@ -607,5 +607,3 @@ func WithModifiers(mods ...RequestModifier) ClientOption {
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
 	}
 }
-
-

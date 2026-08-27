@@ -47,7 +47,7 @@ func main() {
 		option.WithPersonaStruct(fingerprint.PersonaChrome120Windows),
 	)
 
-	res, err := chromeClient.Get[Response](ctx, "/headers")
+	res, err := chromeClient.GetTo[Response](ctx, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {
@@ -63,7 +63,7 @@ func main() {
 		option.WithPersonaStruct(fingerprint.PersonaFirefox120Windows),
 	)
 
-	res, err = firefoxClient.Get[Response](ctx, "/headers")
+	res, err = firefoxClient.GetTo[Response](ctx, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {

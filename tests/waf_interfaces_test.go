@@ -275,7 +275,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	)
 
 	info := &telemetry.TraceInfo{}
-	result, err := client.Get[testPayload](t.Context(), "/", mod.WithTrace(info), mod.WithTraceJA4(info))
+	result, err := client.GetTo[testPayload](t.Context(), "/", mod.WithTrace(info), mod.WithTraceJA4(info))
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", result.Message)
@@ -286,7 +286,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	assert.NotEmpty(t, info.RemoteAddr)
 	assert.Greater(t, info.Total, 0*time.Second)
 
-	resultCached, err := client.Get[testPayload](t.Context(), "/")
+	resultCached, err := client.GetTo[testPayload](t.Context(), "/")
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", resultCached.Message)

@@ -22,6 +22,10 @@
 | **[`aoni/x/otel`](./otel)** | Распределенный трейсинг OpenTelemetry и W3C TraceContext. | Без внешних зависимостей (только stdlib) |
 | **[`aoni/x/socketio`](./socketio)** | Клиент **Socket.IO v5 / Engine.IO v4** поверх WebSockets и HTTP Long-Polling. | Парсер фреймов с минимальными аллокациями |
 | **[`aoni/x/geoip`](./geoip)** | Чтение баз **MaxMind GeoIP MMDB** для геолокации по IP и ASN. | Совместимость с MaxMind форматом |
+| **[`aoni/x/webtransport`](./webtransport)** | **WebTransport поверх HTTP/3** (W3C / RFC 9297) для датаграмм и стримов. | Мультиплексирование QUIC и HTTP/3 |
+| **[`aoni/x/grpc/dynamic`](./grpc/dynamic)** | **Динамический gRPC-клиент** через дескрипторы Protobuf и JSON. | Динамические схемы без кодогенерации |
+| **[`aoni/x/sqlcookie`](./sqlcookie)** | **SQL-хранилище cookies** для изолированных персистентных jar. | Драйвер `database/sql` |
+| **[`aoni/x/tunnel/tun`](./tunnel/tun)** | **Низкоуровневые TUN/TAP драйверы L3** (Wintun, Linux tun, macOS utun). | Нативные платформенные драйверы |
 
 ## ⚡ Сравнение: `aoni/x/otel` и OpenTelemetry SDK
 

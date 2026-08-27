@@ -53,7 +53,7 @@ func main() {
 	)
 
 	// 1. Path variable: fetch user /users/{id}
-	user, err := client.Get[User](ctx,
+	user, err := client.GetTo[User](ctx,
 		"/users/{id}",
 		mod.WithVar("id", 1),
 	)
@@ -69,7 +69,7 @@ func main() {
 		PostID int `query:"postId"`
 	}{PostID: 1}
 
-	comments, err := client.Get[[]Comment](ctx,
+	comments, err := client.GetTo[[]Comment](ctx,
 		"/posts/{id}/comments",
 		mod.WithVar("id", 1),
 		mod.WithQuery(params),
@@ -83,7 +83,7 @@ func main() {
 	// 3. Automated Defaults: fetch filtered posts /posts?userId=1&_limit=3&_sort=id
 	// By passing an empty filter, aoni detects that fields are zero-valued
 	// and automatically applies the values defined in 'default' tags.
-	posts, err := client.Get[[]Post](ctx,
+	posts, err := client.GetTo[[]Post](ctx,
 		"/posts",
 		mod.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
 	)

@@ -163,7 +163,8 @@ func newDefaultTransport() *http.Transport {
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		// RFC 8996 §4, §5 & RFC 7525 (BCP 195): Deprecating TLS 1.0 and TLS 1.1. Minimum version MUST be TLS 1.2.
+		// RFC 8996 §4, §5 & RFC 7525 (BCP 195): Deprecating TLS 1.0 and TLS 1.1.
+		// Minimum version MUST be TLS 1.2.
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},

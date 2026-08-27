@@ -71,7 +71,7 @@ func main() {
 
 	// Make requests that will be load-balanced across proxies
 	for i := range 3 {
-		res, err := client.Get[IPResponse](ctx, "/ip")
+		res, err := client.GetTo[IPResponse](ctx, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

@@ -99,7 +99,7 @@ graph TD
 
 ```go
 // Safe by Default: Concise, safe, and fully typed
-users, err := client.Get[[]User](ctx, "https://api.example.com/users")
+users, err := client.GetTo[[]User](ctx, "https://api.example.com/users")
 ```
 
 ### 2. Power-User Fast Path (`fast.Client`)
@@ -107,7 +107,7 @@ users, err := client.Get[[]User](ctx, "https://api.example.com/users")
 
 - **Hardware Line Speed**: Up to **2,480,000+ RPS** on a single workstation with sub-microsecond latency.
 - **Zero Allocations**: Eliminates heap churn (`0 B/op, 0 allocs/op`) through object reuse, stack hints, and off-heap memory slabs.
-- **Zero Type Drift**: Uses generic decoding pipelines (`fastClient.Get[T]`, `codec.Decode`) without runtime reflection overhead.
+- **Zero Type Drift**: Uses generic decoding pipelines (`fastClient.GetTo[T]`, `codec.Decode`) without runtime reflection overhead.
 
 ```go
 // Power-User Fast Path: 0 allocations, line speed
@@ -164,6 +164,8 @@ To guarantee eternal stability and prevent protocol drift, the codebase is parti
 │  Independent experimental and third-party modules:       │
 │  • aoni/x/socketio (Socket.IO v5 / Engine.IO v4)         │
 │  • aoni/x/geoip    (MaxMind GeoIP2 MMDB database)        │
+│  • aoni/x/otel     (Zero-dependency OpenTelemetry)       │
+│  • aoni/x/webtransport (WebTransport over HTTP/3)        │
 └──────────────────────────────────────────────────────────┘
 ```
 

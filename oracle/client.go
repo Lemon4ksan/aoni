@@ -82,7 +82,7 @@ func (c *Client) BaseURL() string {
 
 // Status checks if the sidecar bridge is healthy and ready.
 func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
-	resp, err := c.client.Get[StatusResponse](ctx, c.baseURL+"/status")
+	resp, err := c.client.GetTo[StatusResponse](ctx, c.baseURL+"/status")
 	if err != nil {
 		return nil, fmt.Errorf("checking oracle status: %w", err)
 	}
@@ -94,7 +94,7 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 func (c *Client) Init(ctx context.Context, cookies string) error {
 	req := InitRequest{Cookies: cookies}
 
-	resp, err := c.client.Post[InitResponse](ctx, c.baseURL+"/init", req)
+	resp, err := c.client.PostTo[InitResponse](ctx, c.baseURL+"/init", req)
 	if err != nil {
 		return fmt.Errorf("initializing oracle browser: %w", err)
 	}
@@ -118,7 +118,7 @@ func (c *Client) GetTokenWithFlow(ctx context.Context, flow, content string) (*T
 		Content: content,
 	}
 
-	resp, err := c.client.Post[TokenResponse](ctx, c.baseURL+"/token", req)
+	resp, err := c.client.PostTo[TokenResponse](ctx, c.baseURL+"/token", req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching oracle token: %w", err)
 	}

@@ -78,7 +78,7 @@ func main() {
 		option.WithBaseURL("https://httpbin.org"),
 	)
 
-	res, err := retryClient.Get[Response](ctx, "/status/200")
+	res, err := retryClient.GetTo[Response](ctx, "/status/200")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func main() {
 		option.WithBaseURL("https://httpbin.org"),
 	)
 
-	_, _ = customClient.Get[Response](ctx, "/status/429")
+	_, _ = customClient.GetTo[Response](ctx, "/status/429")
 
 	// Use retryOnTransient client for unreliable endpoints
 	_ = retryOnTransient

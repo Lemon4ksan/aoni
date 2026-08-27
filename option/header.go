@@ -67,7 +67,7 @@ func WithPriorityPreset(p priority.Priority) aoni.ClientOption {
 //	    option.WithBaseURL("https://api.github.com"),
 //	)
 //	// Performs GET to "https://api.github.com/users/octocat"
-//	res, err := client.Get[User](ctx, "/users/octocat")
+//	res, err := client.GetTo[User](ctx, "/users/octocat")
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {

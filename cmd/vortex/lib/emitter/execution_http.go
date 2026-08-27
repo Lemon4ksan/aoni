@@ -130,7 +130,7 @@ func emitGetExecution(
 	case m.Return.IsVoid:
 		fmt.Fprintf(
 			buf,
-			"\t_, err := %s.Get[%s](ctx, %q, allMods...)\n",
+			"\t_, err := %s.GetTo[%s](ctx, %q, allMods...)\n",
 			targetReq,
 			genericType,
 			rawPath,
@@ -155,7 +155,7 @@ func emitGetExecution(
 	default:
 		fmt.Fprintf(
 			buf,
-			"\tresp, err := %s.Get[%s](ctx, %q, allMods...)\n",
+			"\tresp, err := %s.GetTo[%s](ctx, %q, allMods...)\n",
 			targetReq,
 			genericType,
 			rawPath,
@@ -179,22 +179,12 @@ func emitBodyVerbExecution(
 	isPointer bool,
 ) {
 	methodName := helperFn
-	switch helperFn {
-	case "PostTo":
-		methodName = "Post"
-	case "PutTo":
-		methodName = "Put"
-	case "PatchTo":
-		methodName = "Patch"
-	case "DeleteTo":
-		methodName = "Delete"
-	}
 
 	if m.Return.IsVoid {
-		if methodName == "Delete" && (bodyArg == "nil" || bodyArg == "") {
+		if methodName == "DeleteTo" && (bodyArg == "nil" || bodyArg == "") {
 			fmt.Fprintf(
 				buf,
-				"\t_, err := %s.Delete[%s](ctx, %q, allMods...)\n",
+				"\t_, err := %s.DeleteTo[%s](ctx, %q, allMods...)\n",
 				targetReq,
 				genericType,
 				rawPath,
@@ -216,10 +206,10 @@ func emitBodyVerbExecution(
 		return
 	}
 
-	if methodName == "Delete" && (bodyArg == "nil" || bodyArg == "") {
+	if methodName == "DeleteTo" && (bodyArg == "nil" || bodyArg == "") {
 		fmt.Fprintf(
 			buf,
-			"\tresp, err := %s.Delete[%s](ctx, %q, allMods...)\n",
+			"\tresp, err := %s.DeleteTo[%s](ctx, %q, allMods...)\n",
 			targetReq,
 			genericType,
 			rawPath,
@@ -423,13 +413,13 @@ func emitEnvelopeUnwrap(
 
 		fmt.Fprintf(
 			buf,
-			"\tresp, err := %s.Post[envelope](ctx, %q, %s, allMods...)\n",
+			"\tresp, err := %s.PostTo[envelope](ctx, %q, %s, allMods...)\n",
 			targetReq,
 			rawPath,
 			bodyArg,
 		)
 	} else {
-		fmt.Fprintf(buf, "\tresp, err := %s.Get[envelope](ctx, %q, allMods...)\n", targetReq, rawPath)
+		fmt.Fprintf(buf, "\tresp, err := %s.GetTo[envelope](ctx, %q, allMods...)\n", targetReq, rawPath)
 	}
 
 	zeroVal := zeroValueOf(m.Return)

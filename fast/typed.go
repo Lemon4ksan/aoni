@@ -90,15 +90,86 @@ func (g *FastGRPCClient) Invoke[Resp any](
 	return result, nil
 }
 
-// Get executes a zero-allocation HTTP GET request on the fast engine and decodes the response into *Resp.
+// --- Raw Non-Generic HTTP Methods on *Client ---
+
+// Get executes a fast HTTP GET request and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+//
+// # Example
+//
+//	resp, err := fastClient.Get(ctx, "/users/42")
+//	if err != nil {
+//	    return err
+//	}
+//	defer resp.Close()
+func (c *Client) Get(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.executeFast(ctx, http.MethodGet, path, nil, mods)
+}
+
+// Post executes a fast HTTP POST request carrying body and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+func (c *Client) Post(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.executeFast(ctx, http.MethodPost, path, body, mods)
+}
+
+// Put executes a fast HTTP PUT request carrying body and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+func (c *Client) Put(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.executeFast(ctx, http.MethodPut, path, body, mods)
+}
+
+// Patch executes a fast HTTP PATCH request carrying body and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+func (c *Client) Patch(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.executeFast(ctx, http.MethodPatch, path, body, mods)
+}
+
+// Delete executes a fast HTTP DELETE request and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+func (c *Client) Delete(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.executeFast(ctx, http.MethodDelete, path, nil, mods)
+}
+
+// Fetch executes an arbitrary raw HTTP method request on the fast engine and returns the raw [aoni.Response].
+//
+// # Resource Management
+//
+// Caller MUST call resp.Close() when done to return buffers to the pool.
+func (c *Client) Fetch(
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
+	return c.executeFast(ctx, method, path, body, mods)
+}
+
+// --- Generic Typed HTTP Methods on *Client ---
+
+// GetTo executes a zero-allocation HTTP GET request on the fast engine and decodes the response into *Resp.
 //
 // Automatically releases pooled buffers upon completion.
 //
 // # Example
 //
-//	user, err := fastClient.Get[User](ctx, "/users/42")
-func (c *Client) Get[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
-	return c.Fetch[Resp](ctx, http.MethodGet, path, nil, mods...)
+//	user, err := fastClient.GetTo[User](ctx, "/users/42")
+func (c *Client) GetTo[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
+	return c.FetchTo[Resp](ctx, http.MethodGet, path, nil, mods...)
 }
 
 // GetInto executes a fast HTTP GET request and decodes the payload directly into target with 0 heap allocations.
@@ -111,18 +182,18 @@ func (c *Client) GetInto[Resp any](ctx context.Context, path string, target *Res
 	return c.FetchInto[Resp](ctx, http.MethodGet, path, nil, target, mods...)
 }
 
-// Post executes a fast HTTP POST request carrying body and decodes the response into *Resp.
+// PostTo executes a fast HTTP POST request carrying body and decodes the response into *Resp.
 //
 // # Example
 //
-//	created, err := fastClient.Post[User](ctx, "/users", CreateUserReq{Name: "Alice"})
-func (c *Client) Post[Resp any](
+//	created, err := fastClient.PostTo[User](ctx, "/users", CreateUserReq{Name: "Alice"})
+func (c *Client) PostTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	return c.Fetch[Resp](ctx, http.MethodPost, path, body, mods...)
+	return c.FetchTo[Resp](ctx, http.MethodPost, path, body, mods...)
 }
 
 // PostInto executes a fast HTTP POST request and decodes response directly into target with 0 heap allocations.
@@ -136,14 +207,14 @@ func (c *Client) PostInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPost, path, body, target, mods...)
 }
 
-// Put executes a fast HTTP PUT request carrying body and decodes the response into *Resp.
-func (c *Client) Put[Resp any](
+// PutTo executes a fast HTTP PUT request carrying body and decodes the response into *Resp.
+func (c *Client) PutTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	return c.Fetch[Resp](ctx, http.MethodPut, path, body, mods...)
+	return c.FetchTo[Resp](ctx, http.MethodPut, path, body, mods...)
 }
 
 // PutInto executes a fast HTTP PUT request and decodes response directly into target with 0 heap allocations.
@@ -157,14 +228,14 @@ func (c *Client) PutInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPut, path, body, target, mods...)
 }
 
-// Patch executes a fast HTTP PATCH request carrying body and decodes the response into *Resp.
-func (c *Client) Patch[Resp any](
+// PatchTo executes a fast HTTP PATCH request carrying body and decodes the response into *Resp.
+func (c *Client) PatchTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	return c.Fetch[Resp](ctx, http.MethodPatch, path, body, mods...)
+	return c.FetchTo[Resp](ctx, http.MethodPatch, path, body, mods...)
 }
 
 // PatchInto executes a fast HTTP PATCH request and decodes response directly into target with 0 heap allocations.
@@ -178,9 +249,9 @@ func (c *Client) PatchInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodPatch, path, body, target, mods...)
 }
 
-// Delete executes a fast HTTP DELETE request and decodes any returned payload into *Resp.
-func (c *Client) Delete[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
-	return c.Fetch[Resp](ctx, http.MethodDelete, path, nil, mods...)
+// DeleteTo executes a fast HTTP DELETE request and decodes any returned payload into *Resp.
+func (c *Client) DeleteTo[Resp any](ctx context.Context, path string, mods ...aoni.RequestModifier) (*Resp, error) {
+	return c.FetchTo[Resp](ctx, http.MethodDelete, path, nil, mods...)
 }
 
 // DeleteInto executes a fast HTTP DELETE request and decodes response directly into target with 0 heap allocations.
@@ -193,8 +264,8 @@ func (c *Client) DeleteInto[Resp any](
 	return c.FetchInto[Resp](ctx, http.MethodDelete, path, nil, target, mods...)
 }
 
-// Fetch executes an arbitrary HTTP method request on the fast engine and decodes the response into *Resp.
-func (c *Client) Fetch[Resp any](
+// FetchTo executes an arbitrary HTTP method request on the fast engine and decodes the response into *Resp.
+func (c *Client) FetchTo[Resp any](
 	ctx context.Context,
 	method, path string,
 	body any,

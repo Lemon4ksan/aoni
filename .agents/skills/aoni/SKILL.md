@@ -72,7 +72,7 @@ func NewService(doer any, opts ...option.Option) *Service {
    - ✅ **ALWAYS** use `aoni.NewClient()`, `fast.NewClient()`, or accept `any` (`aoni.RequestDoer` / `aoni.HTTPRequester`).
 2. **USE TYPE-SAFE GENERICS**:
    - ❌ **NEVER** unmarshal JSON responses manually with `json.Unmarshal(body, &v)`.
-   - ✅ **ALWAYS** use `client.Get[T]()`, `client.Post[T]()`, or `client.R().FetchTo[T]()`.
+   - ✅ **ALWAYS** use `client.GetTo[T]()`, `client.PostTo[T]()`, or `client.R().FetchTo[T]()`.
 3. **USE IDIOMATIC ERROR CHECKING**:
    - ❌ **NEVER** inspect status codes manually with `if resp.StatusCode == 404`.
    - ✅ **ALWAYS** use `aoni.IsNotFound(err)`, `aoni.IsUnauthorized(err)`, `aoni.IsRateLimited(err)`.
@@ -85,13 +85,13 @@ Import: `"github.com/lemon4ksan/aoni/mod"`
 
 Operation | Idiomatic Code
 :--- | :---
-**GET JSON into DTO** | `user, err := s.client.Get[UserDTO](ctx, "users/"+id, mods...)`
-**POST JSON payload** | `created, err := s.client.Post[UserDTO](ctx, "users", payload, mods...)`
-**POST Form URL-Encoded** | `login, err := s.client.Post[LoginDTO](ctx, "auth/login", nil, mod.WithFormValues(url.Values{"user": {"alice"}, "pass": {"secret"}}))`
-**Query Parameters** | `items, err := s.client.Get[ListDTO](ctx, "items", mod.WithQuery("limit", "50"), mod.WithQuery("page", "2"))`
-**Headers & Bearer Token** | `profile, err := s.client.Get[ProfileDTO](ctx, "profile", mod.WithHeader("X-Tenant", id), mod.WithBearer(token))`
-**Per-Request Timeout** | `health, err := s.client.Get[HealthDTO](ctx, "health", mod.WithTimeout(2*time.Second))`
-**Multipart File Upload** | `upload, err := s.client.Post[UploadDTO](ctx, "upload", nil, mod.WithMultipartFile("avatar", "pic.png", reader))`
+**GET JSON into DTO** | `user, err := s.client.GetTo[UserDTO](ctx, "users/"+id, mods...)`
+**POST JSON payload** | `created, err := s.client.PostTo[UserDTO](ctx, "users", payload, mods...)`
+**POST Form URL-Encoded** | `login, err := s.client.PostTo[LoginDTO](ctx, "auth/login", nil, mod.WithFormValues(url.Values{"user": {"alice"}, "pass": {"secret"}}))`
+**Query Parameters** | `items, err := s.client.GetTo[ListDTO](ctx, "items", mod.WithQuery("limit", "50"), mod.WithQuery("page", "2"))`
+**Headers & Bearer Token** | `profile, err := s.client.GetTo[ProfileDTO](ctx, "profile", mod.WithHeader("X-Tenant", id), mod.WithBearer(token))`
+**Per-Request Timeout** | `health, err := s.client.GetTo[HealthDTO](ctx, "health", mod.WithTimeout(2*time.Second))`
+**Multipart File Upload** | `upload, err := s.client.PostTo[UploadDTO](ctx, "upload", nil, mod.WithMultipartFile("avatar", "pic.png", reader))`
 
 ## 5. Idiomatic Error Classification
 

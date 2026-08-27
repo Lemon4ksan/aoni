@@ -36,7 +36,7 @@ func main() {
 	// Trace with full timing breakdown
 	var info telemetry.TraceInfo
 
-	_, err := client.Get[HTTPBinResponse](ctx, "/ip",
+	_, err := client.GetTo[HTTPBinResponse](ctx, "/ip",
 		mod.WithTrace(&info),
 	)
 	if err != nil {
@@ -56,7 +56,7 @@ func main() {
 	// WithCurlDump + CaptureResponse: capture the raw response for curl generation
 	var resp *http.Response
 
-	_, err = client.Get[HTTPBinResponse](ctx, "/ip",
+	_, err = client.GetTo[HTTPBinResponse](ctx, "/ip",
 		mod.WithCurlDump(),
 		mod.WithCaptureResponse(&resp),
 	)

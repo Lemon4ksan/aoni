@@ -29,7 +29,7 @@ func main() {
 		option.WithP0fSignature(p0f.Linux311),
 	)
 
-	resp, err := client.Get[IPResponse](ctx, "/ip")
+	resp, err := client.GetTo[IPResponse](ctx, "/ip")
 	if err != nil {
 		log.Fatal(err)
 	}

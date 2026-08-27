@@ -309,7 +309,8 @@ func toParamGoName(wire string) string {
 
 	for _, p := range parts[1:] {
 		if len(p) > 0 {
-			sb.WriteString(strings.ToUpper(p[:1]) + strings.ToLower(p[1:]))
+			sb.WriteString(strings.ToUpper(p[:1]))
+			sb.WriteString(strings.ToLower(p[1:]))
 		}
 	}
 

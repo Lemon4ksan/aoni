@@ -22,6 +22,10 @@ The core `aoni` package maintains a stable API surface, while experimental proto
 | **[`aoni/x/otel`](./otel)** | OpenTelemetry Distributed Tracing & W3C TraceContext implementation. | 0 external dependencies (stdlib only) |
 | **[`aoni/x/socketio`](./socketio)** | **Socket.IO v5 / Engine.IO v4** client over WebSockets & HTTP Long-Polling. | Low-allocation frame parser |
 | **[`aoni/x/geoip`](./geoip)** | **MaxMind GeoIP MMDB reader** for IP geolocation & ASN lookups. | MaxMind format compatible |
+| **[`aoni/x/webtransport`](./webtransport)** | **WebTransport over HTTP/3** (W3C / RFC 9297) for datagrams & multiplexed streams. | QUIC & HTTP/3 multiplexing |
+| **[`aoni/x/grpc/dynamic`](./grpc/dynamic)** | **Dynamic gRPC Invoker** via Protobuf reflection descriptors & JSON messages. | Dynamic descriptors |
+| **[`aoni/x/sqlcookie`](./sqlcookie)** | **SQL Cookie Storage** for proxy-isolated persistent cookie jars. | `database/sql` driver |
+| **[`aoni/x/tunnel/tun`](./tunnel/tun)** | **OS Layer 3 TUN/TAP device drivers** (Wintun, Linux tun, macOS utun). | Platform native drivers |
 
 ## ⚡ Comparison: `aoni/x/otel` vs Official OTel SDK
 

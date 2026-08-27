@@ -81,7 +81,7 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := client.Get[Response](t.Context(), "/")
+	res, err := client.GetTo[Response](t.Context(), "/")
 	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
@@ -148,7 +148,7 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := client.Get[Response](t.Context(), "/")
+	res, err := client.GetTo[Response](t.Context(), "/")
 	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)

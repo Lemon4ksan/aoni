@@ -31,7 +31,7 @@ func main() {
 	)
 
 	// Bearer token authentication
-	res, err := client.Get[ProtectedResource](ctx,
+	res, err := client.GetTo[ProtectedResource](ctx,
 		"/bearer",
 		mod.WithBearer("my-secret-token"),
 	)
@@ -42,7 +42,7 @@ func main() {
 	fmt.Println("Bearer:", res.Message)
 
 	// Basic authentication
-	basicRes, err := client.Get[ProtectedResource](ctx,
+	basicRes, err := client.GetTo[ProtectedResource](ctx,
 		"/basic-auth/user/passwd",
 		mod.WithBasicAuth("user", "passwd"),
 	)
@@ -53,7 +53,7 @@ func main() {
 	fmt.Println("Basic:", basicRes.Message)
 
 	// Custom headers
-	headerRes, err := client.Get[ProtectedResource](ctx,
+	headerRes, err := client.GetTo[ProtectedResource](ctx,
 		"/headers",
 		mod.WithHeader("X-Custom-Header", "hello-aoni"),
 		mod.WithHeader("X-Request-ID", "abc-123"),

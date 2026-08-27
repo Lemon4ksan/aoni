@@ -52,7 +52,7 @@ func (c *userAPIClient) GetUser(ctx context.Context, id string, mods ...aoni.Req
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := c.r.Get[UserDTO](ctx, "users/{id}", allMods...)
+	resp, err := c.r.GetTo[UserDTO](ctx, "users/{id}", allMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *userAPIClient) CreateUser(ctx context.Context, req CreateUserRequest, m
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := c.r.Post[UserDTO](ctx, "users", req, allMods...)
+	resp, err := c.r.PostTo[UserDTO](ctx, "users", req, allMods...)
 	if err != nil {
 		return nil, err
 	}

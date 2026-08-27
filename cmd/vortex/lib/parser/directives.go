@@ -821,7 +821,8 @@ func toPascalCase(s string) string {
 	var res strings.Builder
 	for _, p := range parts {
 		if len(p) > 0 {
-			res.WriteString(strings.ToUpper(p[:1]) + p[1:])
+			res.WriteString(strings.ToUpper(p[:1]))
+			res.WriteString(p[1:])
 		}
 	}
 

@@ -117,7 +117,8 @@ func toPascalCase(s string) string {
 		case "eresult":
 			b.WriteString("EResult")
 		default:
-			b.WriteString(strings.ToUpper(p[:1]) + p[1:])
+			b.WriteString(strings.ToUpper(p[:1]))
+			b.WriteString(p[1:])
 		}
 	}
 

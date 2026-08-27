@@ -92,7 +92,7 @@ func (c *billingAPIClient) GetTransactions(ctx context.Context, from time.Time, 
 		allMods = append(allMods, mods...)
 	}
 
-	resp, err := c.r.Get[TransactionList](ctx, "transactions", allMods...)
+	resp, err := c.r.GetTo[TransactionList](ctx, "transactions", allMods...)
 	if err != nil {
 		return nil, err
 	}

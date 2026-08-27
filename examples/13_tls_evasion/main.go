@@ -55,7 +55,7 @@ func main() {
 	)
 
 	// Make a request with forced HTTP/1.1 and ordered headers
-	res, err := client.Get[Response](ctx, "/ip",
+	res, err := client.GetTo[Response](ctx, "/ip",
 		mod.WithForceHTTP1(),
 		mod.WithOrderedHeaders([]string{
 			fheader.Host,
@@ -80,7 +80,7 @@ func main() {
 	fmt.Printf("TLS evasion request successful: %s\n", res.Origin)
 
 	// Alternatively, force HTTP/2 for multiplexing
-	_, _ = client.Get[Response](ctx, "/ip",
+	_, _ = client.GetTo[Response](ctx, "/ip",
 		mod.WithForceHTTP2(),
 		mod.WithALPN(aoni.AlpnH2, aoni.AlpnHTTP),
 	)

@@ -48,7 +48,7 @@ func TestClientTypedGet(t *testing.T) {
 
 	ctx := context.Background()
 
-	user, err := client.Get[UserDTO](ctx, "/users/42")
+	user, err := client.GetTo[UserDTO](ctx, "/users/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestClientTypedPost(t *testing.T) {
 
 	reqPayload := CreateUserRequest{Name: "Eli", Email: "eli@blackmesa.gov"}
 
-	user, err := client.Post[UserDTO](context.Background(), "/users", reqPayload)
+	user, err := client.PostTo[UserDTO](context.Background(), "/users", reqPayload)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,19 +134,19 @@ func TestClientTypedPutPatchDelete(t *testing.T) {
 	ctx := context.Background()
 
 	// Put
-	putUser, err := client.Put[UserDTO](ctx, "/users/1", CreateUserRequest{Name: "Barney Put"})
+	putUser, err := client.PutTo[UserDTO](ctx, "/users/1", CreateUserRequest{Name: "Barney Put"})
 	if err != nil || putUser.Name != "Barney Put" {
 		t.Fatalf("Put failed: %v, user: %+v", err, putUser)
 	}
 
 	// Patch
-	patchUser, err := client.Patch[UserDTO](ctx, "/users/1", CreateUserRequest{Name: "Barney Patch"})
+	patchUser, err := client.PatchTo[UserDTO](ctx, "/users/1", CreateUserRequest{Name: "Barney Patch"})
 	if err != nil || patchUser.Name != "Barney Patch" {
 		t.Fatalf("Patch failed: %v, user: %+v", err, patchUser)
 	}
 
 	// Delete
-	delUser, err := client.Delete[UserDTO](ctx, "/users/1")
+	delUser, err := client.DeleteTo[UserDTO](ctx, "/users/1")
 	if err != nil || delUser.Name != "Barney Deleted" {
 		t.Fatalf("Delete failed: %v, user: %+v", err, delUser)
 	}
@@ -248,7 +248,7 @@ func TestFastClientTyped(t *testing.T) {
 
 	fastClient := fast.NewClient(aoni.WithBaseURL(ts.URL))
 
-	user, err := fastClient.Get[UserDTO](context.Background(), "/users/55")
+	user, err := fastClient.GetTo[UserDTO](context.Background(), "/users/55")
 	if err != nil {
 		t.Fatalf("fast client get failed: %v", err)
 	}

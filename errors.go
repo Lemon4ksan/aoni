@@ -304,7 +304,7 @@ func (e *APIError) Category() HTTPStatusCategory {
 //
 // # Example
 //
-//	result := aoni.AsTypedResult(client.Get[User](ctx, "/users/1"))
+//	result := aoni.AsTypedResult(client.GetTo[User](ctx, "/users/1"))
 //	if result.IsFailure() {
 //	    log.Printf("Failed: %v", result.Error())
 //	}
@@ -327,7 +327,7 @@ func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 //
 // # Example
 //
-//	user, err := client.Get[User](ctx, "/users/unknown")
+//	user, err := client.GetTo[User](ctx, "/users/unknown")
 //	if aoni.IsNotFound(err) {
 //	    // Handle missing user resource
 //	}

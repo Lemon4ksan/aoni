@@ -131,13 +131,16 @@ func SnakeToPascal(s string) string {
 	parts := strings.FieldsFunc(s, func(r rune) bool {
 		return r == '_' || r == '-' || r == '.'
 	})
-	for i, p := range parts {
+
+	var sb strings.Builder
+	for _, p := range parts {
 		if len(p) > 0 {
-			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+			sb.WriteString(strings.ToUpper(p[:1]))
+			sb.WriteString(strings.ToLower(p[1:]))
 		}
 	}
 
-	return strings.Join(parts, "")
+	return sb.String()
 }
 
 func classifyType(val any) string {

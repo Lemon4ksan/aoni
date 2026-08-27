@@ -16,7 +16,7 @@ _«В сетях хаос — это норма. Пусть aoni будет тв
 
 <b>aoni</b> — сетевой стек и HTTP-клиент для Go. Поддерживает стандарты IETF RFC, спецификации W3C и механизмы устойчивости сетевого стека Chromium.
 
-#### [English](README.md) • Русский • [Спецификация безопасности](docs/SECURITY_AND_FIDELITY.md) • [Руководство по Vortex](docs/VORTEX_RU.md)
+#### [English](README.md) • Русский • [Спецификация безопасности](docs/SECURITY_AND_FIDELITY.md) • [Руководство по Vortex](docs/VORTEX.md)
 
 </div>
 
@@ -61,7 +61,7 @@ func main() {
 	)
 
 	// 2. GET-запрос с автоматическим декодированием ответа
-	user, err := client.Get[User](ctx, "/users/{id}",
+	user, err := client.GetTo[User](ctx, "/users/{id}",
 		mod.WithVar("id", 42),
 		mod.WithHeader("Accept", "application/json"),
 	)
@@ -75,22 +75,22 @@ func main() {
 
 ## Примеры использования
 
-### 1. Generic-методы (`client.Get[T]`, `client.Post[T]` и др.)
+### 1. Generic-методы (`client.GetTo[T]`, `client.PostTo[T]` и др.)
 Тело запроса и ответ сериализуются и десериализуются автоматически:
 
 ```go
 // GET-запрос с декодированием ответа в *User
-user, err := client.Get[User](ctx, "/users/42")
+user, err := client.GetTo[User](ctx, "/users/42")
 
 // POST с телом запроса
-created, err := client.Post[User](ctx, "/users", User{Name: "Alice"})
+created, err := client.PostTo[User](ctx, "/users", User{Name: "Alice"})
 
 // PUT, PATCH, DELETE
-updated, err := client.Put[User](ctx, "/users/42", User{Name: "Alice Cooper"})
-deleted, err := client.Delete[User](ctx, "/users/42")
+updated, err := client.PutTo[User](ctx, "/users/42", User{Name: "Alice Cooper"})
+deleted, err := client.DeleteTo[User](ctx, "/users/42")
 
 // Произвольный HTTP-метод
-res, err := client.Fetch[User](ctx, "CUSTOM", "/endpoint", payload)
+res, err := client.FetchTo[User](ctx, "CUSTOM", "/endpoint", payload)
 ```
 
 ### 2. Доступ к `*http.Response` и декодирование в существующую структуру
@@ -121,11 +121,11 @@ resp, err := client.R().
 	Post("/users/{userId}/update")
 ```
 
-### 4. Вызовы функций пакета (`aoni.Get[T]`, `aoni.Post[T]`)
+### 4. Вызовы функций пакета (`aoni.GetTo[T]`, `aoni.PostTo[T]`)
 Для выполнения запросов без создания отдельного экземпляра клиента:
 
 ```go
-user, err := aoni.Get[User](ctx, "https://api.example.com/users/42")
+user, err := aoni.GetTo[User](ctx, "https://api.example.com/users/42")
 ```
 
 ### 5. Движок `fast.Client`
@@ -139,7 +139,7 @@ fastClient := fast.NewClient(
 	option.WithChrome(),
 )
 
-user, err := fastClient.Get[User](ctx, "/users/42")
+user, err := fastClient.GetTo[User](ctx, "/users/42")
 ```
 
 ## ⚡ Сравнение производительности
@@ -157,7 +157,7 @@ user, err := fastClient.Get[User](ctx, "/users/42")
 ## Архитектура
 
 ### 1. Публичный API и транспорт
-* **Стабильный интерфейс:** Базовые методы RFC 9110 (`client.Get[T]`, `client.Post[T]`, `client.R()`, `option.With...`, `mod.With...`) зафиксированы в рамках v1.x.
+* **Стабильный интерфейс:** Базовые методы RFC 9110 (`client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, `option.With...`, `mod.With...`) зафиксированы в рамках v1.x.
 * **Транспорт:** Поддерживает согласование протоколов (HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3 с ML-KEM, MASQUE), алгоритм Happy Eyeballs и переиспользование буферов.
 * **Расширения `aoni/x/...`:** Дополнительные интеграции и протокольные адаптеры (Socket.IO v5, GeoIP MMDB) вынесены в отдельные пакеты.
 
@@ -215,7 +215,7 @@ vortex mock
 vortex check --strict ./...
 ```
 
-Подробнее см. в [**Руководстве по Vortex**](docs/VORTEX_RU.md) и [**Спецификации Vortex**](docs/SPEC.md).
+Подробнее см. в [**Руководстве по Vortex**](docs/VORTEX.md) и [**Спецификации Vortex**](docs/SPEC.md).
 
 ## Дополнительные протоколы и возможности
 
@@ -386,12 +386,12 @@ aoni/
 ## 📚 Техническая документация
 
 - [**Инварианты безопасности и протоколов**](docs/SECURITY_AND_FIDELITY.md): Модель защиты, фильтрация SSRF, DNS rebinding, защита от декомпрессионных бомб.
-- [**Руководство по Vortex**](docs/VORTEX_RU.md): Декларативный синтаксис, OpenAPI/AsyncAPI парсинг, mock-серверы и интеграция с CI/CD.
+- [**Руководство по Vortex**](docs/VORTEX.md): Декларативный синтаксис, OpenAPI/AsyncAPI парсинг, mock-серверы и интеграция с CI/CD.
 - [**Спецификация Vortex DSL**](docs/SPEC.md): Грамматика EBNF и правила статического линтера.
-- [**Спецификация сетевого стека**](docs/NETWORK_STACK_RU.md): Happy Eyeballs v3, восстановление после HTTP 421/408/425, ECH и управление пулами соединений.
+- [**Спецификация сетевого стека**](docs/NETWORK_STACK.md): Happy Eyeballs v3, восстановление после HTTP 421/408/425, ECH и управление пулами соединений.
 - [**Оптимизация CPU и памяти**](docs/CPU_STACK.md): SIMD-операции, slab-аллокация и распределение памяти.
-- [**Низкоуровневые механизмы**](docs/VOODOO_RU.md): Управление состоянием HPACK, системные вызовы для сокетов и фрейминг.
-- [**Книга рецептов (Cookbook)**](docs/COOKBOOK_RU.md): Практические примеры для REST, WebSockets, gRPC-Web и стриминга.
+- [**Низкоуровневые механизмы**](docs/VOODOO.md): Управление состоянием HPACK, системные вызовы для сокетов и фрейминг.
+- [**Книга рецептов (Cookbook)**](docs/COOKBOOK.md): Практические примеры для REST, WebSockets, gRPC-Web и стриминга.
 - [**Примеры кода**](examples): Примеры использования библиотеки.
 
 ## 🧾 Лицензия

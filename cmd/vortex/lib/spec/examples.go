@@ -398,7 +398,8 @@ func toPascalCase(s string) string {
 			continue
 		}
 
-		sb.WriteString(strings.ToUpper(p[:1]) + p[1:])
+		sb.WriteString(strings.ToUpper(p[:1]))
+		sb.WriteString(p[1:])
 	}
 
 	res := sb.String()

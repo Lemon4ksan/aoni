@@ -32,7 +32,7 @@ func main() {
 		option.WithBaseURL("https://jsonplaceholder.typicode.com"),
 	)
 
-	post, err := client.Get[Post](ctx, "/posts/1")
+	post, err := client.GetTo[Post](ctx, "/posts/1")
 	if err != nil {
 		log.Fatal(err)
 	}

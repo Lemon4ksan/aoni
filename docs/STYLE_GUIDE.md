@@ -251,8 +251,9 @@ All sentinel errors (`errors.New`) and formatted error strings (`fmt.Errorf`) MU
 
 ### 7.2 Generics-First Unmarshaling Ergonomics
 `aoni` uses Go generics (`[T any]`) to eliminate boilerplate unmarshaling:
-- `client.Get[T](ctx, path)`
-- `client.Post[T](ctx, path, body)`
+- `client.GetTo[T](ctx, path)` (or `aoni.GetTo[T](ctx, path)`)
+- `client.PostTo[T](ctx, path, body)` (or `aoni.PostTo[T](ctx, path, body)`)
+- `client.Get(ctx, path)` / `client.Post(ctx, path, body)` (raw `*http.Response`)
 - `client.R().SetResult(&target).Get(path)`
 - `codec.DecodeTo[T](resp, target)`
 

@@ -53,7 +53,7 @@ func (c *paymentAPIClient) GetInvoice(ctx context.Context, invoice_id string, mo
 	}
 
 	allMods = append(allMods, mod.WithCoalesce())
-	resp, err := c.r.Get[InvoiceDTO](ctx, "invoices/{invoice_id}", allMods...)
+	resp, err := c.r.GetTo[InvoiceDTO](ctx, "invoices/{invoice_id}", allMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (c *paymentAPIClient) CreateCheckout(ctx context.Context, req CheckoutReq, 
 	}
 
 	allMods = append(allMods, mod.WithIdempotencyKey())
-	resp, err := c.r.Post[CheckoutSession](ctx, "checkout", req, allMods...)
+	resp, err := c.r.PostTo[CheckoutSession](ctx, "checkout", req, allMods...)
 	if err != nil {
 		return nil, err
 	}

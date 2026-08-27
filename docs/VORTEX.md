@@ -514,7 +514,7 @@ func main() {
         option.WithTimeoutString("10s"),
     )
 
-    resp, err := client.Get[DataResponse](ctx, "https://example.com/api/data",
+    resp, err := client.GetTo[DataResponse](ctx, "https://example.com/api/data",
         mod.WithHeader("cf-turnstile-response", tokenResp.Token),
         mod.WithHeader("Cookie", tokenResp.Cookies),
     )

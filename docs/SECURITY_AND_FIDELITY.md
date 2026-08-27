@@ -140,7 +140,7 @@ To eliminate cross-site tracking, side-channel attacks, and cookie correlation a
 * **Compound Key Definition**:
   $$\text{NIK} = \langle \text{TopFrameSite},\ \text{FrameSite},\ \text{IsCrossSite} \rangle$$
 * **Multi-Tenant Personas**: Allows hosting thousands of isolated "Virtual Browser Personas" in a single process without cross-tab session leakage.
-* **CHIPS Integration**: Maps NIK context directly into RFC 6265bis Partitioned Cookie Jar lookups in [`cookie/jar.go`](file:///D:/CodingProjects/aoni/cookie/jar.go).
+* **CHIPS Integration**: Maps NIK context directly into RFC 6265bis Partitioned Cookie Jar lookups in [`cookie/jar.go`](../cookie/jar.go).
 
 ## 6. Comprehensive Defense & Fidelity Matrix
 

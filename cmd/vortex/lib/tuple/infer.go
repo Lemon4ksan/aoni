@@ -474,7 +474,8 @@ func sanitizeExportedFieldName(name string) string {
 	var sb strings.Builder
 	for _, p := range parts {
 		if len(p) > 0 {
-			sb.WriteString(strings.ToUpper(p[:1]) + p[1:])
+			sb.WriteString(strings.ToUpper(p[:1]))
+			sb.WriteString(p[1:])
 		}
 	}
 

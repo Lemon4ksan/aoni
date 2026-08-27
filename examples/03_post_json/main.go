@@ -51,7 +51,7 @@ func main() {
 		UserID: 1,
 	}
 
-	result, err := client.Post[PostResponse](
+	result, err := client.PostTo[PostResponse](
 		ctx, "/posts", payload,
 		mod.WithErrorModel(&ErrorResponse{}),
 	)

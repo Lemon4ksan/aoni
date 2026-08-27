@@ -461,7 +461,8 @@ func sanitizeIdentifier(s string) string {
 
 	var sb strings.Builder
 	for _, p := range parts {
-		sb.WriteString(strings.ToUpper(p[:1]) + p[1:])
+		sb.WriteString(strings.ToUpper(p[:1]))
+		sb.WriteString(p[1:])
 	}
 
 	return sb.String()

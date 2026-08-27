@@ -45,7 +45,7 @@ func main() {
 	// Trace with JA4 fingerprint collection
 	var info telemetry.TraceInfo
 
-	_, err := client.Get[Response](ctx, "/ip",
+	_, err := client.GetTo[Response](ctx, "/ip",
 		mod.WithTraceJA4(&info),
 	)
 	if err != nil {
@@ -67,7 +67,7 @@ func main() {
 		}),
 	)
 
-	_, _ = firefoxClient.Get[Response](ctx, "/ip")
+	_, _ = firefoxClient.GetTo[Response](ctx, "/ip")
 }
 
 func printJA4Report(r *ja4.Report) {

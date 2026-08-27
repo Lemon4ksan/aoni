@@ -61,7 +61,7 @@ func main() {
 	)
 
 	// 2. Direct generic GET request
-	user, err := client.Get[User](ctx, "/users/{id}",
+	user, err := client.GetTo[User](ctx, "/users/{id}",
 		mod.WithVar("id", 42),
 		mod.WithHeader("Accept", "application/json"),
 	)
@@ -75,27 +75,33 @@ func main() {
 
 ## Client Usage Patterns
 
-### 1. Generic Methods (`client.Get[T]`, `client.Post[T]`, etc.)
+### 1. Generic Methods (`client.GetTo[T]`, `client.PostTo[T]`, etc.)
 Request payloads and responses are serialized and deserialized automatically:
 
 ```go
 // GET request decoded into *User
-user, err := client.Get[User](ctx, "/users/42")
+user, err := client.GetTo[User](ctx, "/users/42")
 
 // POST with request body
-created, err := client.Post[User](ctx, "/users", User{Name: "Alice"})
+created, err := client.PostTo[User](ctx, "/users", User{Name: "Alice"})
 
 // PUT, PATCH, DELETE
-updated, err := client.Put[User](ctx, "/users/42", User{Name: "Alice Cooper"})
-deleted, err := client.Delete[User](ctx, "/users/42")
+updated, err := client.PutTo[User](ctx, "/users/42", User{Name: "Alice Cooper"})
+deleted, err := client.DeleteTo[User](ctx, "/users/42")
 
 // Custom HTTP method
-res, err := client.Fetch[User](ctx, "CUSTOM", "/endpoint", payload)
+res, err := client.FetchTo[User](ctx, "CUSTOM", "/endpoint", payload)
 ```
 
 ### 2. Raw Response Access & Binding to Existing Struct
 
 ```go
+// Raw GET request returning (*http.Response, error)
+rawResp, err := client.Get(ctx, "/raw-data")
+if err == nil {
+    defer rawResp.Body.Close()
+}
+
 // GetEx returns both the typed result and raw *http.Response
 user, resp, err := client.GetEx[User](ctx, "/users/42")
 fmt.Printf("Status: %d, Server: %s\n", resp.StatusCode, resp.Header.Get("Server"))
@@ -121,11 +127,11 @@ resp, err := client.R().
 	Post("/users/{userId}/update")
 ```
 
-### 4. Top-Level Package Functions (`aoni.Get[T]`, `aoni.Post[T]`)
+### 4. Top-Level Package Functions (`aoni.GetTo[T]`, `aoni.PostTo[T]`)
 For quick requests without managing a client instance:
 
 ```go
-user, err := aoni.Get[User](ctx, "https://api.example.com/users/42")
+user, err := aoni.GetTo[User](ctx, "https://api.example.com/users/42")
 ```
 
 ### 5. High-Throughput Engine (`fast.Client`)
@@ -157,7 +163,7 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 ## Architecture
 
 ### 1. Public API & Transport
-* **Stable Public Surface:** RFC 9110 methods (`client.Get[T]`, `client.Post[T]`, `client.R()`, `option.With...`, `mod.With...`) are maintained across v1.x releases.
+* **Stable Public Surface:** RFC 9110 methods (`client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, `option.With...`, `mod.With...`) are maintained across v1.x releases.
 * **Transport:** Handles protocol negotiation (HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3 with ML-KEM, MASQUE), Happy Eyeballs connection racing, and buffer management.
 * **Extensions in `aoni/x/...`:** Third-party integrations and protocol adapters (e.g. Socket.IO v5, GeoIP MMDB) reside in separate packages.
 

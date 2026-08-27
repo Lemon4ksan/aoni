@@ -203,7 +203,7 @@ func BenchmarkGET_Generic_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		res, err := client.Get[benchPayload](ctx, "/")
+		res, err := client.GetTo[benchPayload](ctx, "/")
 		if err != nil {
 			b.Fatal(err)
 		}

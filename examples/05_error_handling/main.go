@@ -33,7 +33,7 @@ func main() {
 	)
 
 	// Example 1: Check for aoni.APIError with a custom error model
-	_, err := client.Get[any](ctx,
+	_, err := client.GetTo[any](ctx,
 		"/posts/99999",
 		mod.WithErrorModel(&NotFoundResponse{}),
 	)
@@ -51,7 +51,7 @@ func main() {
 	}
 
 	// Example 2: Check for Cloudflare challenge
-	_, err = client.Get[any](ctx, "/challenge-protected-page")
+	_, err = client.GetTo[any](ctx, "/challenge-protected-page")
 	if err != nil {
 		if errors.Is(err, challenge.ErrCloudflareDetected) {
 			fmt.Println("Cloudflare challenge detected, need browser-level solving")
@@ -59,7 +59,7 @@ func main() {
 	}
 
 	// Example 3: Check for response too large
-	_, err = client.Get[any](ctx, "/large-payload")
+	_, err = client.GetTo[any](ctx, "/large-payload")
 	if err != nil {
 		if errors.Is(err, aoni.ErrResponseTooLarge) {
 			fmt.Println("Response exceeded configured size limit")
