@@ -22,6 +22,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/pkce"
 )
 
@@ -563,3 +564,19 @@ func PeekResponse(resp *http.Response, n int) ([]byte, error) {
 
 	return pipeline.PeekResponseBody(resp, n)
 }
+
+// WithVar replaces a URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).
+func WithVar(key string, value any) RequestModifier {
+	return mod.WithVar(key, value)
+}
+
+// WithVars replaces multiple URI template placeholders using alternating key-value pairs.
+func WithVars(pairs ...any) RequestModifier {
+	return mod.WithVars(pairs...)
+}
+
+// Custom constructs a custom [RequestModifier] wrapping an arbitrary closure function.
+func Custom(fn func(Request)) RequestModifier {
+	return mod.Custom(fn)
+}
+
