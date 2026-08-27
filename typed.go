@@ -88,6 +88,7 @@ func (c *Client) Post(ctx context.Context, path string, body any, mods ...Reques
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
@@ -107,6 +108,7 @@ func (c *Client) Put(ctx context.Context, path string, body any, mods ...Request
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
@@ -126,6 +128,7 @@ func (c *Client) Patch(ctx context.Context, path string, body any, mods ...Reque
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
@@ -168,6 +171,7 @@ func (c *Client) Fetch(
 		}
 
 		var stackBuf [stackModCapacity]RequestModifier
+
 		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 

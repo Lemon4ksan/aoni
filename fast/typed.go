@@ -114,7 +114,12 @@ func (c *Client) Get(ctx context.Context, path string, mods ...aoni.RequestModif
 // # Resource Management
 //
 // Caller MUST call resp.Close() when done to return buffers to the pool.
-func (c *Client) Post(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+func (c *Client) Post(
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
 	return c.executeFast(ctx, http.MethodPost, path, body, mods)
 }
 
@@ -123,7 +128,12 @@ func (c *Client) Post(ctx context.Context, path string, body any, mods ...aoni.R
 // # Resource Management
 //
 // Caller MUST call resp.Close() when done to return buffers to the pool.
-func (c *Client) Put(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+func (c *Client) Put(
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
 	return c.executeFast(ctx, http.MethodPut, path, body, mods)
 }
 
@@ -132,7 +142,12 @@ func (c *Client) Put(ctx context.Context, path string, body any, mods ...aoni.Re
 // # Resource Management
 //
 // Caller MUST call resp.Close() when done to return buffers to the pool.
-func (c *Client) Patch(ctx context.Context, path string, body any, mods ...aoni.RequestModifier) (aoni.Response, error) {
+func (c *Client) Patch(
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
 	return c.executeFast(ctx, http.MethodPatch, path, body, mods)
 }
 
