@@ -16,7 +16,7 @@ import (
 	"net/http/httptest"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -34,7 +34,7 @@ func main() {
 
 	// Start a local test server to demonstrate without external network dependency
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(fheader.ContentType, fheader.MIMEApplicationJSON)
+		w.Header().Set(header.ContentType, header.MIMEApplicationJSON)
 		fmt.Fprintf(w, `{"headers": {"User-Agent": %q}}`, r.UserAgent())
 	}))
 	defer server.Close()

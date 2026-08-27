@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -669,7 +669,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			pipeline.GlobalBufferPool.Put(buf)
 		}
 
-		if ct := req.Header.Get(fheader.ContentType); ct != "" {
+		if ct := req.Header.Get(header.ContentType); ct != "" {
 			fastReq.Header.SetContentType(ct)
 		}
 
@@ -684,7 +684,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			return nil, err
 		}
 
-		hadEncoding := len(fastResp.Header.Peek(fheader.ContentEncoding)) > 0
+		hadEncoding := len(fastResp.Header.Peek(header.ContentEncoding)) > 0
 		uncompressed := decompressFastResponse(fastResp) || hadEncoding
 
 		bodyRC := &fastBodyReadCloser{

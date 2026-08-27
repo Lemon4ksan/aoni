@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 
@@ -62,7 +62,7 @@ func WithPriorityPreset(p priority.Priority) RequestModifier {
 //
 //	grpc-timeout: 5000m
 func WithGRPCWebTimeout(d time.Duration) RequestModifier {
-	return WithHeader(fheader.GRPCTimeout, formatGRPCTimeout(d))
+	return WithHeader(header.GRPCTimeout, formatGRPCTimeout(d))
 }
 
 // WithGRPCMetadata injects custom gRPC-Web binary and text metadata headers.
@@ -259,7 +259,7 @@ func WithPKCEVerifier(verifier string) RequestModifier {
 //	    mod.WithUserAgent("FeedFetcher/2.0"),
 //	)
 func WithUserAgent(ua string) RequestModifier {
-	return WithHeader(fheader.UserAgent, ua)
+	return WithHeader(header.UserAgent, ua)
 }
 
 // WithContentType sets the Content-Type entity header (RFC 9110 §8.3).
@@ -270,7 +270,7 @@ func WithUserAgent(ua string) RequestModifier {
 //	    mod.WithContentType("application/graphql"),
 //	)
 func WithContentType(ct string) RequestModifier {
-	return WithHeader(fheader.ContentType, ct)
+	return WithHeader(header.ContentType, ct)
 }
 
 // WithAccept sets the Accept content negotiation header (RFC 9110 §12.5.1).
@@ -281,32 +281,32 @@ func WithContentType(ct string) RequestModifier {
 //	    mod.WithAccept("application/vnd.api+json"),
 //	)
 func WithAccept(accept string) RequestModifier {
-	return WithHeader(fheader.Accept, accept)
+	return WithHeader(header.Accept, accept)
 }
 
 // WithOrigin sets the Origin CORS header (RFC 6454 §7).
 func WithOrigin(origin string) RequestModifier {
-	return WithHeader(fheader.Origin, origin)
+	return WithHeader(header.Origin, origin)
 }
 
 // WithIfNoneMatch sets the If-None-Match conditional validator header (RFC 9110 §13.1.2) for ETag caching.
 func WithIfNoneMatch(etag string) RequestModifier {
-	return WithHeader(fheader.IfNoneMatch, etag)
+	return WithHeader(header.IfNoneMatch, etag)
 }
 
 // WithIfMatch sets the If-Match conditional header (RFC 9110 §13.1.1) to prevent mid-air collision updates.
 func WithIfMatch(etag string) RequestModifier {
-	return WithHeader(fheader.IfMatch, etag)
+	return WithHeader(header.IfMatch, etag)
 }
 
 // WithIfModifiedSince sets the If-Modified-Since conditional validator header (RFC 9110 §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfModifiedSince, timekit.FormatHTTPDate(t))
+	return WithHeader(header.IfModifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithIfUnmodifiedSince sets the If-Unmodified-Since conditional header (RFC 9110 §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
+	return WithHeader(header.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithRange sets the Range header for partial byte-range requests (RFC 9110 §14.2).
@@ -321,24 +321,24 @@ func WithIfUnmodifiedSince(t time.Time) RequestModifier {
 //	)
 func WithRange(start, end int64) RequestModifier {
 	if start < 0 {
-		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10))
+		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10))
 	}
 
 	if end < 0 {
-		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
+		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
 	}
 
-	return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
+	return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 }
 
 // WithIfRangeETag sets the If-Range conditional header with an entity tag validator (RFC 9110 §13.1.5).
 func WithIfRangeETag(etag string) RequestModifier {
-	return WithHeader(fheader.IfRange, etag)
+	return WithHeader(header.IfRange, etag)
 }
 
 // WithIfRangeDate sets the If-Range conditional header with an HTTP timestamp date (RFC 9110 §13.1.5).
 func WithIfRangeDate(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfRange, timekit.FormatHTTPDate(t))
+	return WithHeader(header.IfRange, timekit.FormatHTTPDate(t))
 }
 
 // WithCacheControl sets Cache-Control request directives (RFC 9111 §5.2.1).
@@ -349,17 +349,17 @@ func WithIfRangeDate(t time.Time) RequestModifier {
 //	    mod.WithCacheControl("no-cache", "max-age=0"),
 //	)
 func WithCacheControl(directives ...string) RequestModifier {
-	return WithHeader(fheader.CacheControl, strings.Join(directives, ", "))
+	return WithHeader(header.CacheControl, strings.Join(directives, ", "))
 }
 
 // WithNoCache forces intermediate proxies and origin servers to revalidate cached content via "Cache-Control: no-cache".
 func WithNoCache() RequestModifier {
-	return WithHeader(fheader.CacheControl, fheader.ValueNoCache)
+	return WithHeader(header.CacheControl, header.ValueNoCache)
 }
 
 // WithNoStore directs caches never to persist request or response data via "Cache-Control: no-store".
 func WithNoStore() RequestModifier {
-	return WithHeader(fheader.CacheControl, fheader.ValueNoStore)
+	return WithHeader(header.CacheControl, header.ValueNoStore)
 }
 
 // ============================================================================
@@ -368,26 +368,26 @@ func WithNoStore() RequestModifier {
 
 // WithSecWebSocketProtocol requests one or more WebSocket subprotocols during upgrade (RFC 6455 §11.3.4).
 func WithSecWebSocketProtocol(protocols ...string) RequestModifier {
-	return WithHeader(fheader.SecWebSocketProtocol, strings.Join(protocols, ", "))
+	return WithHeader(header.SecWebSocketProtocol, strings.Join(protocols, ", "))
 }
 
 // WithSecWebSocketExtensions requests WebSocket framing extensions (RFC 6455 §11.3.2).
 func WithSecWebSocketExtensions(extensions ...string) RequestModifier {
-	return WithHeader(fheader.SecWebSocketExtensions, strings.Join(extensions, ", "))
+	return WithHeader(header.SecWebSocketExtensions, strings.Join(extensions, ", "))
 }
 
 // WithSecWebSocketVersion sets the Sec-WebSocket-Version header (RFC 6455 §11.3.5).
 func WithSecWebSocketVersion(version string) RequestModifier {
-	return WithHeader(fheader.SecWebSocketVersion, version)
+	return WithHeader(header.SecWebSocketVersion, version)
 }
 
 // WithPermessageDeflate requests the permessage-deflate WebSocket compression extension (RFC 7692 §7).
 func WithPermessageDeflate(params ...string) RequestModifier {
 	if len(params) == 0 {
-		return WithHeader(fheader.SecWebSocketExtensions, "permessage-deflate; client_max_window_bits")
+		return WithHeader(header.SecWebSocketExtensions, "permessage-deflate; client_max_window_bits")
 	}
 
-	return WithHeader(fheader.SecWebSocketExtensions, "permessage-deflate; "+strings.Join(params, "; "))
+	return WithHeader(header.SecWebSocketExtensions, "permessage-deflate; "+strings.Join(params, "; "))
 }
 
 // ============================================================================
@@ -408,7 +408,7 @@ func WithCookie(c *http.Cookie) RequestModifier {
 
 	return RequestModifier{
 		Kind:  core.ModHeaderAdd,
-		Key:   fheader.Cookie,
+		Key:   header.Cookie,
 		Value: c.String(),
 	}
 }
@@ -419,7 +419,7 @@ func WithCookies(kv map[string]string) RequestModifier {
 		Kind: core.ModCustom,
 		Fn: func(req Request) {
 			for k, v := range kv {
-				req.AddHeader(fheader.Cookie, k+"="+v)
+				req.AddHeader(header.Cookie, k+"="+v)
 			}
 		},
 	}
@@ -495,5 +495,5 @@ func WithWebPushTopic(topic string) RequestModifier {
 
 // WithVAPIDAuth injects an RFC 8292 Voluntary Application Server Identification (VAPID) Authorization header.
 func WithVAPIDAuth(vapidAuth string) RequestModifier {
-	return WithHeader(fheader.Authorization, vapidAuth)
+	return WithHeader(header.Authorization, vapidAuth)
 }

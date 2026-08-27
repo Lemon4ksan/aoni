@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 const (
@@ -164,12 +164,12 @@ func fetchVersions(client *http.Client) versionInfo {
 func fetchChrome(client *http.Client, platform string) string {
 	url := fmt.Sprintf("https://chromiumdash.appspot.com/fetch_releases?platform=%s&channel=Stable&num=1", platform)
 
-	req, err := http.NewRequest(fheader.MethodGet, url, nil) //nolint:noctx
+	req, err := http.NewRequest(header.MethodGet, url, nil) //nolint:noctx
 	if err != nil {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -205,12 +205,12 @@ func fetchFirefox(client *http.Client) string {
 }
 
 func fetchIOS(client *http.Client) string {
-	req, err := http.NewRequest(fheader.MethodGet, "https://api.ipsw.me/v4/device/iPhone16,2", nil) //nolint:noctx
+	req, err := http.NewRequest(header.MethodGet, "https://api.ipsw.me/v4/device/iPhone16,2", nil) //nolint:noctx
 	if err != nil {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -238,7 +238,7 @@ func fetchIOS(client *http.Client) string {
 func fetchAndroid(client *http.Client) string {
 	req, err := http.NewRequestWithContext(
 		context.Background(),
-		fheader.MethodGet,
+		header.MethodGet,
 		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
 		nil,
 	)
@@ -246,7 +246,7 @@ func fetchAndroid(client *http.Client) string {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {

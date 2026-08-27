@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
@@ -176,7 +176,7 @@ func WithPersonaStruct(p fingerprint.Persona) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.UserAgent, p.UserAgent)
+		cfg.Defaults.Headers.Set(header.UserAgent, p.UserAgent)
 
 		if len(p.HeaderOrder) > 0 {
 			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithOrderedHeaders(p.HeaderOrder))

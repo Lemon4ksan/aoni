@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	fip "github.com/lemon4ksan/foundation/net/ip"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/ip"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -194,8 +194,8 @@ type DialConfig = transport.DialConfig
 // automatically scrubbed during cross-origin HTTP redirects (RFC 9110 §15.4)
 // to prevent security token leakage to untrusted third-party origins.
 var DefaultSensitiveHeaders = []string{
-	fheader.Authorization,
-	fheader.Cookie,
+	header.Authorization,
+	header.Cookie,
 	"X-Session-ID",
 	"X-Access-Token",
 	"X-Access-Key",
@@ -521,7 +521,7 @@ type NetworkConfig struct {
 	L2Device netdial.L2Device
 
 	// SourceRotator manages round-robin or least-used rotation across multiple local egress IP addresses.
-	SourceRotator *fip.SourceIPRotator
+	SourceRotator *ip.SourceIPRotator
 
 	// DynamicHedging configures real-time EWMA latency-based speculative request hedging to eliminate tail latency.
 	DynamicHedging *telemetry.DynamicHedgingConfig
@@ -903,7 +903,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	cloned := d
 
 	if d.BaseURL != nil {
-		cloned.BaseURL = furl.CloneURL(d.BaseURL)
+		cloned.BaseURL = urlkit.CloneURL(d.BaseURL)
 	}
 
 	if d.Headers != nil {
@@ -1597,7 +1597,7 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 
 		host := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
 		for _, domainPattern := range allowedDomains {
-			if furl.MatchDomainPattern(host, domainPattern) {
+			if urlkit.MatchDomainPattern(host, domainPattern) {
 				return nil
 			}
 		}
@@ -1652,7 +1652,7 @@ func DefaultRedirectPolicy(
 			headersToScrub = DefaultSensitiveHeaders
 		}
 
-		if furl.IsCrossOrigin(req.URL, via[0].URL) {
+		if urlkit.IsCrossOrigin(req.URL, via[0].URL) {
 			for _, h := range headersToScrub {
 				req.Header.Del(h)
 			}

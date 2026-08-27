@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -121,7 +121,7 @@ func WithJSONBody(payload any) RequestModifier {
 
 	return RequestModifier{
 		Kind:        core.ModBodyBytes,
-		ContentType: fheader.MIMEApplicationJSON,
+		ContentType: header.MIMEApplicationJSON,
 		Bytes:       bodyBytes,
 	}
 }
@@ -173,7 +173,7 @@ func WithSmartBody(body any) RequestModifier {
 	if s, ok := body.(string); ok {
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: fheader.MIMETextPlainCharsetUTF8,
+			ContentType: header.MIMETextPlainCharsetUTF8,
 			Bytes:       bytesconv.S2B(s),
 		}
 	}
@@ -205,7 +205,7 @@ func WithXMLBody(payload any) RequestModifier {
 
 	return RequestModifier{
 		Kind:        core.ModBodyBytes,
-		ContentType: fheader.MIMEApplicationXML,
+		ContentType: header.MIMEApplicationXML,
 		Bytes:       bodyBytes,
 	}
 }
@@ -228,7 +228,7 @@ func WithYAMLBody(payload any) RequestModifier {
 
 	return RequestModifier{
 		Kind:        core.ModBodyBytes,
-		ContentType: fheader.MIMEApplicationYAML,
+		ContentType: header.MIMEApplicationYAML,
 		Bytes:       bodyBytes,
 	}
 }
@@ -257,7 +257,7 @@ func WithProtoBody(msg proto.Message) RequestModifier {
 
 	return RequestModifier{
 		Kind:        core.ModBodyBytes,
-		ContentType: fheader.MIMEApplicationProtobuf,
+		ContentType: header.MIMEApplicationProtobuf,
 		Bytes:       bodyBytes,
 	}
 }
@@ -289,7 +289,7 @@ func WithGRPCWebBody(msg proto.Message) RequestModifier {
 		Kind: core.ModCustom,
 		Fn: func(req Request) {
 			req.SetBodyBytes(capturedFrame)
-			req.SetHeader(fheader.ContentType, fheader.MIMEApplicationGRPCWebProto)
+			req.SetHeader(header.ContentType, header.MIMEApplicationGRPCWebProto)
 			req.SetHeader("X-Grpc-Web", "1")
 		},
 	}
@@ -311,7 +311,7 @@ func WithFormValues(values url.Values) RequestModifier {
 
 	return RequestModifier{
 		Kind:        core.ModBodyBytes,
-		ContentType: fheader.MIMEApplicationForm,
+		ContentType: header.MIMEApplicationForm,
 		Bytes:       bytesconv.S2B(encoded),
 	}
 }
@@ -338,7 +338,7 @@ func WithFormBody(payload any) RequestModifier {
 
 			if r, ok := payload.(io.Reader); ok {
 				req.SetBodyStream(r, -1)
-				req.SetHeader(fheader.ContentType, fheader.MIMEApplicationForm)
+				req.SetHeader(header.ContentType, header.MIMEApplicationForm)
 				return
 			}
 
@@ -355,7 +355,7 @@ func WithFormBody(payload any) RequestModifier {
 
 			encoded := vals.Encode()
 			req.SetBodyBytes(bytesconv.S2B(encoded))
-			req.SetHeader(fheader.ContentType, fheader.MIMEApplicationForm)
+			req.SetHeader(header.ContentType, header.MIMEApplicationForm)
 		},
 	}
 }

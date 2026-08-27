@@ -40,7 +40,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
 )
@@ -481,7 +481,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 
 		default:
 			// Fallback local echo if no upstream specified
-			rec.Header().Set(fheader.ContentType, fheader.MIMEApplicationJSON)
+			rec.Header().Set(header.ContentType, header.MIMEApplicationJSON)
 			rec.WriteHeader(http.StatusOK)
 			_, _ = rec.Write([]byte(`{"status":"ok"}`))
 		}
@@ -491,7 +491,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		var postData *harPost
 		if len(reqBodyBytes) > 0 {
 			postData = &harPost{
-				MimeType: r.Header.Get(fheader.ContentType),
+				MimeType: r.Header.Get(header.ContentType),
 				Text:     string(reqBodyBytes),
 			}
 		}
@@ -500,7 +500,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		if rec.body.Len() > 0 {
 			respContent = &harContent{
 				Size:     int64(rec.body.Len()),
-				MimeType: rec.Header().Get(fheader.ContentType),
+				MimeType: rec.Header().Get(header.ContentType),
 				Text:     rec.body.String(),
 			}
 		}
@@ -810,9 +810,9 @@ func handleDecryptedHTTPS(
 			return
 		}
 
-		isStreaming := strings.Contains(fwdResp.Header.Get(fheader.ContentType), fheader.MIMETextEventStream) ||
-			strings.Contains(fwdResp.Header.Get(fheader.ContentType), "ndjson") ||
-			strings.Contains(fwdResp.Header.Get(fheader.ContentType), "grpc") ||
+		isStreaming := strings.Contains(fwdResp.Header.Get(header.ContentType), header.MIMETextEventStream) ||
+			strings.Contains(fwdResp.Header.Get(header.ContentType), "ndjson") ||
+			strings.Contains(fwdResp.Header.Get(header.ContentType), "grpc") ||
 			(fwdResp.ContentLength < 0 && len(fwdResp.TransferEncoding) > 0)
 
 		var respBodyBytes []byte
@@ -848,7 +848,7 @@ func handleDecryptedHTTPS(
 		var postData *harPost
 		if len(reqBodyBytes) > 0 {
 			postData = &harPost{
-				MimeType: req.Header.Get(fheader.ContentType),
+				MimeType: req.Header.Get(header.ContentType),
 				Text:     string(reqBodyBytes),
 			}
 		}
@@ -857,12 +857,12 @@ func handleDecryptedHTTPS(
 		if len(respBodyBytes) > 0 {
 			bodyText, encoding, decompressed := decodePayloadForHAR(
 				respBodyBytes,
-				fwdResp.Header.Get(fheader.ContentEncoding),
+				fwdResp.Header.Get(header.ContentEncoding),
 			)
 			if decompressed {
 				var filtered []harNV
 				for _, h := range respHeaders {
-					if !strings.EqualFold(h.Name, fheader.ContentEncoding) {
+					if !strings.EqualFold(h.Name, header.ContentEncoding) {
 						filtered = append(filtered, h)
 					}
 				}
@@ -872,7 +872,7 @@ func handleDecryptedHTTPS(
 
 			respContent = &harContent{
 				Size:     int64(len(bodyText)),
-				MimeType: fwdResp.Header.Get(fheader.ContentType),
+				MimeType: fwdResp.Header.Get(header.ContentType),
 				Text:     bodyText,
 				Encoding: encoding,
 			}

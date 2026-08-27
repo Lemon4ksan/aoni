@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 type Release struct {
@@ -71,12 +71,12 @@ type ipswResponse struct {
 }
 
 func fetchIOSVersion(client *http.Client) string {
-	req, err := http.NewRequest(fheader.MethodGet, "https://api.ipsw.me/v4/device/iPhone16,2", nil) //nolint:noctx
+	req, err := http.NewRequest(header.MethodGet, "https://api.ipsw.me/v4/device/iPhone16,2", nil) //nolint:noctx
 	if err != nil {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -116,7 +116,7 @@ type wikiResponse struct {
 func fetchAndroidVersion(client *http.Client) string {
 	req, err := http.NewRequestWithContext(
 		context.Background(),
-		fheader.MethodGet,
+		header.MethodGet,
 		"https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims",
 		nil,
 	)
@@ -124,7 +124,7 @@ func fetchAndroidVersion(client *http.Client) string {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -148,7 +148,7 @@ func fetchAndroidVersion(client *http.Client) string {
 
 func fetchChromeVersion(client *http.Client, platform string) string {
 	req, err := http.NewRequest( //nolint:noctx
-		fheader.MethodGet,
+		header.MethodGet,
 		"https://chromiumdash.appspot.com/fetch_releases?platform="+platform+"&channel=Stable&num=1",
 		nil,
 	)
@@ -156,7 +156,7 @@ func fetchChromeVersion(client *http.Client, platform string) string {
 		return ""
 	}
 
-	req.Header.Set(fheader.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set(header.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {

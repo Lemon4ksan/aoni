@@ -16,8 +16,8 @@ import (
 	flog "github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -696,14 +696,14 @@ func (c *Client) ensureUserAgent() {
 		c.cfg.Defaults.Headers = make(http.Header)
 	}
 
-	if c.cfg.Defaults.Headers.Get(fheader.UserAgent) == "" {
-		c.cfg.Defaults.Headers.Set(fheader.UserAgent, DefaultUserAgent)
+	if c.cfg.Defaults.Headers.Get(header.UserAgent) == "" {
+		c.cfg.Defaults.Headers.Set(header.UserAgent, DefaultUserAgent)
 	}
 }
 
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
-	u, err := furl.Resolve(c.prepared.BaseURL, path)
+	u, err := urlkit.Resolve(c.prepared.BaseURL, path)
 	if err != nil {
 		return nil, &Error{Op: "failed to resolve URL", Err: err}
 	}

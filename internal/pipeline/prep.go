@@ -20,8 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/cookie"
@@ -119,10 +119,10 @@ func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 	}
 
 	// RFC 9842 §6.1: Accept-Encoding
-	ae := req.Header.Get(fheader.AcceptEncoding)
+	ae := req.Header.Get(header.AcceptEncoding)
 	if ae != "" {
 		if !strings.Contains(strings.ToLower(ae), dict.ContentEncodingDCZ) {
-			req.Header.Set(fheader.AcceptEncoding, ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
+			req.Header.Set(header.AcceptEncoding, ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
 		}
 	}
 
@@ -184,7 +184,7 @@ func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
-		progressReader := &fio.ProgressReader{
+		progressReader := &iokit.ProgressReader{
 			Reader:     req.Body,
 			Total:      req.ContentLength,
 			OnProgress: cfg.UploadProgress,
@@ -199,7 +199,7 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 					return nil, err
 				}
 
-				return &fio.ProgressReader{
+				return &iokit.ProgressReader{
 					Reader:     rc,
 					Total:      req.ContentLength,
 					OnProgress: cfg.UploadProgress,
@@ -431,7 +431,7 @@ func (p *Pipeline[Req, Resp]) rotateUserAgentAndHints(req *http.Request) {
 	idx := atomic.AddUint32(&p.counter, 1) - 1
 	prof := profiles[idx%uint32(len(profiles))] //nolint:gosec
 
-	req.Header.Set(fheader.UserAgent, prof.UserAgent)
+	req.Header.Set(header.UserAgent, prof.UserAgent)
 
 	for k, v := range prof.ClientHints {
 		req.Header.Set(k, v)
@@ -451,7 +451,7 @@ func (p *Pipeline[Req, Resp]) applyDPIJitter(req *http.Request, cfg *DPIJitterCo
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {
-		req.Body = &fio.JitterReader{
+		req.Body = &iokit.JitterReader{
 			ReadCloser: req.Body,
 			Delay:      delay,
 		}
@@ -474,12 +474,12 @@ func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 		req.Header = make(http.Header)
 	}
 
-	if req.Header.Get(fheader.Referer) != "" || p.defaults.RefererState == nil {
+	if req.Header.Get(header.Referer) != "" || p.defaults.RefererState == nil {
 		return
 	}
 
 	if lastURL := p.defaults.RefererState.LastURL.Get(); lastURL != "" {
-		req.Header.Set(fheader.Referer, lastURL)
+		req.Header.Set(header.Referer, lastURL)
 	}
 }
 
@@ -526,7 +526,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 				stdReq.Header.Add(string(k), string(v))
 			}
 
-			if host := bytesconv.B2S(fastReq.Header.Peek(fheader.Host)); host != "" {
+			if host := bytesconv.B2S(fastReq.Header.Peek(header.Host)); host != "" {
 				stdReq.Host = host
 			}
 		}

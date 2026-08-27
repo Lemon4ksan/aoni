@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
@@ -316,10 +316,10 @@ func (i *TrafficInspector) broadcast(msg string) {
 
 // sseHandler streams captured requests to connected web browsers via Server-Sent Events.
 func (i *TrafficInspector) sseHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(fheader.ContentType, fheader.MIMETextEventStream)
-	w.Header().Set(fheader.CacheControl, fheader.ValueNoCache)
-	w.Header().Set(fheader.Connection, fheader.ValueKeepAlive)
-	w.Header().Set(fheader.AccessControlAllowOrigin, "*")
+	w.Header().Set(header.ContentType, header.MIMETextEventStream)
+	w.Header().Set(header.CacheControl, header.ValueNoCache)
+	w.Header().Set(header.Connection, header.ValueKeepAlive)
+	w.Header().Set(header.AccessControlAllowOrigin, "*")
 
 	ch := make(chan string, 10)
 
@@ -349,7 +349,7 @@ func (i *TrafficInspector) sseHandler(w http.ResponseWriter, r *http.Request) {
 
 // requestsHandler returns historical captured requests in reverse chronological order as JSON.
 func (i *TrafficInspector) requestsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(fheader.ContentType, fheader.MIMEApplicationJSON)
+	w.Header().Set(header.ContentType, header.MIMEApplicationJSON)
 
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -376,7 +376,7 @@ var dashboardHTML []byte
 
 // dashboardHandler serves the embedded single-page web inspector application.
 func (i *TrafficInspector) dashboardHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(fheader.ContentType, fheader.MIMETextHTMLCharsetUTF8)
+	w.Header().Set(header.ContentType, header.MIMETextHTMLCharsetUTF8)
 	_, _ = w.Write(dashboardHTML)
 }
 

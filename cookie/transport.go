@@ -7,7 +7,7 @@ package cookie
 import (
 	"net/http"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // Transport intercepts HTTP transactions to manage proxy-isolated cookies.
@@ -80,13 +80,13 @@ func (t *Transport) setCookies(req *http.Request) *http.Request {
 
 	reqClone := req.Clone(req.Context())
 
-	existing := reqClone.Header.Get(fheader.Cookie)
+	existing := reqClone.Header.Get(header.Cookie)
 	if existing == "" {
-		reqClone.Header.Set(fheader.Cookie, cookieHeader)
+		reqClone.Header.Set(header.Cookie, cookieHeader)
 		return reqClone
 	}
 
-	reqClone.Header.Set(fheader.Cookie, existing+"; "+cookieHeader)
+	reqClone.Header.Set(header.Cookie, existing+"; "+cookieHeader)
 
 	return reqClone
 }

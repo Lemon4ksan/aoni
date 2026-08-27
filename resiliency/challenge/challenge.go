@@ -26,7 +26,7 @@ import (
 	"mime"
 	"net/http"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -74,7 +74,7 @@ func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 		return false, nil //nolint:nilerr
 	}
 
-	if !isHTMLContentType(resp.Header.Get(fheader.ContentType)) && !hasHTMLTags(prefix) {
+	if !isHTMLContentType(resp.Header.Get(header.ContentType)) && !hasHTMLTags(prefix) {
 		return false, nil
 	}
 
@@ -120,7 +120,7 @@ func isHTMLContentType(contentType string) bool {
 		return false
 	}
 
-	return bytesconv.EqualFoldASCII(mediaType, fheader.MIMETextHTML) ||
+	return bytesconv.EqualFoldASCII(mediaType, header.MIMETextHTML) ||
 		bytesconv.EqualFoldASCII(mediaType, "application/xhtml+xml")
 }
 

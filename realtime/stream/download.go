@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -132,7 +132,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 			http.MethodGet,
 			t.url,
 			0,
-			mod.WithHeader(fheader.Range, fheader.ValueBytes+"=0-0"),
+			mod.WithHeader(header.Range, header.ValueBytes+"=0-0"),
 		)
 		if err != nil {
 			return err
@@ -145,9 +145,9 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	etag := probeResp.Header.Get(fheader.ETag)
-	lastModified := probeResp.Header.Get(fheader.LastModified)
-	acceptRanges := probeResp.Header.Get(fheader.AcceptRanges)
+	etag := probeResp.Header.Get(header.ETag)
+	lastModified := probeResp.Header.Get(header.LastModified)
+	acceptRanges := probeResp.Header.Get(header.AcceptRanges)
 	totalBytes := probeResp.ContentLength
 
 	var downloadedBytes int64
@@ -186,7 +186,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	supportsRanges := acceptRanges == fheader.ValueBytes || probeResp.StatusCode == http.StatusPartialContent
+	supportsRanges := acceptRanges == header.ValueBytes || probeResp.StatusCode == http.StatusPartialContent
 	if !supportsRanges || t.concurrency <= 1 {
 		return t.downloadSequential(ctx, file, downloadedBytes, totalBytes, etag, lastModified)
 	}
@@ -203,9 +203,9 @@ func (t *DownloadTask) downloadSequential(
 	mods := append([]aoni.RequestModifier(nil), t.modifiers...)
 
 	if startBytes > 0 {
-		mods = append(mods, mod.WithHeader(fheader.Range, fmt.Sprintf(fheader.ValueBytes+"=%d-", startBytes)))
+		mods = append(mods, mod.WithHeader(header.Range, fmt.Sprintf(header.ValueBytes+"=%d-", startBytes)))
 		if etag != "" {
-			mods = append(mods, mod.WithHeader(fheader.IfRange, etag))
+			mods = append(mods, mod.WithHeader(header.IfRange, etag))
 		}
 	}
 

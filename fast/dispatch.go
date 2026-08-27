@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
@@ -452,7 +452,7 @@ func (c *Client) executeFastHTTP(
 			restoreOriginalTarget()
 
 			if isHTTPS && !hasHostHeader {
-				req.Header.Del(fheader.Host)
+				req.Header.Del(header.Host)
 			}
 
 			h1engine.ReleaseRequest(req)
@@ -479,7 +479,7 @@ func (c *Client) setupFastHTTPSchemeAndHost(
 ) (isHTTPS bool, origHost []byte, hasHostHeader bool, cleanup func()) {
 	isHTTPS = bytes.EqualFold(req.URI().Scheme(), []byte("https"))
 	origHost = req.URI().Host()
-	hasHostHeader = len(req.Header.Peek(fheader.Host)) > 0
+	hasHostHeader = len(req.Header.Peek(header.Host)) > 0
 
 	var hostStr string
 
@@ -505,7 +505,7 @@ func (c *Client) setupFastHTTPSchemeAndHost(
 			req.URI().SetHostBytes(origHost)
 
 			if !hasHostHeader {
-				req.Header.Del(fheader.Host)
+				req.Header.Del(header.Host)
 			}
 		}
 	}
@@ -524,7 +524,7 @@ func (c *Client) configureFastHTTPProxy(ctx context.Context, req *h1engine.Reque
 	}
 
 	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := furl.Parse(rawProxy); parseErr == nil {
+		if parsed, parseErr := urlkit.Parse(rawProxy); parseErr == nil {
 			proxyURL = parsed
 		}
 	}
@@ -623,9 +623,9 @@ func isH2FrameOnH1Error(err error) bool {
 }
 
 func sanitizeTraceHeaders(req *h1engine.Request) {
-	if bytesconv.EqualFoldASCII(bytesconv.B2S(req.Header.Method()), fheader.MethodTrace) {
-		req.Header.Del(fheader.Authorization)
-		req.Header.Del(fheader.ProxyAuthorization)
-		req.Header.Del(fheader.Cookie)
+	if bytesconv.EqualFoldASCII(bytesconv.B2S(req.Header.Method()), header.MethodTrace) {
+		req.Header.Del(header.Authorization)
+		req.Header.Del(header.ProxyAuthorization)
+		req.Header.Del(header.Cookie)
 	}
 }

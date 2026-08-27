@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
 )
@@ -153,8 +153,8 @@ func fetchRemoteSpecWithCache(rawURL string) ([]byte, error) {
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
 	if err == nil {
-		req.Header.Set(fheader.UserAgent, "Vortex-API-Guardian/1.0 (Zero-Alloc Go Client)")
-		req.Header.Set(fheader.Accept, "application/json, application/yaml, text/yaml, text/plain, */*")
+		req.Header.Set(header.UserAgent, "Vortex-API-Guardian/1.0 (Zero-Alloc Go Client)")
+		req.Header.Set(header.Accept, "application/json, application/yaml, text/yaml, text/plain, */*")
 
 		resp, getErr := client.Do(req)
 		if getErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {

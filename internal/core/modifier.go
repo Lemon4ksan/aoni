@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"net/url"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/netutil"
@@ -61,14 +61,14 @@ func (m RequestModifier) Apply(req Request) {
 	case ModQuery, ModQueryAdd:
 		req.AddQueryParam(m.Key, m.Value)
 	case ModBearer:
-		req.SetHeader(fheader.Authorization, netutil.FormatBearerAuth(m.Value))
+		req.SetHeader(header.Authorization, netutil.FormatBearerAuth(m.Value))
 	case ModBasicAuth:
-		req.SetHeader(fheader.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
+		req.SetHeader(header.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
 	case ModBodyBytes:
 		req.SetBodyBytes(m.Bytes)
 
 		if m.ContentType != "" {
-			req.SetHeader(fheader.ContentType, m.ContentType)
+			req.SetHeader(header.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -82,7 +82,7 @@ func (m RequestModifier) Apply(req Request) {
 		req.SetBodyStream(m.Stream, lenVal)
 
 		if m.ContentType != "" {
-			req.SetHeader(fheader.ContentType, m.ContentType)
+			req.SetHeader(header.ContentType, m.ContentType)
 		}
 
 	case ModCustom:
@@ -128,14 +128,14 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(fheader.Authorization, netutil.FormatBearerAuth(m.Value))
+		req.Header.Set(header.Authorization, netutil.FormatBearerAuth(m.Value))
 
 	case ModBasicAuth:
 		if req.Header == nil {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(fheader.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
+		req.Header.Set(header.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
 
 	case ModBodyBytes:
 		buf := m.Bytes
@@ -150,7 +150,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set(fheader.ContentType, m.ContentType)
+			req.Header.Set(header.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -172,7 +172,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set(fheader.ContentType, m.ContentType)
+			req.Header.Set(header.ContentType, m.ContentType)
 		}
 
 	case ModCustom:
@@ -329,4 +329,4 @@ func (s *stdReqAdapter) EngineRequest() any         { return s.req }
 var _ Request = (*stdReqAdapter)(nil)
 
 // ProgressFunc is a callback invoked periodically to monitor stream upload or download progress.
-type ProgressFunc = fio.ProgressFunc
+type ProgressFunc = iokit.ProgressFunc

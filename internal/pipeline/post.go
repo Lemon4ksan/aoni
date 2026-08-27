@@ -16,8 +16,8 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
 
@@ -334,7 +334,7 @@ func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int
 
 	if resp.ContentLength > maxSize {
 		_ = resp.Body.Close()
-		return fio.ErrResponseTooLarge
+		return iokit.ErrResponseTooLarge
 	}
 
 	cl := resp.ContentLength
@@ -353,10 +353,10 @@ func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int
 
 	if cl > maxSize {
 		_ = resp.Body.Close()
-		return fio.ErrResponseTooLarge
+		return iokit.ErrResponseTooLarge
 	}
 
-	resp.Body = &fio.LimitCheckingReadCloser{
+	resp.Body = &iokit.LimitCheckingReadCloser{
 		ReadCloser: resp.Body,
 		Limit:      maxSize,
 	}
@@ -415,7 +415,7 @@ func PeekResponseBody(resp *http.Response, n int) ([]byte, error) {
 		return nil, nil
 	}
 
-	if b, ok := resp.Body.(*fio.BufioReadCloser); ok {
+	if b, ok := resp.Body.(*iokit.BufioReadCloser); ok {
 		return b.Peek(n)
 	}
 
@@ -424,7 +424,7 @@ func PeekResponseBody(resp *http.Response, n int) ([]byte, error) {
 	}
 
 	peekable := bufio.NewReader(resp.Body)
-	resp.Body = &fio.BufioReadCloser{
+	resp.Body = &iokit.BufioReadCloser{
 		Reader: peekable,
 		Closer: resp.Body,
 	}
@@ -450,13 +450,13 @@ func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *T
 		return nil
 	}
 
-	mBody, err := fio.NewMultiReadBody(resp.Body, threshold, disableDisk)
+	mBody, err := iokit.NewMultiReadBody(resp.Body, threshold, disableDisk)
 	if err != nil {
 		_ = resp.Body.Close()
 		return err
 	}
 
-	resp.Body = &fio.ResponseBodyReadCloser{ReadCloser: mBody}
+	resp.Body = &iokit.ResponseBodyReadCloser{ReadCloser: mBody}
 
 	return nil
 }
@@ -487,7 +487,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 		progress := cfg.DownloadProgress
 
 		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
-			return &fio.ProgressReader{
+			return &iokit.ProgressReader{
 				Reader:     body,
 				Total:      r.ContentLength,
 				OnProgress: progress,
@@ -611,13 +611,13 @@ func stageDictionaryCapture[Req, Resp any](
 }
 
 func resetDecompressedHeader(resp *http.Response) {
-	resp.Header.Del(fheader.ContentEncoding)
-	resp.Header.Del(fheader.ContentLength)
+	resp.Header.Del(header.ContentEncoding)
+	resp.Header.Del(header.ContentLength)
 	resp.ContentLength = -1
 }
 
 func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadCloser {
-	contentType := resp.Header.Get(fheader.ContentType)
+	contentType := resp.Header.Get(header.ContentType)
 	if contentType == "" {
 		return body
 	}
@@ -661,7 +661,7 @@ func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadClo
 			off += copy(buf[off:], params[k])
 		}
 
-		resp.Header.Set(fheader.ContentType, string(buf[:off]))
+		resp.Header.Set(header.ContentType, string(buf[:off]))
 	} else {
 		var b strings.Builder
 		b.Grow(len(mediaType) + totalLen)
@@ -674,10 +674,10 @@ func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadClo
 			b.WriteString(params[k])
 		}
 
-		resp.Header.Set(fheader.ContentType, b.String())
+		resp.Header.Set(header.ContentType, b.String())
 	}
 
-	return &fio.DecompressReadCloser{
+	return &iokit.DecompressReadCloser{
 		Reader: transform.NewReader(body, enc.NewDecoder()),
 		Closer: body,
 	}
@@ -693,7 +693,7 @@ func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.R
 		return resp, nil //nolint:nilerr
 	}
 
-	buffered := &fio.ExplicitBufferedBody{
+	buffered := &iokit.ExplicitBufferedBody{
 		Prefix: bodyBytes,
 		Stream: resp.Body,
 	}

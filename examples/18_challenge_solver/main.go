@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
@@ -61,8 +61,8 @@ func (s *BrowserChallengeSolver) Solve(ctx context.Context, _ error, req *http.R
 	maps.Copy(solvedReq.Header, req.Header)
 
 	// Inject solved cookie/credentials
-	solvedReq.Header.Set(fheader.Cookie, "cf_clearance=solved_value_abc123")
-	solvedReq.Header.Set(fheader.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...")
+	solvedReq.Header.Set(header.Cookie, "cf_clearance=solved_value_abc123")
+	solvedReq.Header.Set(header.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...")
 
 	// Send request via default transport
 	client := &http.Client{}

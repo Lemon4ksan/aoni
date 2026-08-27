@@ -20,7 +20,7 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
@@ -616,7 +616,7 @@ func (r *RequestBuilder) SetForceContentType(mime string) *RequestBuilder {
 
 // SetForceJSON forces response parsing as JSON regardless of Content-Type headers.
 func (r *RequestBuilder) SetForceJSON() *RequestBuilder {
-	return r.SetForceContentType(fheader.MIMEApplicationJSON)
+	return r.SetForceContentType(header.MIMEApplicationJSON)
 }
 
 // SetLabel attaches a human-readable metric or route label.
@@ -982,7 +982,7 @@ func (r *RequestBuilder) executeDownload(
 
 		targetFile := outputFile
 		if targetFile == "" && r.outputDirectory != "" {
-			filename := sanitize.ExtractFilename(resp.Header.Get(fheader.ContentDisposition))
+			filename := sanitize.ExtractFilename(resp.Header.Get(header.ContentDisposition))
 			if filename == "" {
 				filename = filepath.Base(path)
 				if filename == "." || filename == "/" {

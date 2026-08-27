@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -190,7 +190,7 @@ func WithLocale(locale string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.AcceptLanguage, locale)
+		cfg.Defaults.Headers.Set(header.AcceptLanguage, locale)
 	}
 }
 

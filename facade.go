@@ -15,7 +15,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 	"google.golang.org/protobuf/proto"
@@ -332,55 +332,55 @@ func WithRetry(attempts int) RequestModifier {
 
 // WithUserAgent constructs an [RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) RequestModifier {
-	return WithHeader(fheader.UserAgent, ua)
+	return WithHeader(header.UserAgent, ua)
 }
 
 // WithContentType constructs an [RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
 func WithContentType(ct string) RequestModifier {
-	return WithHeader(fheader.ContentType, ct)
+	return WithHeader(header.ContentType, ct)
 }
 
 // WithAccept constructs an [RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
 func WithAccept(accept string) RequestModifier {
-	return WithHeader(fheader.Accept, accept)
+	return WithHeader(header.Accept, accept)
 }
 
 // WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfModifiedSince, timekit.FormatHTTPDate(t))
+	return WithHeader(header.IfModifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
 func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader(fheader.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
+	return WithHeader(header.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
 }
 
 // WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
 func WithRange(start, end int64) RequestModifier {
 	if start < 0 {
-		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10))
+		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10))
 	}
 
 	if end < 0 {
-		return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
+		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
 	}
 
-	return WithHeader(fheader.Range, fheader.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
+	return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 }
 
 // WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
 func WithCacheControl(directives ...string) RequestModifier {
-	return WithHeader(fheader.CacheControl, strings.Join(directives, ", "))
+	return WithHeader(header.CacheControl, strings.Join(directives, ", "))
 }
 
 // WithNoCache constructs an [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
 func WithNoCache() RequestModifier {
-	return WithHeader(fheader.CacheControl, fheader.ValueNoCache)
+	return WithHeader(header.CacheControl, header.ValueNoCache)
 }
 
 // WithNoStore constructs an [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
 func WithNoStore() RequestModifier {
-	return WithHeader(fheader.CacheControl, fheader.ValueNoStore)
+	return WithHeader(header.CacheControl, header.ValueNoStore)
 }
 
 // WithBaseURL returns an [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
@@ -425,7 +425,7 @@ func WithClientUserAgent(ua string) ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.UserAgent, ua)
+		cfg.Defaults.Headers.Set(header.UserAgent, ua)
 	}
 }
 
@@ -506,14 +506,14 @@ func WithSmartBody(body any) RequestModifier {
 
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: fheader.MIMEApplicationProtobuf,
+			ContentType: header.MIMEApplicationProtobuf,
 			Bytes:       bodyBytes,
 		}
 
 	case url.Values:
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: fheader.MIMEApplicationForm,
+			ContentType: header.MIMEApplicationForm,
 			Bytes:       bytesconv.S2B(b.Encode()),
 		}
 
@@ -532,7 +532,7 @@ func WithSmartBody(body any) RequestModifier {
 	case string:
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: fheader.MIMETextPlainCharsetUTF8,
+			ContentType: header.MIMETextPlainCharsetUTF8,
 			Bytes:       bytesconv.S2B(b),
 		}
 
@@ -549,7 +549,7 @@ func WithSmartBody(body any) RequestModifier {
 
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
-			ContentType: fheader.MIMEApplicationJSON,
+			ContentType: header.MIMEApplicationJSON,
 			Bytes:       bodyBytes,
 		}
 	}

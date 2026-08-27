@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -64,8 +64,8 @@ func (g *FastGRPCClient) Invoke[Resp any](
 	req.SetContext(ctx)
 	req.SetMethod(http.MethodPost)
 	req.SetURL(path)
-	req.SetHeader(fheader.ContentType, fheader.MIMEApplicationGRPC)
-	req.SetHeader(fheader.TE, fheader.ValueTrailers)
+	req.SetHeader(header.ContentType, header.MIMEApplicationGRPC)
+	req.SetHeader(header.TE, header.ValueTrailers)
 	req.SetBodyBytes(frameBytes)
 
 	mod.Apply(req, mods...)

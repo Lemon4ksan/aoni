@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -70,7 +70,7 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 
 	hasCookieHeader := false
 	for key, values := range req.Header {
-		if bytesconv.EqualFoldASCII(key, fheader.Cookie) {
+		if bytesconv.EqualFoldASCII(key, header.Cookie) {
 			hasCookieHeader = true
 		}
 
@@ -87,7 +87,7 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 	}
 
 	if !hasCookieHeader {
-		appendJarCookies(&sb, req.Cookies(), isHeaderSensitive(fheader.Cookie, sensitiveList), redactSecret)
+		appendJarCookies(&sb, req.Cookies(), isHeaderSensitive(header.Cookie, sensitiveList), redactSecret)
 	}
 
 	appendBodyAndURL(&sb, req, body)
@@ -150,13 +150,13 @@ func appendJarCookies(sb *strings.Builder, cookies []*http.Cookie, isSecret bool
 	}
 
 	sb.WriteString(" -H ")
-	sb.WriteString(escapeShell(fheader.Cookie + ": " + cookieSb.String()))
+	sb.WriteString(escapeShell(header.Cookie + ": " + cookieSb.String()))
 }
 
 // appendBodyAndURL formats request body payload and destination URL onto sb.
 func appendBodyAndURL(sb *strings.Builder, req *http.Request, body []byte) {
-	contentType := req.Header.Get(fheader.ContentType)
-	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], fheader.MIMEMultipartFormData) &&
+	contentType := req.Header.Get(header.ContentType)
+	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], header.MIMEMultipartFormData) &&
 		len(body) > 0 {
 		summary := SummarizeMultipartBody(body, contentType)
 		for part := range strings.SplitSeq(summary, "&") {

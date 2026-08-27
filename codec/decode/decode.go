@@ -10,30 +10,30 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
-// BytesReader is an alias for [fio.BytesReader].
-type BytesReader = fio.BytesReader
+// BytesReader is an alias for [iokit.BytesReader].
+type BytesReader = iokit.BytesReader
 
 var (
 	// InspectBytes attempts to extract contiguous payload bytes from r without allocations.
-	InspectBytes = fio.InspectBytes
+	InspectBytes = iokit.InspectBytes
 
 	// ReadAllSafe returns the payload bytes safely cloning only when volatile.
-	ReadAllSafe = fio.ReadAllSafe
+	ReadAllSafe = iokit.ReadAllSafe
 
 	// StripBOMBytes detects and strips Byte Order Marks (BOM) from a byte slice.
-	StripBOMBytes = fio.StripBOMBytes
+	StripBOMBytes = iokit.StripBOMBytes
 
 	// StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
-	StripBOM = fio.StripBOM
+	StripBOM = iokit.StripBOM
 )
 
 var (
@@ -111,25 +111,25 @@ func LookupDecoder(contentType string) Decoder {
 	norm := headkit.BaseMediaType(contentType)
 
 	switch {
-	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationJSON),
+	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationJSON),
 		bytesconv.EqualFoldASCII(norm, "text/json"),
 		strings.HasSuffix(norm, "+json"):
 		return JSONDecoder
-	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWebProto),
-		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWeb),
-		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationGRPCWebText),
-		strings.HasPrefix(norm, fheader.MIMEApplicationGRPCWeb):
+	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWebProto),
+		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWeb),
+		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWebText),
+		strings.HasPrefix(norm, header.MIMEApplicationGRPCWeb):
 		return GRPCWebDecoder
-	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationProtobuf),
+	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationProtobuf),
 		bytesconv.EqualFoldASCII(norm, "application/protobuf"),
 		strings.HasSuffix(norm, "+proto"):
 		return ProtoDecoder
-	case bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationXML),
+	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationXML),
 		bytesconv.EqualFoldASCII(norm, "text/xml"),
 		strings.HasSuffix(norm, "+xml"):
 		return XMLDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
-		bytesconv.EqualFoldASCII(norm, fheader.MIMEApplicationYAML),
+		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationYAML),
 		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
 		bytesconv.EqualFoldASCII(norm, "text/yaml"),
 		strings.HasSuffix(norm, "+yaml"):

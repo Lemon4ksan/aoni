@@ -8,25 +8,25 @@ import (
 	"errors"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // Standard DPoP HTTP Headers and Authentication Schemes (RFC 9449 §4.1, §7.1, §8).
 const (
 	// HeaderDPoP carries the DPoP Proof JWT in requests (RFC 9449 §4.1).
-	HeaderDPoP = fheader.DPoP
+	HeaderDPoP = header.DPoP
 
 	// HeaderDPoPNonce carries server-provided nonces in responses (RFC 9449 §8 & §9).
-	HeaderDPoPNonce = fheader.DPoPNonce
+	HeaderDPoPNonce = header.DPoPNonce
 
 	// HeaderAuthorization carries credentials (e.g. "DPoP <access-token>") (RFC 9449 §7.1).
-	HeaderAuthorization = fheader.Authorization
+	HeaderAuthorization = header.Authorization
 
 	// HeaderWWWAuthenticate carries authentication challenges (RFC 9449 §7.1).
-	HeaderWWWAuthenticate = fheader.WWWAuthenticate
+	HeaderWWWAuthenticate = header.WWWAuthenticate
 
 	// SchemeDPoP is the HTTP authentication scheme for DPoP access tokens (RFC 9449 §7.1).
-	SchemeDPoP = fheader.ValueDPoP
+	SchemeDPoP = header.ValueDPoP
 
 	// TypeDPoPJWT is the mandatory typ header parameter value for DPoP proof JWTs (RFC 9449 §4.2).
 	TypeDPoPJWT = "dpop+jwt"

@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"os"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -32,7 +32,7 @@ func WithCorrelationID(id string) RequestModifier {
 			cfg.TraceInfo.CorrelationID = activeID
 		}
 
-		req.SetHeader(fheader.XCorrelationID, activeID)
+		req.SetHeader(header.XCorrelationID, activeID)
 	})
 }
 
@@ -74,7 +74,7 @@ func dumpStdRequest(stdReq *http.Request) {
 	if stdReq.Body != nil && stdReq.Body != http.NoBody {
 		var buf bytes.Buffer
 
-		_, _ = fio.CopyZeroAlloc(&buf, stdReq.Body)
+		_, _ = iokit.CopyZeroAlloc(&buf, stdReq.Body)
 		body = buf.Bytes()
 		stdReq.Body = io.NopCloser(bytes.NewReader(body))
 	}

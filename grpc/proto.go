@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -39,7 +39,7 @@ var (
 
 // WithGRPCWebTimeout assigns standard gRPC-Web timeout headers.
 func WithGRPCWebTimeout(d time.Duration) core.RequestModifier {
-	return mod.WithHeader(fheader.GRPCTimeout, requestutil.FormatGRPCTimeout(d))
+	return mod.WithHeader(header.GRPCTimeout, requestutil.FormatGRPCTimeout(d))
 }
 
 // ProtoGetTo executes an HTTP GET request expecting a binary Protocol Buffer response stream unmarshaled into Resp.
@@ -192,7 +192,7 @@ func withProtoGetMods(
 ) []core.RequestModifier {
 	total := 2 + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithHeader(fheader.Accept, fheader.MIMEApplicationProtobuf)
+		stackBuf[0] = mod.WithHeader(header.Accept, header.MIMEApplicationProtobuf)
 		stackBuf[1] = mod.WithDecoder(decode.ProtoDecoder)
 		copy(stackBuf[2:], mods)
 
@@ -202,7 +202,7 @@ func withProtoGetMods(
 	allMods := make([]core.RequestModifier, 0, total)
 	allMods = append(
 		allMods,
-		mod.WithHeader(fheader.Accept, fheader.MIMEApplicationProtobuf),
+		mod.WithHeader(header.Accept, header.MIMEApplicationProtobuf),
 		mod.WithDecoder(decode.ProtoDecoder),
 	)
 	allMods = append(allMods, mods...)
@@ -220,7 +220,7 @@ func withProtoPostMods(
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
 		stackBuf[0] = mod.WithBody(bytes.NewReader(bodyBytes))
-		stackBuf[1] = mod.WithHeader(fheader.ContentType, fheader.MIMEApplicationProtobuf)
+		stackBuf[1] = mod.WithHeader(header.ContentType, header.MIMEApplicationProtobuf)
 		stackBuf[2] = mod.WithDecoder(decode.ProtoDecoder)
 		copy(stackBuf[3:], mods)
 
@@ -231,7 +231,7 @@ func withProtoPostMods(
 	allMods = append(
 		allMods,
 		mod.WithBody(bytes.NewReader(bodyBytes)),
-		mod.WithHeader(fheader.ContentType, fheader.MIMEApplicationProtobuf),
+		mod.WithHeader(header.ContentType, header.MIMEApplicationProtobuf),
 		mod.WithDecoder(decode.ProtoDecoder),
 	)
 	allMods = append(allMods, mods...)
@@ -249,7 +249,7 @@ func withWebPostMods(
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
 		stackBuf[0] = mod.WithBody(bytes.NewReader(frameBytes))
-		stackBuf[1] = mod.WithHeader(fheader.ContentType, fheader.MIMEApplicationGRPCWebProto)
+		stackBuf[1] = mod.WithHeader(header.ContentType, header.MIMEApplicationGRPCWebProto)
 		stackBuf[2] = mod.WithDecoder(decode.GRPCWebDecoder)
 		copy(stackBuf[3:], mods)
 
@@ -260,7 +260,7 @@ func withWebPostMods(
 	allMods = append(
 		allMods,
 		mod.WithBody(bytes.NewReader(frameBytes)),
-		mod.WithHeader(fheader.ContentType, fheader.MIMEApplicationGRPCWebProto),
+		mod.WithHeader(header.ContentType, header.MIMEApplicationGRPCWebProto),
 		mod.WithDecoder(decode.GRPCWebDecoder),
 	)
 	allMods = append(allMods, mods...)

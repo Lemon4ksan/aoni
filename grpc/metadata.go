@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -46,7 +46,7 @@ func WithBinaryHeader(key string, val []byte) core.RequestModifier {
 
 // WithTimeout produces a [core.RequestModifier] setting the gRPC-Timeout header.
 func WithTimeout(d time.Duration) core.RequestModifier {
-	return mod.WithHeader(fheader.GRPCTimeout, formatTimeout(d))
+	return mod.WithHeader(header.GRPCTimeout, formatTimeout(d))
 }
 
 // NewContext returns a new context carrying gRPC metadata.

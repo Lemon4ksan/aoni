@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/headkit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/internal/version"
@@ -130,10 +130,10 @@ func (g *HARGenerator) Record(
 			Cookies:     respCookies,
 			Content: HARContent{
 				Size:     int64(len(bodyBytes)),
-				MimeType: resp.Header.Get(fheader.ContentType),
+				MimeType: resp.Header.Get(header.ContentType),
 				Text:     string(bodyBytes),
 			},
-			RedirectURL: resp.Header.Get(fheader.Location),
+			RedirectURL: resp.Header.Get(header.Location),
 			HeadersSize: -1,
 			BodySize:    int64(len(bodyBytes)),
 		},
@@ -158,7 +158,7 @@ func captureHARResponseBody(resp *http.Response) []byte {
 		return nil
 	}
 
-	contentType := resp.Header.Get(fheader.ContentType)
+	contentType := resp.Header.Get(header.ContentType)
 	isText := strings.Contains(contentType, "json") ||
 		strings.Contains(contentType, "text") ||
 		strings.Contains(contentType, "xml") ||

@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
@@ -169,7 +169,7 @@ func WithUserAgent(ua string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.UserAgent, ua)
+		cfg.Defaults.Headers.Set(header.UserAgent, ua)
 	}
 }
 
@@ -187,7 +187,7 @@ func WithOrigin(origin string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.Origin, origin)
+		cfg.Defaults.Headers.Set(header.Origin, origin)
 	}
 }
 
@@ -208,7 +208,7 @@ func WithBearer(token string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.Authorization, netutil.FormatBearerAuth(token))
+		cfg.Defaults.Headers.Set(header.Authorization, netutil.FormatBearerAuth(token))
 	}
 }
 
@@ -230,7 +230,7 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.Authorization, netutil.FormatBasicAuth(username, password))
+		cfg.Defaults.Headers.Set(header.Authorization, netutil.FormatBasicAuth(username, password))
 	}
 }
 
@@ -315,7 +315,7 @@ func WithEnvBearer(envVarName string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(fheader.Authorization, "Bearer "+val)
+		cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
 	}
 }
 
@@ -382,7 +382,7 @@ func FromVortexCache(startDirs ...string) aoni.ClientOption {
 
 			if entry.Header != "" {
 				if strings.EqualFold(entry.Header, "authorization") && !strings.HasPrefix(val, "Bearer ") {
-					cfg.Defaults.Headers.Set(fheader.Authorization, "Bearer "+val)
+					cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
 				} else {
 					cfg.Defaults.Headers.Set(entry.Header, val)
 				}
@@ -393,9 +393,9 @@ func FromVortexCache(startDirs ...string) aoni.ClientOption {
 			switch strings.ToUpper(key) {
 			case "AUTH_TOKEN", "BEARER_TOKEN", "API_TOKEN", "ACCESS_TOKEN":
 				if !strings.HasPrefix(val, "Bearer ") {
-					cfg.Defaults.Headers.Set(fheader.Authorization, "Bearer "+val)
+					cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
 				} else {
-					cfg.Defaults.Headers.Set(fheader.Authorization, val)
+					cfg.Defaults.Headers.Set(header.Authorization, val)
 				}
 
 			case "API_KEY", "APIKEY", "X_API_KEY":

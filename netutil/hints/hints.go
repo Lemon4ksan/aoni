@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // Preconnecter defines an interface for clients capable of proactive TCP/TLS preconnecting
@@ -97,7 +97,7 @@ func ParseLinksFromHeaders(headers http.Header) []Link {
 	}
 
 	var allLinks []Link
-	for _, val := range headers[fheader.Link] {
+	for _, val := range headers[header.Link] {
 		links := ParseLinkHeader(val)
 		allLinks = append(allLinks, links...)
 	}

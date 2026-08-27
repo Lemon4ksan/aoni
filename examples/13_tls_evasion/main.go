@@ -15,7 +15,7 @@ import (
 	"log"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
@@ -58,19 +58,19 @@ func main() {
 	res, err := client.GetTo[Response](ctx, "/ip",
 		mod.WithForceHTTP1(),
 		mod.WithOrderedHeaders([]string{
-			fheader.Host,
-			fheader.Connection,
-			fheader.CacheControl,
-			fheader.UpgradeInsecureRequests,
-			fheader.UserAgent,
-			fheader.Accept,
-			fheader.SecFetchSite,
-			fheader.SecFetchMode,
-			fheader.SecFetchUser,
-			fheader.SecFetchDest,
-			fheader.AcceptEncoding,
-			fheader.AcceptLanguage,
-			fheader.Cookie,
+			header.Host,
+			header.Connection,
+			header.CacheControl,
+			header.UpgradeInsecureRequests,
+			header.UserAgent,
+			header.Accept,
+			header.SecFetchSite,
+			header.SecFetchMode,
+			header.SecFetchUser,
+			header.SecFetchDest,
+			header.AcceptEncoding,
+			header.AcceptLanguage,
+			header.Cookie,
 		}),
 	)
 	if err != nil {

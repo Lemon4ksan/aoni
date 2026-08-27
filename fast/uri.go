@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -60,7 +60,7 @@ func (c *Client) formatTargetURL(path string) (string, error) {
 		return "", ErrTargetURLEmpty
 	}
 
-	return furl.ResolveString(c.cfg.Defaults.BaseURL, path)
+	return urlkit.ResolveString(c.cfg.Defaults.BaseURL, path)
 }
 
 // resolveTargetURLFastFallback formats target URL when fast-path byte slices cannot be directly applied (RFC 3986 §5.2 & §5.3).
@@ -108,8 +108,8 @@ func applyUserinfoAuth(req aoni.Request, targetURL string) {
 		username := parsed.User.Username()
 		password, _ := parsed.User.Password()
 
-		if req.Header(fheader.Authorization) == "" {
-			req.SetHeader(fheader.Authorization, netutil.FormatBasicAuth(username, password))
+		if req.Header(header.Authorization) == "" {
+			req.SetHeader(header.Authorization, netutil.FormatBasicAuth(username, password))
 		}
 	}
 }

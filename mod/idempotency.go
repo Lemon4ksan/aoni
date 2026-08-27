@@ -7,7 +7,7 @@ package mod
 import (
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
@@ -18,7 +18,7 @@ import (
 const HeaderIdempotencyKey = "Idempotency-Key"
 
 // HeaderRequestID is the standard distributed tracing request identifier header.
-const HeaderRequestID = fheader.XRequestID
+const HeaderRequestID = header.XRequestID
 
 // WithIdempotencyKey generates and attaches a unique, time-ordered UUIDv7 into the "Idempotency-Key" header (RFC 9562).
 //

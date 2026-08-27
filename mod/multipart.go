@@ -15,8 +15,8 @@ import (
 	"slices"
 	"strings"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -80,7 +80,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 					return
 				}
 
-				if _, err = fio.CopyZeroAlloc(part, r); err != nil {
+				if _, err = iokit.CopyZeroAlloc(part, r); err != nil {
 					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
@@ -92,7 +92,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 			}
 
 			req.SetBodyBytes(getBytes())
-			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
+			req.SetHeader(header.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -151,7 +151,7 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 				if f.Reader != nil || f.Filename != "" {
 					ct := f.ContentType
 					if ct == "" {
-						ct = fheader.MIMEApplicationOctetStream
+						ct = header.MIMEApplicationOctetStream
 					}
 
 					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
@@ -161,7 +161,7 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 					}
 
 					if f.Reader != nil {
-						if _, err = fio.CopyZeroAlloc(part, f.Reader); err != nil {
+						if _, err = iokit.CopyZeroAlloc(part, f.Reader); err != nil {
 							getOrInitRequestConfig(req).BodyError = err
 							return
 						}
@@ -180,7 +180,7 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 			}
 
 			req.SetBodyBytes(getBytes())
-			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
+			req.SetHeader(header.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -201,7 +201,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 			go streamMultipartPayload(ctx, pw, writer, fields, files)
 
 			req.SetBodyStream(pr, -1)
-			req.SetHeader(fheader.ContentType, writer.FormDataContentType())
+			req.SetHeader(header.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -237,7 +237,7 @@ func streamMultipartPayload(
 
 			part, err := createFormFileHeader(writer, key, key, contentType)
 			if err == nil {
-				_, _ = fio.CopyZeroAlloc(part, streamReader)
+				_, _ = iokit.CopyZeroAlloc(part, streamReader)
 			}
 		}
 	}
@@ -256,23 +256,23 @@ func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
 	}
 
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return fheader.MIMEApplicationOctetStream, r
+		return header.MIMEApplicationOctetStream, r
 	}
 
-	return fheader.MIMEApplicationOctetStream, r
+	return header.MIMEApplicationOctetStream, r
 }
 
 // createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type (RFC 7578 §4.2 & §4.4).
 // Per RFC 7578 §4.2, filename* (RFC 5987/8187) MUST NOT be used in multipart/form-data.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
 	h := make(textproto.MIMEHeader)
-	h.Set(fheader.ContentDisposition,
+	h.Set(header.ContentDisposition,
 		"form-data; name=\""+escapeQuotes(fieldname)+"\"; filename=\""+escapeQuotes(filename)+"\"")
 
 	if contentType != "" {
-		h.Set(fheader.ContentType, contentType)
+		h.Set(header.ContentType, contentType)
 	} else {
-		h.Set(fheader.ContentType, fheader.MIMEApplicationOctetStream)
+		h.Set(header.ContentType, header.MIMEApplicationOctetStream)
 	}
 
 	return w.CreatePart(h)

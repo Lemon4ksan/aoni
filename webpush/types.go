@@ -12,7 +12,7 @@ import (
 	"errors"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
 // Standard HTTP Header names and Content Encodings for WebPush.
@@ -27,10 +27,10 @@ const (
 	HeaderTopic = "Topic"
 
 	// HeaderContentEncoding specifies the payload content encoding (RFC 8291 §4).
-	HeaderContentEncoding = fheader.ContentEncoding
+	HeaderContentEncoding = header.ContentEncoding
 
 	// HeaderAuthorization specifies the VAPID authorization header (RFC 8292 §3).
-	HeaderAuthorization = fheader.Authorization
+	HeaderAuthorization = header.Authorization
 
 	// ContentEncodingAES128GCM is the mandatory content encoding for encrypted push messages (RFC 8291).
 	ContentEncodingAES128GCM = "aes128gcm"

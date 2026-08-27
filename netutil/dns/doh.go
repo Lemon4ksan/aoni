@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	fdns "github.com/lemon4ksan/foundation/net/dns"
+	"github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni"
@@ -129,7 +129,7 @@ func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 	wg.Wait()
 
 	if err4 != nil && err6 != nil {
-		return nil, fdns.WrapDNSError(host, "DoH", r.Endpoint, err4)
+		return nil, dns.WrapDNSError(host, "DoH", r.Endpoint, err4)
 	}
 
 	records := make([]wire.DNSRecord, 0, len(v4Records)+len(v6Records))
@@ -145,7 +145,7 @@ func (r *DoHResolver) LookupHTTPS(ctx context.Context, host string, port uint16)
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeHTTPS)
 	if err != nil {
-		return nil, fdns.WrapDNSError(host, "DoH", r.Endpoint, err)
+		return nil, dns.WrapDNSError(host, "DoH", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeHTTPS)
@@ -157,7 +157,7 @@ func (r *DoHResolver) LookupSVCB(ctx context.Context, scheme, service string, po
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeSVCB)
 	if err != nil {
-		return nil, fdns.WrapDNSError(service, "DoH", r.Endpoint, err)
+		return nil, dns.WrapDNSError(service, "DoH", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeSVCB)
@@ -181,7 +181,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader(fheader.Accept, DoHMediaType)
+	req.SetHeader(header.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -189,12 +189,12 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader(fheader.ContentType, DoHMediaType)
+		req.SetHeader(header.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader(fheader.Host, r.Host)
+		req.SetHeader(header.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)
@@ -227,7 +227,7 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader(fheader.Accept, DoHMediaType)
+	req.SetHeader(header.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -235,12 +235,12 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader(fheader.ContentType, DoHMediaType)
+		req.SetHeader(header.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader(fheader.Host, r.Host)
+		req.SetHeader(header.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)

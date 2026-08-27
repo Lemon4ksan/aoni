@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/contextkit"
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/async/contextkit"
+	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/pathkit"
 	"google.golang.org/protobuf/proto"
 
@@ -57,7 +57,7 @@ func Invoke[Resp any](
 	reqMsg proto.Message,
 	mods ...core.RequestModifier,
 ) (*Resp, error) {
-	ctx = asyncctx.Wrap(ctx)
+	ctx = contextkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -104,7 +104,7 @@ func InvokeInto(
 	target proto.Message,
 	mods ...core.RequestModifier,
 ) error {
-	ctx = asyncctx.Wrap(ctx)
+	ctx = contextkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -149,21 +149,21 @@ func prepareGRPCModifiers(
 ) []core.RequestModifier {
 	grpcMods := make([]core.RequestModifier, 0, len(mods)+5)
 	grpcMods = append(grpcMods,
-		mod.WithContentType(fheader.MIMEApplicationGRPC),
-		mod.WithHeader(fheader.TE, fheader.ValueTrailers),
-		mod.WithHeader(fheader.UserAgent, "grpc-aoni/1.0"),
+		mod.WithContentType(header.MIMEApplicationGRPC),
+		mod.WithHeader(header.TE, header.ValueTrailers),
+		mod.WithHeader(header.UserAgent, "grpc-aoni/1.0"),
 		mod.WithBody(bytes.NewReader(frameBytes)),
 	)
 
 	if isStreaming {
 		grpcMods = append(
 			grpcMods,
-			mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity),
+			mod.WithHeader(header.GRPCAcceptEncoding, header.ValueGzip+", "+header.ValueIdentity),
 		)
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCTimeout, formatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader(header.GRPCTimeout, formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -184,13 +184,13 @@ func validateInitialHeaders(resp *http.Response) error {
 		}
 	}
 
-	ct := resp.Header.Get(fheader.ContentType)
-	if ct != "" && !strings.HasPrefix(ct, fheader.MIMEApplicationGRPC) {
+	ct := resp.Header.Get(header.ContentType)
+	if ct != "" && !strings.HasPrefix(ct, header.MIMEApplicationGRPC) {
 		return fmt.Errorf("%w: %s", ErrInvalidContentType, ct)
 	}
 
 	// Check "Trailers-Only" response case (when error status is delivered directly in initial response headers)
-	if statusCode := resp.Header.Get(fheader.GRPCStatus); statusCode != "" && statusCode != "0" {
+	if statusCode := resp.Header.Get(header.GRPCStatus); statusCode != "" && statusCode != "0" {
 		return parseGRPCStatus(resp.Header)
 	}
 
@@ -204,7 +204,7 @@ func validateResponseTrailers(resp *http.Response) error {
 		trailers = resp.Header
 	}
 
-	statusCode := trailers.Get(fheader.GRPCStatus)
+	statusCode := trailers.Get(header.GRPCStatus)
 	if statusCode == "" {
 		return ErrMissingGRPCStatus
 	}
@@ -239,15 +239,15 @@ func prepareGRPCStreamModifiers(
 ) []core.RequestModifier {
 	grpcMods := make([]core.RequestModifier, 0, len(mods)+5)
 	grpcMods = append(grpcMods,
-		mod.WithContentType(fheader.MIMEApplicationGRPC),
-		mod.WithHeader(fheader.TE, fheader.ValueTrailers),
-		mod.WithHeader(fheader.UserAgent, "grpc-aoni/1.0"),
-		mod.WithHeader(fheader.GRPCAcceptEncoding, fheader.ValueGzip+", "+fheader.ValueIdentity),
+		mod.WithContentType(header.MIMEApplicationGRPC),
+		mod.WithHeader(header.TE, header.ValueTrailers),
+		mod.WithHeader(header.UserAgent, "grpc-aoni/1.0"),
+		mod.WithHeader(header.GRPCAcceptEncoding, header.ValueGzip+", "+header.ValueIdentity),
 		mod.WithBody(bodyReader),
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader(fheader.GRPCTimeout, formatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader(header.GRPCTimeout, formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -331,7 +331,7 @@ func ServerStream[Resp any](
 	reqMsg proto.Message,
 	mods ...core.RequestModifier,
 ) (*StreamResponse[Resp], error) {
-	ctx = asyncctx.Wrap(ctx)
+	ctx = contextkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -535,7 +535,7 @@ func BidiStream[Req proto.Message, Resp any](
 	fullMethod string,
 	mods ...core.RequestModifier,
 ) (*BidiStreamClient[Req, Resp], error) {
-	ctx = asyncctx.Wrap(ctx)
+	ctx = contextkit.Wrap(ctx)
 	streamCtx, cancel := context.WithCancel(ctx) //nolint:gosec
 	pipeReader, pipeWriter := io.Pipe()
 

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	fheader "github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
@@ -51,7 +51,7 @@ func (s *HeadlessWAFSolver) Solve(ctx context.Context, err error, req *http.Requ
 		Header:     make(http.Header),
 		Request:    req,
 	}
-	mockResponse.Header.Set(fheader.ContentType, fheader.MIMEApplicationJSON)
+	mockResponse.Header.Set(header.ContentType, header.MIMEApplicationJSON)
 	return mockResponse, nil
 }
 
