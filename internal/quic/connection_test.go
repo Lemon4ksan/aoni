@@ -1836,25 +1836,25 @@ func TestConnectionACKTimer(t *testing.T) {
 			calls = append(
 				calls,
 				tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-					func(buf *packetBuffer, _ protocol.ByteCount, _ monotime.Time, _ protocol.Version) (shortHeaderPacket, error) {
+					func(buf *packetBuffer, _ protocol.ByteCount, now monotime.Time, _ protocol.Version) (shortHeaderPacket, error) {
 						buf.Data = append(buf.Data, []byte("foobar")...)
-						times = append(times, monotime.Now())
+						times = append(times, now)
 
 						rph := tc.receivedPacketHandler()
 						if len(times) == 1 {
 							// After first packet is sent, set alarm timeout for the next iteration
 							// Get the ACK frame to reset state, then receive a new packet to set alarm
-							_ = rph.GetAckFrame(protocol.Encryption1RTT, monotime.Now(), false)
-							alarmRcvTime := monotime.Now().Add(alarmTimeout - protocol.MaxAckDelay)
+							_ = rph.GetAckFrame(protocol.Encryption1RTT, now, false)
+							alarmRcvTime := now.Add(alarmTimeout - protocol.MaxAckDelay)
 							_ = rph.ReceivedPacket(2, protocol.ECNNon, protocol.Encryption1RTT, alarmRcvTime, true)
 						} else {
 							// After second packet is sent, set alarm timeout far in the future
-							_ = rph.GetAckFrame(protocol.Encryption1RTT, monotime.Now(), false)
+							_ = rph.GetAckFrame(protocol.Encryption1RTT, now, false)
 							_ = rph.ReceivedPacket(
 								3,
 								protocol.ECNNon,
 								protocol.Encryption1RTT,
-								monotime.Now().Add(time.Hour),
+								now.Add(time.Hour),
 								true,
 							)
 						}
@@ -1875,6 +1875,10 @@ func TestConnectionACKTimer(t *testing.T) {
 		}
 
 		gomock.InOrder(calls...)
+		tc.packer.EXPECT().
+			AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(shortHeaderPacket{}, errNothingToPack).
+			AnyTimes()
 
 		errChan := make(chan error, 1)
 		go func() { errChan <- tc.conn.run() }()

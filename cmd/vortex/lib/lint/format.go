@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/internal/version"
 )
 
 // ANSI color codes
@@ -351,7 +353,7 @@ func FormatSARIF(w io.Writer, report *Report) error {
 				Tool: sarifTool{
 					Driver: sarifDriver{
 						Name:           "vortex",
-						Version:        "0.6.0",
+						Version:        version.Number,
 						InformationURI: "https://github.com/lemon4ksan/aoni",
 						Rules:          rules,
 					},
