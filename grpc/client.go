@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/async/contextkit"
+	"github.com/lemon4ksan/foundation/async/ctxkit"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/pathkit"
 	"google.golang.org/protobuf/proto"
@@ -57,7 +57,7 @@ func Invoke[Resp any](
 	reqMsg proto.Message,
 	mods ...core.RequestModifier,
 ) (*Resp, error) {
-	ctx = contextkit.Wrap(ctx)
+	ctx = ctxkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -104,7 +104,7 @@ func InvokeInto(
 	target proto.Message,
 	mods ...core.RequestModifier,
 ) error {
-	ctx = contextkit.Wrap(ctx)
+	ctx = ctxkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -331,7 +331,7 @@ func ServerStream[Resp any](
 	reqMsg proto.Message,
 	mods ...core.RequestModifier,
 ) (*StreamResponse[Resp], error) {
-	ctx = contextkit.Wrap(ctx)
+	ctx = ctxkit.Wrap(ctx)
 
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
@@ -535,7 +535,7 @@ func BidiStream[Req proto.Message, Resp any](
 	fullMethod string,
 	mods ...core.RequestModifier,
 ) (*BidiStreamClient[Req, Resp], error) {
-	ctx = contextkit.Wrap(ctx)
+	ctx = ctxkit.Wrap(ctx)
 	streamCtx, cancel := context.WithCancel(ctx) //nolint:gosec
 	pipeReader, pipeWriter := io.Pipe()
 

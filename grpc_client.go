@@ -47,3 +47,34 @@ func (g *GRPCClient) InvokeInto(
 ) error {
 	return grpc.InvokeInto(ctx, g.client, fullMethod, reqMsg, target, mods...)
 }
+
+// InvokeGRPC executes a native unary gRPC call over stealth HTTP/2 transport using the specified requester (or DefaultClient if nil).
+func InvokeGRPC[Resp any](
+	ctx context.Context,
+	doer HTTPRequester,
+	fullMethod string,
+	reqMsg proto.Message,
+	mods ...RequestModifier,
+) (*Resp, error) {
+	if doer == nil {
+		doer = DefaultClient
+	}
+
+	return grpc.Invoke[Resp](ctx, doer, fullMethod, reqMsg, mods...)
+}
+
+// InvokeGRPCInto executes a native unary gRPC call and unmarshals the response frame directly into target message without allocation.
+func InvokeGRPCInto(
+	ctx context.Context,
+	doer HTTPRequester,
+	fullMethod string,
+	reqMsg proto.Message,
+	target proto.Message,
+	mods ...RequestModifier,
+) error {
+	if doer == nil {
+		doer = DefaultClient
+	}
+
+	return grpc.InvokeInto(ctx, doer, fullMethod, reqMsg, target, mods...)
+}

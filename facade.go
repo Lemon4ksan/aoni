@@ -88,6 +88,14 @@ func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Resp
 	return DefaultClient.Request(ctx, http.MethodHead, path, mods...)
 }
 
+// Options executes an HTTP OPTIONS request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
+func Options(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return DefaultClient.Request(ctx, http.MethodOptions, path, mods...)
+}
+
 // GetTo executes a 1-line typed GET request using [DefaultClient] and decodes the response into a newly allocated T.
 //
 // Automatically handles decompression (gzip, brotli, zstd) and Content-Type negotiation.
@@ -163,6 +171,97 @@ func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestM
 //	status, err := aoni.DeleteTo[DeleteStatus](ctx, "https://api.example.com/users/42")
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.DeleteTo[T](ctx, path, mods...)
+}
+
+// GetInto executes a typed GET request using [DefaultClient] and decodes the response directly into target without allocations.
+//
+// # Example
+//
+//	var user User
+//	err := aoni.GetInto(ctx, "https://api.example.com/users/42", &user)
+func GetInto[T any](ctx context.Context, path string, target *T, mods ...RequestModifier) error {
+	return DefaultClient.GetInto[T](ctx, path, target, mods...)
+}
+
+// PostInto executes a typed POST request carrying body using [DefaultClient] and decodes the response directly into target.
+func PostInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
+	return DefaultClient.PostInto[T](ctx, path, body, target, mods...)
+}
+
+// PutInto executes a typed PUT request carrying body using [DefaultClient] and decodes the response directly into target.
+func PutInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
+	return DefaultClient.PutInto[T](ctx, path, body, target, mods...)
+}
+
+// PatchInto executes a typed PATCH request carrying body using [DefaultClient] and decodes the response directly into target.
+func PatchInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
+	return DefaultClient.PatchInto[T](ctx, path, body, target, mods...)
+}
+
+// DeleteInto executes a typed DELETE request using [DefaultClient] and decodes the response directly into target.
+func DeleteInto[T any](ctx context.Context, path string, target *T, mods ...RequestModifier) error {
+	return DefaultClient.DeleteInto[T](ctx, path, target, mods...)
+}
+
+// FetchInto executes an arbitrary HTTP method request using [DefaultClient] and decodes the response directly into target.
+func FetchInto[T any](
+	ctx context.Context,
+	method, path string,
+	body any,
+	target *T,
+	mods ...RequestModifier,
+) error {
+	return DefaultClient.FetchInto[T](ctx, method, path, body, target, mods...)
+}
+
+// GetEx executes a typed GET request using [DefaultClient] and returns both the unmarshaled *T and raw [*http.Response].
+func GetEx[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, *http.Response, error) {
+	return DefaultClient.GetEx[T](ctx, path, mods...)
+}
+
+// PostEx executes a typed POST request carrying body using [DefaultClient] and returns both *T and raw [*http.Response].
+func PostEx[T any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (*T, *http.Response, error) {
+	return DefaultClient.PostEx[T](ctx, path, body, mods...)
+}
+
+// PutEx executes a typed PUT request carrying body using [DefaultClient] and returns both *T and raw [*http.Response].
+func PutEx[T any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (*T, *http.Response, error) {
+	return DefaultClient.PutEx[T](ctx, path, body, mods...)
+}
+
+// PatchEx executes a typed PATCH request carrying body using [DefaultClient] and returns both *T and raw [*http.Response].
+func PatchEx[T any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (*T, *http.Response, error) {
+	return DefaultClient.PatchEx[T](ctx, path, body, mods...)
+}
+
+// DeleteEx executes a typed DELETE request using [DefaultClient] and returns both *T and raw [*http.Response].
+func DeleteEx[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, *http.Response, error) {
+	return DefaultClient.DeleteEx[T](ctx, path, mods...)
+}
+
+// FetchEx executes an arbitrary HTTP method request using [DefaultClient] and returns both *T and raw [*http.Response].
+func FetchEx[T any](
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) (*T, *http.Response, error) {
+	return DefaultClient.FetchEx[T](ctx, method, path, body, mods...)
 }
 
 // Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.

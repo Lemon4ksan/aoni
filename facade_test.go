@@ -121,3 +121,59 @@ func TestDeepCloning_Isolation(t *testing.T) {
 	assert.Equal(t, "session_id", cloned.Defaults.Pipeline.Cache.CookieIndices[0])
 	assert.Equal(t, "utm_source", cloned.Defaults.Pipeline.Cache.NoVarySearch.IgnoreParams[0])
 }
+
+func TestFacade_OptionsAndIntoEx(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodOptions:
+			w.Header().Set("Allow", "GET, POST, OPTIONS")
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"name":"Bob","age":25}`))
+		case http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"Charlie","age":35}`))
+		}
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	// 1. Test Options
+	resp, err := Options(ctx, ts.URL)
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "GET, POST, OPTIONS", resp.Header.Get("Allow"))
+
+	// 2. Test GetInto
+	var getUser sampleUser
+
+	err = GetInto(ctx, ts.URL, &getUser)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", getUser.Name)
+	assert.Equal(t, 25, getUser.Age)
+
+	// 3. Test GetEx
+	exUser, exResp, err := GetEx[sampleUser](ctx, ts.URL)
+	require.NoError(t, err)
+
+	if exResp != nil && exResp.Body != nil {
+		_ = exResp.Body.Close()
+	}
+
+	assert.Equal(t, "Bob", exUser.Name)
+
+	// 4. Test PostInto
+	var postUser sampleUser
+
+	err = PostInto(ctx, ts.URL, map[string]string{"dummy": "data"}, &postUser)
+	require.NoError(t, err)
+	assert.Equal(t, "Charlie", postUser.Name)
+	assert.Equal(t, 35, postUser.Age)
+}
