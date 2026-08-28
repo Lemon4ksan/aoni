@@ -1954,7 +1954,8 @@ func TestConnectionGSOBatch(t *testing.T) {
 
 		tc.packer.EXPECT().
 			AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(shortHeaderPacket{}, errNothingToPack)
+			Return(shortHeaderPacket{}, errNothingToPack).
+			AnyTimes()
 		tc.sendConn.EXPECT().Write(expectedData, uint16(maxPacketSize), protocol.ECT1).DoAndReturn(
 			func([]byte, uint16, protocol.ECN) error { close(done); return nil },
 		)
@@ -2054,6 +2055,10 @@ func TestConnectionGSOBatchPacketSize(t *testing.T) {
 				Return(shortHeaderPacket{}, errNothingToPack),
 		)
 		gomock.InOrder(calls...)
+		tc.packer.EXPECT().
+			AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(shortHeaderPacket{}, errNothingToPack).
+			AnyTimes()
 
 		done := make(chan struct{})
 		gomock.InOrder(
