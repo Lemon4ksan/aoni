@@ -99,11 +99,6 @@ func (c *Client) TrackHTTPSTarget(addr string) {
 	c.activeTargets.Track(addr)
 }
 
-// UntrackHTTPSTarget decrements the active HTTPS target reference count for addr.
-func (c *Client) UntrackHTTPSTarget(addr string) {
-	c.activeTargets.Untrack(addr)
-}
-
 // IsHTTPSTarget reports whether addr has been tracked as an active HTTPS target.
 func (c *Client) IsHTTPSTarget(addr string) bool {
 	return c.activeTargets.IsTracked(addr)
@@ -237,41 +232,14 @@ func applyHostRewriteRules(rules map[string]string, host, port string) (string, 
 }
 
 type targetTracker struct {
-	mu      sync.RWMutex
-	targets map[string]int
+	targets sync.Map
 }
 
 func (t *targetTracker) Track(addr string) {
-	t.mu.Lock()
-	if t.targets == nil {
-		t.targets = make(map[string]int)
-	}
-
-	t.targets[addr]++
-	t.mu.Unlock()
-}
-
-func (t *targetTracker) Untrack(addr string) {
-	t.mu.Lock()
-	if t.targets != nil {
-		count := t.targets[addr] - 1
-		if count <= 0 {
-			delete(t.targets, addr)
-		} else {
-			t.targets[addr] = count
-		}
-	}
-
-	t.mu.Unlock()
+	t.targets.Store(addr, struct{}{})
 }
 
 func (t *targetTracker) IsTracked(addr string) bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if t.targets == nil {
-		return false
-	}
-
-	return t.targets[addr] > 0
+	_, ok := t.targets.Load(addr)
+	return ok
 }

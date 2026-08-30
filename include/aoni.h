@@ -158,6 +158,8 @@ void aoni_client_destroy(aoni_client_t client);
 int32_t aoni_client_do(aoni_client_t client, aoni_task_t *task);
 void aoni_client_batch_do(aoni_client_t client, aoni_task_t *tasks,
                           size_t count);
+int32_t aoni_client_pipeline_do(aoni_client_t client, aoni_task_t *tasks,
+                                size_t count);
 
 /*
  * Full-Duplex Stream Transport (WebSockets, SSE, Streaming gRPC)

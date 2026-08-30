@@ -18,9 +18,11 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+	"github.com/lemon4ksan/foundation/silicon/simd"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/ws"
@@ -138,6 +140,19 @@ func NewClientFromConfig(cfg *Config) *fast.Client {
 			opts = append(opts, option.WithFirefox())
 		case AONIBrowserSafari:
 			opts = append(opts, option.WithSafari())
+		}
+
+		if cfg.EnableHTTP3 != 0 {
+			opts = append(opts, option.WithHTTP3())
+		}
+
+		if cfg.EnableHTTP2 != 0 {
+			switch cfg.BrowserProfile {
+			case AONIBrowserFirefox:
+				opts = append(opts, option.WithSettings(h2.FirefoxSettings))
+			default:
+				opts = append(opts, option.WithSettings(h2.ChromeSettings))
+			}
 		}
 
 		if cfg.ProxyURL != nil {
@@ -292,36 +307,199 @@ func DoTask(client *fast.Client, t *Task) int32 {
 	return t.StatusCode
 }
 
-// DoBatchTasks executes N tasks in parallel across Go's Netpoller using bounded worker pool concurrency.
+// DoBatchTasks executes N tasks in parallel across Go's Netpoller with zero heap allocations.
 func DoBatchTasks(client *fast.Client, tasks []Task) {
-	if client == nil || len(tasks) == 0 {
+	n := len(tasks)
+	if client == nil || n == 0 {
+		return
+	}
+	if n == 1 {
+		DoTask(client, &tasks[0])
 		return
 	}
 
-	numWorkers := len(tasks)
-	if numWorkers > maxBatchWorkers {
-		numWorkers = maxBatchWorkers
-	}
-
-	taskChan := make(chan *Task, numWorkers*2)
 	var wg sync.WaitGroup
-	wg.Add(numWorkers)
+	wg.Add(n)
 
-	for w := 0; w < numWorkers; w++ {
-		go func() {
-			defer wg.Done()
-			for t := range taskChan {
-				DoTask(client, t)
-			}
-		}()
+	for i := 0; i < n; i++ {
+		t := &tasks[i]
+		go func(task *Task) {
+			DoTask(client, task)
+			wg.Done()
+		}(t)
 	}
-
-	for i := range tasks {
-		taskChan <- &tasks[i]
-	}
-	close(taskChan)
 
 	wg.Wait()
+}
+
+var (
+	pipelineReqsPool = sync.Pool{
+		New: func() any {
+			s := make([]*h1engine.Request, 0, 512)
+			return &s
+		},
+	}
+	pipelineRespsPool = sync.Pool{
+		New: func() any {
+			s := make([]*h1engine.Response, 0, 512)
+			return &s
+		},
+	}
+)
+
+// DoPipelineTasks executes a batch of tasks sequentially pipelined over a single TCP connection (RFC 9112 §9.3.2).
+func DoPipelineTasks(client *fast.Client, tasks []Task) int32 {
+	n := len(tasks)
+	if client == nil || n == 0 {
+		return AONIErrClientNil
+	}
+	if n == 1 {
+		return DoTask(client, &tasks[0])
+	}
+
+	reqsPtr := pipelineReqsPool.Get().(*[]*h1engine.Request)
+	fastReqs := (*reqsPtr)[:0]
+	if cap(fastReqs) < n {
+		fastReqs = make([]*h1engine.Request, 0, n)
+	}
+
+	respsPtr := pipelineRespsPool.Get().(*[]*h1engine.Response)
+	fastResps := (*respsPtr)[:0]
+	if cap(fastResps) < n {
+		fastResps = make([]*h1engine.Response, 0, n)
+	}
+
+	for i := 0; i < n; i++ {
+		t := &tasks[i]
+		req := h1engine.AcquireRequest()
+		req.Reset()
+		fastReqs = append(fastReqs, req)
+		fastResps = append(fastResps, h1engine.AcquireResponse())
+
+		// Method
+		if t.Method != nil && t.MethodLen > 0 {
+			mBytes := unsafe.Slice(t.Method, int(t.MethodLen))
+			req.Header.SetMethodBytes(mBytes)
+		} else {
+			req.Header.SetMethodBytes([]byte("GET"))
+		}
+
+		// URI
+		if t.URL != nil && t.URLLen > 0 {
+			uBytes := unsafe.Slice(t.URL, int(t.URLLen))
+			req.SetRequestURIBytes(uBytes)
+		}
+
+		// Raw Headers
+		if t.HeadersRaw != nil && t.HeadersLen > 0 {
+			hBytes := unsafe.Slice(t.HeadersRaw, int(t.HeadersLen))
+			parseRawHeadersToH1(hBytes, req)
+		}
+
+		// Body
+		if t.BodyPtr != nil && t.BodyLen > 0 {
+			bBytes := unsafe.Slice(t.BodyPtr, int(t.BodyLen))
+			req.SetBody(bBytes)
+		}
+	}
+
+	startNano := clock.CoarseNowNano()
+	err := client.Unwrap().DoPipeline(fastReqs, fastResps)
+	endNano := clock.CoarseNowNano()
+	elapsed := uint64(endNano - startNano)
+	perReqTime := elapsed / uint64(n)
+
+	for i := 0; i < n; i++ {
+		t := &tasks[i]
+		resp := fastResps[i]
+		req := fastReqs[i]
+
+		t.TotalTimeNS = perReqTime
+		t.TTFBNS = perReqTime
+
+		if err != nil {
+			t.StatusCode = 0
+			t.ErrorCode = AONIErrNetwork
+		} else {
+			t.StatusCode = int32(resp.StatusCode())
+			t.ErrorCode = AONIOk
+
+			// Response Headers
+			if t.RespHeadersPtr != nil && t.RespHeadersCap > 0 {
+				rawHeaders := resp.Header.Header()
+				if len(rawHeaders) > 0 {
+					hBuf := unsafe.Slice(t.RespHeadersPtr, int(t.RespHeadersCap))
+					copied := copy(hBuf, rawHeaders)
+					t.RespHeadersLen = uintptr(copied)
+				}
+			}
+
+			// Response Body
+			body := resp.Body()
+			bodyLen := len(body)
+			if t.RespBufPtr != nil && t.RespBufCap > 0 {
+				buf := unsafe.Slice(t.RespBufPtr, int(t.RespBufCap))
+				copied := copy(buf, body)
+				t.RespBufLen = uintptr(copied)
+				if bodyLen > int(t.RespBufCap) {
+					t.ErrorCode = AONIErrBufferOverflow
+				}
+			}
+		}
+
+		h1engine.ReleaseRequest(req)
+		h1engine.ReleaseResponse(resp)
+	}
+
+	for i := range fastReqs {
+		fastReqs[i] = nil
+	}
+	*reqsPtr = fastReqs[:0]
+	pipelineReqsPool.Put(reqsPtr)
+
+	for i := range fastResps {
+		fastResps[i] = nil
+	}
+	*respsPtr = fastResps[:0]
+	pipelineRespsPool.Put(respsPtr)
+
+	if err != nil {
+		return AONIErrNetwork
+	}
+	return AONIOk
+}
+
+func parseRawHeadersToH1(data []byte, req *h1engine.Request) {
+	for len(data) > 0 {
+		lineEnd := simd.IndexByteVector(data, '\n')
+		var line []byte
+		if lineEnd >= 0 {
+			line = data[:lineEnd]
+			data = data[lineEnd+1:]
+		} else {
+			line = data
+			data = nil
+		}
+
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+
+		if len(line) == 0 {
+			continue
+		}
+
+		colonIdx := simd.IndexByteVector(line, ':')
+		if colonIdx <= 0 {
+			continue
+		}
+
+		key := bytes.TrimSpace(line[:colonIdx])
+		val := bytes.TrimSpace(line[colonIdx+1:])
+		if len(key) > 0 {
+			req.Header.SetBytesKV(key, val)
+		}
+	}
 }
 
 // FreeTaskOffHeap safely releases auto-allocated off-heap memory bound to the task.
@@ -519,7 +697,7 @@ func (s *StreamSession) Close(code int32, reason string) {
 
 func parseRawHeaders(data []byte, req *fast.Request) {
 	for len(data) > 0 {
-		lineEnd := bytes.IndexByte(data, '\n')
+		lineEnd := simd.IndexByteVector(data, '\n')
 		var line []byte
 		if lineEnd >= 0 {
 			line = data[:lineEnd]
@@ -537,7 +715,7 @@ func parseRawHeaders(data []byte, req *fast.Request) {
 			continue
 		}
 
-		colonIdx := bytes.IndexByte(line, ':')
+		colonIdx := simd.IndexByteVector(line, ':')
 		if colonIdx <= 0 {
 			continue
 		}

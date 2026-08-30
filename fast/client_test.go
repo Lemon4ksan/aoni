@@ -175,18 +175,13 @@ func TestTargetTracker_Concurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			for j := 0; j < iterations; j++ {
+	for range workers {
+		wg.Go(func() {
+			for range iterations {
 				client.TrackHTTPSTarget("example.com:443")
 				assert.True(t, client.IsHTTPSTarget("example.com:443"))
-				client.UntrackHTTPSTarget("example.com:443")
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

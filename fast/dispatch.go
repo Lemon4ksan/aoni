@@ -500,7 +500,6 @@ func (c *Client) setupFastHTTPSchemeAndHost(
 
 	cleanup = func() {
 		if isHTTPS {
-			c.UntrackHTTPSTarget(hostStr)
 			req.URI().SetScheme("https")
 			req.URI().SetHostBytes(origHost)
 

@@ -338,8 +338,9 @@ type Client struct {
 
 	_ cpu.CacheLinePad
 
-	mLock sync.RWMutex
-	mOnce sync.Once
+	lastHC atomic.Pointer[HostClient]
+	mLock  sync.RWMutex
+	mOnce  sync.Once
 
 	_ cpu.CacheLinePad
 
@@ -623,25 +624,33 @@ func (c *Client) DoPipelineTimeout(reqs []*Request, resps []*Response, timeout t
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
+	if last := c.lastHC.Load(); last != nil && last.IsTLS == isTLS && bytes.Equal(last.hostBytes, host) {
+		return last, nil
+	}
+
 	m := c.m
 	if isTLS {
 		m = c.ms
 	}
 
+	hostStr := string(host)
 	c.mLock.RLock()
-	hc, exist := m[string(host)]
+	hc, exist := m[hostStr]
 	c.mLock.RUnlock()
 	if exist {
+		c.lastHC.Store(hc)
 		return hc, nil
 	}
 	c.mLock.Lock()
 	defer c.mLock.Unlock()
-	hc, exist = m[string(host)]
+	hc, exist = m[hostStr]
 	if exist {
+		c.lastHC.Store(hc)
 		return hc, nil
 	}
 	hc = &HostClient{
-		Addr:                          AddMissingPort(string(host), isTLS),
+		Addr:                          AddMissingPort(hostStr, isTLS),
+		hostBytes:                     append([]byte(nil), host...),
 		Transport:                     c.Transport,
 		Name:                          c.Name,
 		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
@@ -676,7 +685,8 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		}
 	}
 
-	m[string(host)] = hc
+	m[hostStr] = hc
+	c.lastHC.Store(hc)
 	if len(m) == 1 {
 		go c.mCleaner(m)
 	}
@@ -837,6 +847,11 @@ const (
 	LIFO
 )
 
+type connStripe struct {
+	sync.Mutex
+	conns []*clientConn
+}
+
 // HostClient balances http requests among hosts listed in Addr.
 //
 // HostClient may be used for balancing load among multiple upstream hosts.
@@ -903,8 +918,11 @@ type HostClient struct {
 	// Client name. Used in User-Agent request header.
 	Name string
 
-	conns []*clientConn
-	addrs []string
+	conns         []*clientConn
+	stripes       [16]connStripe
+	stripeCounter uint32
+	hostBytes     []byte
+	addrs         []string
 
 	// Maximum number of connections which may be established to all hosts
 	// listed in Addr.
@@ -1900,6 +1918,25 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
+	// 1. Striped connection pool fast path (zero contention across CPU cores)
+	if c.MaxConnWaitTimeout <= 0 {
+		startIdx := atomic.AddUint32(&c.stripeCounter, 1) & 15
+		for j := uint32(0); j < 4; j++ {
+			idx := (startIdx + j) & 15
+			stripe := &c.stripes[idx]
+			stripe.Lock()
+			num := len(stripe.conns)
+			if num > 0 {
+				cc = stripe.conns[num-1]
+				stripe.conns[num-1] = nil
+				stripe.conns = stripe.conns[:num-1]
+				stripe.Unlock()
+				return cc, nil
+			}
+			stripe.Unlock()
+		}
+	}
+
 	createConn := false
 	startCleaner := false
 
@@ -2030,6 +2067,20 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 // "keep-alive" state. It does not interrupt any connections currently
 // in use.
 func (c *HostClient) CloseIdleConnections() {
+	for i := 0; i < 16; i++ {
+		stripe := &c.stripes[i]
+		stripe.Lock()
+		scratchStripe := append([]*clientConn{}, stripe.conns...)
+		for j := range stripe.conns {
+			stripe.conns[j] = nil
+		}
+		stripe.conns = stripe.conns[:0]
+		stripe.Unlock()
+		for _, cc := range scratchStripe {
+			c.CloseConn(cc)
+		}
+	}
+
 	c.connsLock.Lock()
 	scratch := append([]*clientConn{}, c.conns...)
 	for i := range c.conns {
@@ -2169,9 +2220,11 @@ var clientConnPool sync.Pool
 func (c *HostClient) ReleaseConn(cc *clientConn) {
 	cc.lastUseTime = clock.CoarseTime()
 	if c.MaxConnWaitTimeout <= 0 {
-		c.connsLock.Lock()
-		c.conns = append(c.conns, cc)
-		c.connsLock.Unlock()
+		idx := atomic.AddUint32(&c.stripeCounter, 1) & 15
+		stripe := &c.stripes[idx]
+		stripe.Lock()
+		stripe.conns = append(stripe.conns, cc)
+		stripe.Unlock()
 		return
 	}
 

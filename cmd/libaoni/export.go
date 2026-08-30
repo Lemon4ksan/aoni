@@ -124,6 +124,24 @@ func aoni_client_batch_do(clientPtr unsafe.Pointer, tasks *C.aoni_task_t, count 
 	DoBatchTasks(client, taskList)
 }
 
+// aoni_client_pipeline_do executes N requests pipelined over a single TCP connection in FIFO order.
+//
+//export aoni_client_pipeline_do
+func aoni_client_pipeline_do(clientPtr unsafe.Pointer, tasks *C.aoni_task_t, count C.size_t) C.int32_t {
+	if clientPtr == nil || tasks == nil || count == 0 {
+		return C.int32_t(AONIErrClientNil)
+	}
+
+	handle := cgo.Handle(uintptr(clientPtr))
+	client, ok := handle.Value().(*fast.Client)
+	if !ok || client == nil {
+		return C.int32_t(AONIErrClientNil)
+	}
+
+	taskList := unsafe.Slice((*Task)(unsafe.Pointer(tasks)), int(count))
+	return C.int32_t(DoPipelineTasks(client, taskList))
+}
+
 // aoni_stream_connect initiates a full-duplex stream (WebSocket / SSE / Streaming gRPC).
 //
 //export aoni_stream_connect
