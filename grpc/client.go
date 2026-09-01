@@ -204,11 +204,12 @@ func validateInitialHeaders(resp *http.Response) error {
 // validateResponseTrailers inspects HTTP/2 response trailers for grpc-status codes.
 func validateResponseTrailers(resp *http.Response) error {
 	trailers := resp.Trailer
-	if len(trailers) == 0 {
+	statusCode := trailers.Get(header.GRPCStatus)
+	if statusCode == "" {
 		trailers = resp.Header
+		statusCode = trailers.Get(header.GRPCStatus)
 	}
 
-	statusCode := trailers.Get(header.GRPCStatus)
 	if statusCode == "" {
 		return ErrMissingGRPCStatus
 	}
