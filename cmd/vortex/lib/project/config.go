@@ -32,6 +32,7 @@ type Config struct {
 	Borrow     BorrowConfig     `yaml:"borrow,omitempty"`
 	Formatting FormattingConfig `yaml:"formatting,omitempty"`
 	Ignore     []string         `yaml:"ignore,omitempty"`
+	Routes     []string         `yaml:"routes,omitempty"`
 	Export     ExportConfig     `yaml:"export,omitempty"`
 	Coverage   CoverageConfig   `yaml:"coverage,omitempty"`
 
@@ -112,6 +113,7 @@ type ContractConfig struct {
 	Harness  string          `yaml:"harness,omitempty"`
 	Mock     string          `yaml:"mock,omitempty"`
 	Ignore   []string        `yaml:"ignore,omitempty"`
+	Routes   []string        `yaml:"routes,omitempty"`
 	Disable  []string        `yaml:"disable,omitempty"`
 	Upstream *UpstreamConfig `yaml:"upstream,omitempty"`
 	Plugins  []PluginConfig  `yaml:"plugins,omitempty"`

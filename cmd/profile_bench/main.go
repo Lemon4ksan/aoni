@@ -1,7 +1,12 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -15,10 +20,14 @@ import (
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
-var respBytes = []byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nOK")
+var respBytes = []byte(
+	"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nOK",
+)
 
 func startMockServer() (net.Listener, string) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
 	}
@@ -29,22 +38,28 @@ func startMockServer() (net.Listener, string) {
 			if err != nil {
 				return
 			}
+
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
+
 				if tcpConn, ok := c.(*net.TCPConn); ok {
 					_ = tcpConn.SetNoDelay(true)
 				}
+
 				buf := make([]byte, 8192)
 				for {
 					n, err := c.Read(buf)
 					if err != nil {
 						return
 					}
+
 					req := buf[:n]
+
 					numReqs := bytes.Count(req, []byte("\r\n\r\n"))
 					if numReqs == 0 {
 						numReqs = 1
 					}
+
 					if numReqs == 1 {
 						if _, wErr := c.Write(respBytes); wErr != nil {
 							return
@@ -67,7 +82,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	listener, addr := startMockServer()
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	targetURL := "http://" + addr + "/"
 
@@ -76,10 +91,12 @@ func main() {
 	// Warmup
 	req := fast.NewRequest(nil)
 	req.SetURIBytes([]byte(targetURL))
+
 	resp, err := client.Do(req)
 	if err == nil {
-		resp.Close()
+		_ = resp.Close()
 	}
+
 	req.Release()
 
 	// Start CPU Profiling
@@ -87,7 +104,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer cpuFile.Close()
+
+	defer func() { _ = cpuFile.Close() }()
 
 	if err := pprof.StartCPUProfile(cpuFile); err != nil {
 		panic(err)
@@ -95,8 +113,10 @@ func main() {
 
 	fmt.Printf(">>> Profiling 12 threads x 256 in-flight pipeline for 5 seconds against %s...\n", targetURL)
 
-	var completed atomic.Uint64
-	var stop atomic.Bool
+	var (
+		completed atomic.Uint64
+		stop      atomic.Bool
+	)
 
 	var wg sync.WaitGroup
 	wg.Add(12)
@@ -109,6 +129,7 @@ func main() {
 
 			batchSize := 256
 			reqs := make([]*h1engine.Request, batchSize)
+
 			resps := make([]*h1engine.Response, batchSize)
 			for j := 0; j < batchSize; j++ {
 				r := h1engine.AcquireRequest()

@@ -22,7 +22,7 @@ func NewCommand() base.Command {
 }
 
 func (c *Cmd) Name() string      { return "traffic" }
-func (c *Cmd) Aliases() []string { return []string{"cache"} }
+func (c *Cmd) Aliases() []string { return nil }
 func (c *Cmd) Synopsis() string {
 	return "Manage and inspect local traffic captures, secrets vault, and live HAR recording"
 }
@@ -75,9 +75,6 @@ func (c *Cmd) Run(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	case "prune", "clean":
 		return c.runPrune(ctx, subArgs, stdout, stderr)
 
-	case "cache":
-		return c.Run(ctx, subArgs, stdout, stderr)
-
 	case "help", "-h", "--help":
 		return c.printHelp(stderr)
 
@@ -93,13 +90,13 @@ func (c *Cmd) printHelp(stderr io.Writer) error {
 	fmt.Fprintf(stderr, "  vortex traffic record [flags] [-- cmd]           Capture live HTTP/HTTPS traffic\n")
 	fmt.Fprintf(stderr, "  vortex traffic inspect <session|file.har>        Inspect HTTP requests in table view\n")
 	fmt.Fprintf(stderr, "  vortex traffic diff <sessionA> <sessionB>        Detect parameter and schema deltas\n")
-	fmt.Fprintf(stderr, "  vortex traffic list                              List all cached traffic sessions\n")
-	fmt.Fprintf(stderr, "  vortex traffic store <files...>                  Archive HAR files into cache\n")
+	fmt.Fprintf(stderr, "  vortex traffic list                              List all recorded traffic sessions\n")
+	fmt.Fprintf(stderr, "  vortex traffic store <files...>                  Archive HAR files into traffic store\n")
 	fmt.Fprintf(stderr, "  vortex traffic move <files...>                   Ingest HAR files and delete originals\n")
 	fmt.Fprintf(stderr, "  vortex traffic sanitize <file> -out=<clean>      Export scrubbed, Git-safe HAR\n")
-	fmt.Fprintf(stderr, "  vortex traffic export <id|hash> -out=<file>      Restore uncompressed HAR from cache\n")
+	fmt.Fprintf(stderr, "  vortex traffic export <id|hash> -out=<file>      Restore uncompressed HAR from store\n")
 	fmt.Fprintf(stderr, "  vortex traffic secrets [list|get|set|clear]      Manage local credentials vault\n")
-	fmt.Fprintf(stderr, "  vortex traffic delete <id|hash...>               Delete specific cached sessions\n")
+	fmt.Fprintf(stderr, "  vortex traffic delete <id|hash...>               Delete specific traffic sessions\n")
 	fmt.Fprintf(stderr, "  vortex traffic prune [--all]                     Clean up expired/unused traffic\n\n")
 
 	return nil

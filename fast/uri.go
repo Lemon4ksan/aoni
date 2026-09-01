@@ -19,9 +19,9 @@ import (
 
 // resolveTargetFastURI resolves and sets the request URI using pre-parsed BaseURL bytes with zero allocations (RFC 3986 §3 & §5.2).
 func (c *Client) resolveTargetFastURI(fastReq *h1engine.Request, path string) error {
-	// Zero-allocation fast path for absolute-path references and simple relative paths without dot segments
+	// Zero-allocation fast path for absolute-path references and simple relative paths without dot segments and without query/fragment
 	if len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 && (len(path) < 2 || path[1] != '/') &&
-		!urlkit.IsAbsURL(path) {
+		!urlkit.IsAbsURL(path) && !strings.ContainsAny(path, "?#") {
 		if path[0] == '/' {
 			c.setFastURI(fastReq, path)
 			return nil

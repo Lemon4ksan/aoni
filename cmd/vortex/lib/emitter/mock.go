@@ -361,9 +361,15 @@ func emitMethodRouteMatch(buf *bytes.Buffer, m *ir.MethodIR) {
 				}
 			}
 
-			if pathIdx != -1 {
+			switch {
+			case pathIdx != -1:
 				fmt.Fprintf(buf, "\t\t%s := parts[%d]\n", rawValName, pathIdx)
-			} else {
+			case p.Location == ir.LocFormFields || p.Location == ir.LocMultipartField:
+				fmt.Fprintf(buf, "\t\t%s := r.FormValue(%q)\n", rawValName, wireKey)
+				fmt.Fprintf(buf, "\t\tif %s == \"\" {\n", rawValName)
+				fmt.Fprintf(buf, "\t\t\t%s = r.URL.Query().Get(%q)\n", rawValName, wireKey)
+				fmt.Fprintf(buf, "\t\t}\n")
+			default:
 				fmt.Fprintf(buf, "\t\t%s := r.URL.Query().Get(%q)\n", rawValName, wireKey)
 				fmt.Fprintf(buf, "\t\tif %s == \"\" {\n", rawValName)
 				fmt.Fprintf(buf, "\t\t\tif len(parts) > 0 {\n\t\t\t\t%s = parts[len(parts)-1]\n\t\t\t}\n", rawValName)

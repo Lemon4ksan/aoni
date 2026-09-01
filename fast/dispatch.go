@@ -174,7 +174,7 @@ func (c *Client) raceProtocolHandshakes(
 }
 
 func drainLateRaceResponses(results chan raceResult) {
-	timer := pool.AcquireTimer(2 * time.Second)
+	timer := pool.AcquireTimer(500 * time.Millisecond)
 	defer pool.ReleaseTimer(timer)
 
 	for range 2 {

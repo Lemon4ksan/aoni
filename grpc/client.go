@@ -88,6 +88,8 @@ func Invoke[Resp any](
 		return nil, err
 	}
 
+	_, _ = io.Copy(io.Discard, resp.Body)
+
 	if err := validateResponseTrailers(resp); err != nil {
 		return nil, err
 	}
@@ -127,6 +129,8 @@ func InvokeInto(
 	if _, err := UnmarshalFrame(resp.Body, target); err != nil {
 		return err
 	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return validateResponseTrailers(resp)
 }

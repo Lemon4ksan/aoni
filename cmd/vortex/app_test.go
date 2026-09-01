@@ -1518,54 +1518,54 @@ func TestApp_Cache_Workflow(t *testing.T) {
 
 	app := newTestApp(&stdout, &stderr)
 
-	// 1. vortex traffic cache store --move
-	err = app.Run(context.Background(), []string{"traffic", "cache", "store", "--move", harFile})
+	// 1. vortex traffic move
+	err = app.Run(context.Background(), []string{"traffic", "move", harFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Moved")
 	require.NoFileExists(t, harFile)
 
-	// 2. vortex traffic cache list
+	// 2. vortex traffic list
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"traffic", "cache", "list"})
+	err = app.Run(context.Background(), []string{"traffic", "list"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "traffic")
 	require.Contains(t, stdout.String(), "api.example.com")
 
-	// 3. vortex traffic cache show
+	// 3. vortex traffic show
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"traffic", "cache", "show", "traffic"})
+	err = app.Run(context.Background(), []string{"traffic", "show", "traffic"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "traffic")
 	require.Contains(t, stdout.String(), "1 total entries")
 
-	// 4. vortex traffic cache secrets list & get
+	// 4. vortex traffic secrets list & get
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"traffic", "cache", "secrets", "list"})
+	err = app.Run(context.Background(), []string{"traffic", "secrets", "list"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "AUTH_TOKEN")
 	require.Contains(t, stdout.String(), "GOOGLE_API_KEY")
 
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"traffic", "cache", "secrets", "get", "AUTH_TOKEN"})
+	err = app.Run(context.Background(), []string{"traffic", "secrets", "get", "AUTH_TOKEN"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "sample_secret_token_123")
 
-	// 5. vortex traffic cache export
+	// 5. vortex traffic export
 	stdout.Reset()
 
 	restoredFile := filepath.Join(tempDir, "restored.har")
-	err = app.Run(context.Background(), []string{"traffic", "cache", "export", "traffic", "-out=" + restoredFile})
+	err = app.Run(context.Background(), []string{"traffic", "export", "traffic", "-out=" + restoredFile})
 	require.NoError(t, err)
 	require.FileExists(t, restoredFile)
 
-	// 6. vortex traffic cache prune
+	// 6. vortex traffic prune
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"traffic", "cache", "prune", "--all"})
+	err = app.Run(context.Background(), []string{"traffic", "prune", "--all"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Removed 1 cached traffic session(s)")
 }

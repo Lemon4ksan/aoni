@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/jsbundle"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/pipeline"
@@ -426,9 +428,66 @@ func runOpenAPIImport(_ context.Context, opts *importOptions, stdout io.Writer) 
 		}
 	}
 
-	doc, err := openapi.LoadSpecWithMode(opts.inputSpec, specData, opts.resolvedMode)
-	if err != nil {
-		return fmt.Errorf("loading spec: %w", err)
+	var (
+		doc      *openapi.Document
+		rawBytes []byte
+	)
+	switch {
+	case len(specData) > 0:
+		rawBytes = specData
+	case strings.HasPrefix(opts.inputSpec, "cache:"):
+		cacheID := strings.TrimPrefix(opts.inputSpec, "cache:")
+
+		data, _, err := cache.GetTraffic(".", cacheID)
+		if err == nil && len(data) > 0 {
+			rawBytes = data
+		}
+
+	case len(opts.specList) == 1 && !strings.Contains(opts.specList[0], "*"):
+		data, err := os.ReadFile(opts.specList[0])
+		if err == nil && len(data) > 0 {
+			rawBytes = data
+		}
+	}
+
+	var (
+		ignorePatterns []string
+		routeTemplates []string
+	)
+	if rt != nil && rt.Config != nil {
+		ignorePatterns = append(ignorePatterns, rt.Config.Ignore...)
+
+		routeTemplates = append(routeTemplates, rt.Config.Routes...)
+		if ct := rt.Config.FindContract(opts.targetOut); ct != nil {
+			ignorePatterns = append(ignorePatterns, ct.Ignore...)
+			routeTemplates = append(routeTemplates, ct.Routes...)
+		}
+	}
+
+	ignorePatterns = append(ignorePatterns, opts.excludePaths...)
+
+	if len(rawBytes) > 0 {
+		format, _ := ingest.DetectFormat(rawBytes)
+		if format == ingest.FormatHAR || strings.HasSuffix(opts.inputSpec, ".har") {
+			var hErr error
+
+			doc, hErr = ingest.HARToOpenAPIOpts(rawBytes, ingest.IngestOptions{
+				IgnorePatterns: ignorePatterns,
+				RouteTemplates: routeTemplates,
+			})
+			if hErr != nil {
+				return fmt.Errorf("parsing HAR spec: %w", hErr)
+			}
+		}
+	}
+
+	if doc == nil {
+		var err error
+
+		doc, err = openapi.LoadSpecWithMode(opts.inputSpec, specData, opts.resolvedMode)
+		if err != nil {
+			return fmt.Errorf("loading spec: %w", err)
+		}
 	}
 
 	// Check if existing file is present for semantic reconciliation (Git-merge for APIs)

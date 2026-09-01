@@ -81,12 +81,19 @@ func (r *Runtime) ResolveContract(target string) (*ContractTarget, error) {
 				absPath = filepath.Join(r.RootDir, ct.File)
 			}
 
+			svcName := ct.Name
+			if svcName == "" || strings.EqualFold(svcName, ct.Package) {
+				svcName = "API"
+			} else if len(svcName) > 0 && (svcName[0] >= 'a' && svcName[0] <= 'z') {
+				svcName = strings.ToUpper(svcName[:1]) + svcName[1:]
+			}
+
 			return &ContractTarget{
 				Name:        ct.Name,
 				FilePath:    ct.File,
 				AbsPath:     absPath,
 				Package:     ct.Package,
-				Service:     ct.Name,
+				Service:     svcName,
 				ConfigEntry: ct,
 			}, nil
 		}
@@ -101,12 +108,19 @@ func (r *Runtime) ResolveContract(target string) (*ContractTarget, error) {
 			absPath = filepath.Join(r.RootDir, ct.File)
 		}
 
+		svcName := ct.Name
+		if svcName == "" || strings.EqualFold(svcName, ct.Package) {
+			svcName = "API"
+		} else if len(svcName) > 0 && (svcName[0] >= 'a' && svcName[0] <= 'z') {
+			svcName = strings.ToUpper(svcName[:1]) + svcName[1:]
+		}
+
 		return &ContractTarget{
 			Name:        ct.Name,
 			FilePath:    ct.File,
 			AbsPath:     absPath,
 			Package:     ct.Package,
-			Service:     ct.Name,
+			Service:     svcName,
 			ConfigEntry: ct,
 		}, nil
 	}

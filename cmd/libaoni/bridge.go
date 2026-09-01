@@ -497,7 +497,7 @@ func parseRawHeadersToH1(data []byte, req *h1engine.Request) {
 		key := bytes.TrimSpace(line[:colonIdx])
 		val := bytes.TrimSpace(line[colonIdx+1:])
 		if len(key) > 0 {
-			req.Header.SetBytesKV(key, val)
+			req.Header.AddBytesKV(key, val)
 		}
 	}
 }
@@ -723,7 +723,7 @@ func parseRawHeaders(data []byte, req *fast.Request) {
 		key := bytes.TrimSpace(line[:colonIdx])
 		val := bytes.TrimSpace(line[colonIdx+1:])
 		if len(key) > 0 {
-			req.SetHeaderBytes(key, val)
+			req.AddHeaderBytes(key, val)
 		}
 	}
 }

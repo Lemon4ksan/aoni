@@ -280,6 +280,33 @@ func (e *MergeEngine) ReconcileService(
 		}
 	}
 
+	// Pass 2.5: Match incoming literal paths against existing parameterized route templates
+	if existingSvc != nil {
+		for _, iop := range incomingOps {
+			if matchedIncoming[iop] != nil {
+				continue
+			}
+
+			for _, m := range existingSvc.Methods {
+				if matchedExisting[m] != nil {
+					continue
+				}
+
+				if !strings.EqualFold(m.HTTPMethod, iop.httpMethod) {
+					continue
+				}
+
+				if m.Path != nil && m.Path.RawTemplate != "" {
+					if ok, _ := matchRouteTemplate(m.Path.RawTemplate, iop.rawPath); ok {
+						matchedIncoming[iop] = m
+						matchedExisting[m] = iop
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Pass 3: Match by normalized Method Name
 	usedMethodNames := make(map[string]int)
 	for _, iop := range incomingOps {
@@ -360,7 +387,18 @@ func (e *MergeEngine) ReconcileService(
 		}
 	}
 
-	// Step C: Assemble Complete Go Source File
+	// Step C: Prepare schemas and preserved custom types
+	var schemasBuf bytes.Buffer
+	if doc.Components != nil && len(doc.Components.Schemas) > 0 {
+		writeSchemas(&schemasBuf, doc.Components.Schemas, ImportConfig{TypeMap: cfg.TypeMap})
+	}
+
+	var customTypesBuf bytes.Buffer
+	if doc.Components != nil {
+		preserveExistingTypes(&customTypesBuf, existingAPISrc, doc.Components.Schemas)
+	}
+
+	// Step D: Assemble Complete Go Source File
 	var fullBuf bytes.Buffer
 
 	pkgName := cfg.PackageName
@@ -377,7 +415,9 @@ func (e *MergeEngine) ReconcileService(
 	fullBuf.WriteString("import (\n")
 	fullBuf.WriteString("\t\"context\"\n")
 
-	if bytes.Contains(methodsBuf.Bytes(), []byte("time.Time")) {
+	allBodies := bytes.Join([][]byte{methodsBuf.Bytes(), schemasBuf.Bytes(), customTypesBuf.Bytes()}, []byte("\n"))
+
+	if bytes.Contains(allBodies, []byte("time.Time")) {
 		fullBuf.WriteString("\t\"time\"\n")
 	}
 
@@ -389,7 +429,7 @@ func (e *MergeEngine) ReconcileService(
 				pkgPath := rawType[:dotIdx]
 
 				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
-				if bytes.Contains(methodsBuf.Bytes(), []byte(short)) {
+				if bytes.Contains(allBodies, []byte(short)) {
 					if !slices.Contains(customImports, pkgPath) {
 						customImports = append(customImports, pkgPath)
 					}
@@ -452,16 +492,13 @@ func (e *MergeEngine) ReconcileService(
 	fullBuf.Write(methodsBuf.Bytes())
 	fullBuf.WriteString("}\n\n")
 
-	// Step D: Append and preserve Schemas / Models
-	if doc.Components != nil && len(doc.Components.Schemas) > 0 {
-		var schemasBuf bytes.Buffer
-		writeSchemas(&schemasBuf, doc.Components.Schemas, ImportConfig{TypeMap: cfg.TypeMap})
+	// Append Schemas and custom hand-written types
+	if schemasBuf.Len() > 0 {
 		fullBuf.Write(schemasBuf.Bytes())
 	}
 
-	// Step E: Preserve any custom hand-written types from existing file
-	if doc.Components != nil {
-		preserveExistingTypes(&fullBuf, existingAPISrc, doc.Components.Schemas)
+	if customTypesBuf.Len() > 0 {
+		fullBuf.Write(customTypesBuf.Bytes())
 	}
 
 	formatted, err := format.Source(fullBuf.Bytes())
@@ -506,6 +543,12 @@ func (e *MergeEngine) reconcileMethodNode(
 
 	// 2. Upstream Route directive
 	cleanPath := strings.TrimPrefix(iop.rawPath, "/")
+	if existing.Path != nil && existing.Path.RawTemplate != "" {
+		if ok, _ := matchRouteTemplate(existing.Path.RawTemplate, cleanPath); ok {
+			cleanPath = strings.TrimPrefix(existing.Path.RawTemplate, "/")
+		}
+	}
+
 	fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(iop.httpMethod), cleanPath)
 
 	// 3. Upstream OperationID binding
@@ -582,11 +625,12 @@ func (e *MergeEngine) reconcileMethodNode(
 	}
 
 	// Return type
-	returnType := determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
-	if returnType == "" {
-		if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" {
-			returnType = existing.Return.SuccessType.Name
-		}
+	returnType := ""
+	if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" &&
+		existing.Return.SuccessType.Name != "any" && existing.Return.SuccessType.Name != "map[string]any" {
+		returnType = existing.Return.SuccessType.Name
+	} else {
+		returnType = determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
 	}
 
 	returnSig := "error"
@@ -773,6 +817,16 @@ func (e *MergeEngine) buildReconciledParams(
 		}
 	}
 
+	if len(params.path) == 0 && existing.Path != nil && existing.Path.RawTemplate != "" {
+		if ok, _ := matchRouteTemplate(existing.Path.RawTemplate, iop.rawPath); ok {
+			for _, p := range existing.Params {
+				if p.Location == ir.LocPath {
+					paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
+				}
+			}
+		}
+	}
+
 	for _, p := range params.query {
 		wire := strings.ToLower(p.Name)
 		goName := toCamelCase(p.Name)
@@ -851,11 +905,15 @@ func preserveExistingTypes(buf *bytes.Buffer, existingAPISrc []byte, incomingSch
 			typeName := typeSpec.Name.Name
 			// If incoming OpenAPI schemas already defines this type, let writeSchemas handle it
 			if incomingSchemas != nil {
-				if _, exists := incomingSchemas[typeName]; exists {
-					continue
+				matched := false
+				for k := range incomingSchemas {
+					if toPascalCase(k) == typeName || strings.EqualFold(k, typeName) {
+						matched = true
+						break
+					}
 				}
 
-				if _, exists := incomingSchemas[strings.ToLower(typeName)]; exists {
+				if matched {
 					continue
 				}
 			}
@@ -921,4 +979,56 @@ func isManagedDirective(line string) bool {
 	}
 
 	return slices.Contains(managedDirectives, strings.ToLower(fields[0]))
+}
+
+func matchRouteTemplate(template, candidate string) (bool, map[string]string) {
+	tClean := strings.Trim(template, "/")
+	cClean := strings.Trim(candidate, "/")
+
+	if tClean == "" && cClean == "" {
+		return true, nil
+	}
+
+	tParts := strings.Split(tClean, "/")
+	cParts := strings.Split(cClean, "/")
+
+	if len(tParts) != len(cParts) {
+		return false, nil
+	}
+
+	params := make(map[string]string)
+	for i := range tParts {
+		tp := tParts[i]
+		cp := cParts[i]
+
+		if strings.HasPrefix(tp, "{") && strings.HasSuffix(tp, "}") {
+			pName := strings.TrimSuffix(strings.TrimPrefix(tp, "{"), "}")
+
+			if cp == "" {
+				return false, nil
+			}
+
+			params[pName] = cp
+
+			continue
+		}
+
+		if strings.HasPrefix(tp, ":") {
+			pName := strings.TrimPrefix(tp, ":")
+
+			if cp == "" {
+				return false, nil
+			}
+
+			params[pName] = cp
+
+			continue
+		}
+
+		if !strings.EqualFold(tp, cp) {
+			return false, nil
+		}
+	}
+
+	return true, params
 }

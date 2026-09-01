@@ -63,9 +63,19 @@ type HARContent struct {
 	Encoding string `json:"encoding,omitempty"`
 }
 
-// HARToOpenAPI transforms one or more recorded W3C HAR 1.2 logs into an OpenAPI 3.0 specification,
-// automatically unifying query parameters, status codes, and schema object properties.
-func HARToOpenAPI(data []byte) (*openapi.Document, error) {
+// IngestOptions configures HAR traffic parsing with ignore and route template rewrite rules.
+type IngestOptions struct {
+	IgnorePatterns []string
+	RouteTemplates []string
+}
+
+// HARToOpenAPI transforms one or more recorded W3C HAR 1.2 logs into an OpenAPI 3.0 specification.
+func HARToOpenAPI(data []byte, ignorePatterns ...string) (*openapi.Document, error) {
+	return HARToOpenAPIOpts(data, IngestOptions{IgnorePatterns: ignorePatterns})
+}
+
+// HARToOpenAPIOpts transforms recorded HAR logs into OpenAPI 3.0 specification applying IngestOptions.
+func HARToOpenAPIOpts(data []byte, opts IngestOptions) (*openapi.Document, error) {
 	var har HARLog
 	if err := json.Unmarshal(data, &har); err != nil {
 		return nil, fmt.Errorf("parsing HAR JSON: %w", err)
@@ -97,8 +107,17 @@ func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 			cleanPath = "/"
 		}
 
+		var matchedParams map[string]string
+		for _, tmpl := range opts.RouteTemplates {
+			if ok, p := MatchRouteTemplate(tmpl, cleanPath); ok {
+				cleanPath = "/" + strings.Trim(tmpl, "/")
+				matchedParams = p
+				break
+			}
+		}
+
 		method := strings.ToUpper(entry.Request.Method)
-		if method == "OPTIONS" || method == "HEAD" || isIgnoredHAREndpoint(cleanPath, rawURL) {
+		if method == "OPTIONS" || method == "HEAD" || isIgnoredHAREndpoint(cleanPath, rawURL, opts.IgnorePatterns...) {
 			continue
 		}
 
@@ -107,6 +126,27 @@ func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 		if pathItem == nil {
 			pathItem = &openapi.PathItem{}
 			doc.Paths[cleanPath] = pathItem
+		}
+
+		if len(matchedParams) > 0 {
+			for pName := range matchedParams {
+				exists := false
+				for _, p := range pathItem.Parameters {
+					if p != nil && p.In == "path" && p.Name == pName {
+						exists = true
+						break
+					}
+				}
+
+				if !exists {
+					pathItem.Parameters = append(pathItem.Parameters, &openapi.Parameter{
+						Name:     pName,
+						In:       "path",
+						Required: true,
+						Schema:   &openapi.Schema{Type: openapi.TypeArray{"string"}},
+					})
+				}
+			}
 		}
 
 		var op *openapi.Operation
@@ -441,7 +481,7 @@ func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 	return doc, nil
 }
 
-func isIgnoredHAREndpoint(cleanPath, rawURL string) bool {
+func isIgnoredHAREndpoint(cleanPath, rawURL string, customPatterns ...string) bool {
 	lowerPath := strings.ToLower(cleanPath)
 	lowerURL := strings.ToLower(rawURL)
 
@@ -452,11 +492,10 @@ func isIgnoredHAREndpoint(cleanPath, rawURL string) bool {
 		}
 	}
 
-	// 2. Telemetry, analytics, and noise tracking endpoints
+	// 2. Generic telemetry, analytics, and noise tracking endpoints
 	noisePatterns := []string{
-		"/gen_204", "/csi", "/log", "/batch", "/survey/", "/cookienotificationbar",
+		"/gen_204", "/csi", "/survey/", "/cookienotificationbar",
 		"/static/proxy.html", "/pagead/", "google-analytics.com", "doubleclick.net",
-		"/a/acg8", // Google user profile photos
 	}
 	for _, p := range noisePatterns {
 		if strings.Contains(lowerPath, p) || strings.Contains(lowerURL, p) {
@@ -464,7 +503,69 @@ func isIgnoredHAREndpoint(cleanPath, rawURL string) bool {
 		}
 	}
 
+	// 3. User / workspace configured ignore patterns (from .vortex.yml or flags)
+	for _, p := range customPatterns {
+		pLower := strings.ToLower(strings.TrimSpace(p))
+		if pLower != "" && (strings.Contains(lowerPath, pLower) || strings.Contains(lowerURL, pLower)) {
+			return true
+		}
+	}
+
 	return false
+}
+
+// MatchRouteTemplate checks if a candidate URL path matches a parameterized route template.
+// E.g. "rotor/session/{sessionId}/clone" matches "/rotor/session/Aj49fl3xbpuaodtnfoAk3i/clone".
+func MatchRouteTemplate(template, candidate string) (bool, map[string]string) {
+	tClean := strings.Trim(template, "/")
+	cClean := strings.Trim(candidate, "/")
+
+	if tClean == "" && cClean == "" {
+		return true, nil
+	}
+
+	tParts := strings.Split(tClean, "/")
+	cParts := strings.Split(cClean, "/")
+
+	if len(tParts) != len(cParts) {
+		return false, nil
+	}
+
+	params := make(map[string]string)
+	for i := range tParts {
+		tp := tParts[i]
+		cp := cParts[i]
+
+		if strings.HasPrefix(tp, "{") && strings.HasSuffix(tp, "}") {
+			pName := strings.TrimSuffix(strings.TrimPrefix(tp, "{"), "}")
+
+			if cp == "" {
+				return false, nil
+			}
+
+			params[pName] = cp
+
+			continue
+		}
+
+		if strings.HasPrefix(tp, ":") {
+			pName := strings.TrimPrefix(tp, ":")
+
+			if cp == "" {
+				return false, nil
+			}
+
+			params[pName] = cp
+
+			continue
+		}
+
+		if !strings.EqualFold(tp, cp) {
+			return false, nil
+		}
+	}
+
+	return true, params
 }
 
 func isCredentialHeader(name string) bool {
