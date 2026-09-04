@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lemon4ksan/aoni/internal/compress/zstd"
-	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/foundation/codec/compress/zstd"
 )
 
 const (
@@ -20,23 +20,12 @@ const (
 	CompressZstdBestCompression
 )
 
-var zstdDecoderStorage = pool.NewPerPStorage(func() *zstd.Decoder {
-	dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true))
-	return dec
-})
-
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
-	dec := zstdDecoderStorage.Get()
-	if err := dec.Reset(r); err != nil {
-		return nil, err
-	}
-
-	return dec, nil
+	return compress.AcquireZstdReader(r)
 }
 
 func releaseZstdReader(zr *zstd.Decoder) {
-	_ = zr.Reset(nil)
-	zstdDecoderStorage.Put(zr)
+	compress.ReleaseZstdReader(zr)
 }
 
 // AppendZstdBytesLevel appends src to dst.
@@ -85,11 +74,5 @@ func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendUnzstdBytes appends unzstd src to dst and returns the resulting dst.
 func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
-	dec := zstdDecoderStorage.Get()
-	defer func() {
-		_ = dec.Reset(nil)
-		zstdDecoderStorage.Put(dec)
-	}()
-
-	return dec.DecodeAll(src, dst)
+	return compress.Unzstd(src, dst)
 }

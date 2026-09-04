@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/compress"
 	fio "github.com/lemon4ksan/foundation/iokit"
 
-	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 )
 

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	stdpath "path"
 	"path/filepath"
 	"slices"
 	"time"
@@ -489,6 +490,11 @@ func (r *RequestBuilder) SetOutputFromHeader(targetDir string) *RequestBuilder {
 	return r
 }
 
+// SetOutputDirectory sets the target directory for streamed file downloads.
+func (r *RequestBuilder) SetOutputDirectory(targetDir string) *RequestBuilder {
+	return r.SetOutputFromHeader(targetDir)
+}
+
 // SetBody sets the payload body to be serialized into the request.
 //
 // Automatically detects the appropriate serialization:
@@ -582,6 +588,11 @@ func (r *RequestBuilder) SetError(errResult any) *RequestBuilder {
 func (r *RequestBuilder) SetOutput(filePath string) *RequestBuilder {
 	r.outputFile = filePath
 	return r
+}
+
+// SetOutputFile is an alias for [RequestBuilder.SetOutput].
+func (r *RequestBuilder) SetOutputFile(filePath string) *RequestBuilder {
+	return r.SetOutput(filePath)
 }
 
 // SetDownloadProgress registers a [ProgressFunc] callback monitoring response stream reads.
@@ -937,10 +948,7 @@ func (r *RequestBuilder) executeDownload(
 	mods []RequestModifier,
 	outputFile string,
 ) (*http.Response, error) {
-	maxAttempts := 5
-	if r.retryOverride != nil && r.retryOverride.MaxAttempts > 0 {
-		maxAttempts = r.retryOverride.MaxAttempts
-	}
+	maxAttempts := r.resolveMaxDownloadAttempts()
 
 	var (
 		lastResp *http.Response
@@ -949,12 +957,13 @@ func (r *RequestBuilder) executeDownload(
 
 	for attempt := range maxAttempts {
 		if attempt > 0 {
-			backoffDelay := time.Duration(1<<attempt) * 100 * time.Millisecond
-			if r.retryOverride != nil && r.retryOverride.Backoff > 0 {
-				backoffDelay = r.retryOverride.Backoff * time.Duration(attempt)
-			}
+			if err := sleepWithContext(ctx, calculateDownloadBackoff(attempt, r.retryOverride)); err != nil {
+				if lastResp != nil && lastResp.Body != nil {
+					_ = lastResp.Body.Close()
+				}
 
-			time.Sleep(backoffDelay)
+				return nil, err
+			}
 		}
 
 		resp, err := client.Request(ctx, method, path, mods...)
@@ -963,7 +972,7 @@ func (r *RequestBuilder) executeDownload(
 			continue
 		}
 
-		if resp.StatusCode >= 500 {
+		if isRetryableDownloadStatus(resp.StatusCode) {
 			lastResp = resp
 			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
 			_ = resp.Body.Close()
@@ -971,7 +980,7 @@ func (r *RequestBuilder) executeDownload(
 			continue
 		}
 
-		if resp.StatusCode >= 400 {
+		if resp.StatusCode >= http.StatusBadRequest {
 			return resp, &Error{
 				Op:   "download",
 				Path: path,
@@ -980,37 +989,10 @@ func (r *RequestBuilder) executeDownload(
 			}
 		}
 
-		targetFile := outputFile
-		if targetFile == "" && r.outputDirectory != "" {
-			filename := sanitize.ExtractFilename(resp.Header.Get(header.ContentDisposition))
-			if filename == "" {
-				filename = filepath.Base(path)
-				if filename == "." || filename == "/" {
-					filename = "downloaded_file"
-				}
-			}
-
-			targetFile = filepath.Join(r.outputDirectory, filename)
-		}
-
+		targetFile := resolveDownloadTarget(resp, path, outputFile, r.outputDirectory)
 		if targetFile != "" {
-			if err := os.MkdirAll(filepath.Dir(targetFile), 0o750); err != nil && !os.IsExist(err) {
-				_ = resp.Body.Close()
-				return nil, err
-			}
-
-			out, err := os.Create(targetFile)
-			if err != nil {
-				_ = resp.Body.Close()
-				return nil, err
-			}
-
-			_, copyErr := iokit.CopyZeroAlloc(out, resp.Body)
-			_ = out.Close()
-			_ = resp.Body.Close()
-
-			if copyErr != nil {
-				lastErr = copyErr
+			if err := saveResponseBodyToFile(resp, targetFile); err != nil {
+				lastErr = err
 				continue
 			}
 		}
@@ -1023,6 +1005,99 @@ func (r *RequestBuilder) executeDownload(
 	}
 
 	return lastResp, nil
+}
+
+func (r *RequestBuilder) resolveMaxDownloadAttempts() int {
+	if r.retryOverride != nil && r.retryOverride.MaxAttempts > 0 {
+		return r.retryOverride.MaxAttempts
+	}
+
+	return 5
+}
+
+func calculateDownloadBackoff(attempt int, override *core.RetryOverride) time.Duration {
+	if attempt <= 0 {
+		return 0
+	}
+
+	if override != nil && override.Backoff > 0 {
+		return override.Backoff * time.Duration(attempt)
+	}
+
+	return time.Duration(1<<attempt) * 100 * time.Millisecond
+}
+
+func isRetryableDownloadStatus(statusCode int) bool {
+	return statusCode >= http.StatusInternalServerError
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func resolveDownloadTarget(resp *http.Response, targetPath, outputFile, outputDirectory string) string {
+	if outputFile != "" {
+		return outputFile
+	}
+
+	if outputDirectory == "" {
+		return ""
+	}
+
+	var filename string
+	if resp != nil && resp.Header != nil {
+		if cd := resp.Header.Get(header.ContentDisposition); cd != "" {
+			filename = sanitize.ExtractFilename(cd)
+		}
+	}
+
+	if filename == "" {
+		p := targetPath
+		if u, err := url.Parse(targetPath); err == nil && u.Path != "" {
+			p = u.Path
+		}
+
+		filename = stdpath.Base(p)
+		if filename == "." || filename == "/" || filename == "" {
+			filename = "downloaded_file"
+		}
+	}
+
+	return filepath.Join(outputDirectory, filename)
+}
+
+func saveResponseBodyToFile(resp *http.Response, targetFile string) error {
+	if targetFile == "" || resp == nil || resp.Body == nil {
+		return nil
+	}
+
+	defer resp.Body.Close()
+
+	if err := os.MkdirAll(filepath.Dir(targetFile), 0o750); err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	out, err := os.Create(targetFile)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, copyErr := iokit.CopyZeroAlloc(out, resp.Body)
+
+	return copyErr
 }
 
 // FetchTo executes the request and unmarshals the response into T.

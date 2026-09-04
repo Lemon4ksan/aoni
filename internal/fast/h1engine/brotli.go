@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lemon4ksan/aoni/internal/compress/brotli"
+	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/foundation/codec/compress/brotli"
 )
 
 // Supported compression levels.
@@ -20,11 +21,11 @@ const (
 )
 
 func acquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
-	return brotli.AcquireReader(r), nil
+	return compress.AcquireBrotliReader(r)
 }
 
 func releaseBrotliReader(zr *brotli.Reader) {
-	brotli.ReleaseReader(zr)
+	compress.ReleaseBrotliReader(zr)
 }
 
 // AppendBrotliBytesLevel appends brotlied src to dst using valid RFC 7932 uncompressed meta-blocks.
@@ -113,5 +114,5 @@ func writeUnbrotli(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendUnbrotliBytes appends unbrotlied src to dst and returns the resulting dst.
 func AppendUnbrotliBytes(dst, src []byte) ([]byte, error) {
-	return brotli.Decompress(dst, src)
+	return compress.Unbrotli(src, dst)
 }

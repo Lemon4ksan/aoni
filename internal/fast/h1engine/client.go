@@ -1921,7 +1921,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	// 1. Striped connection pool fast path (zero contention across CPU cores)
 	if c.MaxConnWaitTimeout <= 0 {
 		startIdx := atomic.AddUint32(&c.stripeCounter, 1) & 15
-		for j := uint32(0); j < 4; j++ {
+		for j := uint32(0); j < 16; j++ {
 			idx := (startIdx + j) & 15
 			stripe := &c.stripes[idx]
 			stripe.Lock()

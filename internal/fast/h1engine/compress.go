@@ -12,10 +12,10 @@ import (
 	"io/fs"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/compress/flate"
-	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine/stackless"
-	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/foundation/codec/compress/flate"
+	"github.com/lemon4ksan/foundation/codec/compress/gzip"
 )
 
 // Supported compression levels.
@@ -27,27 +27,12 @@ const (
 	CompressHuffmanOnly        = -2 // flate.HuffmanOnly
 )
 
-var gzipReaderStorage = pool.NewPerPStorage(func() *gzip.Reader {
-	return nil
-})
-
 func acquireGzipReader(r io.Reader) (*gzip.Reader, error) {
-	zr := gzipReaderStorage.Get()
-	if zr == nil {
-		return gzip.NewReader(r)
-	}
-	if err := zr.Reset(r); err != nil {
-		return nil, err
-	}
-	return zr, nil
+	return compress.AcquireGzipReader(r)
 }
 
 func releaseGzipReader(zr *gzip.Reader) {
-	if zr == nil {
-		return
-	}
-	_ = zr.Close()
-	gzipReaderStorage.Put(zr)
+	compress.ReleaseGzipReader(zr)
 }
 
 func acquireFlateReader(r io.Reader) (io.ReadCloser, error) {
@@ -240,9 +225,7 @@ func writeGunzip(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendGunzipBytes appends gunzipped src to dst and returns the resulting dst.
 func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{b: dst}
-	_, err := WriteGunzip(w, src)
-	return w.b, err
+	return compress.Gunzip(src, dst)
 }
 
 // AppendDeflateBytesLevel appends deflated src to dst using the given
@@ -353,9 +336,7 @@ func writeInflate(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendInflateBytes appends inflated src to dst and returns the resulting dst.
 func AppendInflateBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{b: dst}
-	_, err := WriteInflate(w, src)
-	return w.b, err
+	return compress.Inflate(src, dst)
 }
 
 type byteSliceWriter struct {

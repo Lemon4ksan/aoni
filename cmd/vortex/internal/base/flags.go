@@ -5,133 +5,33 @@
 package base
 
 import (
-	"flag"
-	"strings"
+	"github.com/lemon4ksan/foundation/argkit"
 )
 
 // StringSliceFlag implements [flag.Value] for multi-valued command line arguments.
-type StringSliceFlag []string
+type StringSliceFlag = argkit.StringSliceFlag
 
-func (s *StringSliceFlag) String() string {
-	if s == nil {
-		return ""
-	}
+// NormalizeArgs stitches back arguments that were fragmented by shell tokenizers.
+var NormalizeArgs = argkit.NormalizeArgs
 
-	return strings.Join(*s, ",")
-}
-
-func (s *StringSliceFlag) Set(value string) error {
-	*s = append(*s, value)
-	return nil
-}
-
-// NormalizeArgs stitches back arguments that were fragmented by shell tokenizers (e.g. PowerShell splitting -out=pkg/api and .go).
-func NormalizeArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-
-	result := make([]string, 0, len(args))
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		for i+1 < len(args) && strings.HasPrefix(args[i+1], ".") && !strings.Contains(args[i+1], "/") && !strings.Contains(args[i+1], "\\") {
-			// Orphaned suffix like .go, .json, .har, .yaml
-			arg = strings.Join([]string{arg, args[i+1]}, "")
-			i++
-		}
-
-		result = append(result, arg)
-	}
-
-	return result
-}
-
-// ParseInterspersedFlags parses a FlagSet correctly even when flags and positional arguments
-// are freely mixed together (e.g. `vortex diff file.go --strict`). It returns the ordered positional arguments.
-func ParseInterspersedFlags(fs *flag.FlagSet, args []string) ([]string, error) {
-	args = NormalizeArgs(args)
-
-	var (
-		flagArgs []string
-		posArgs  []string
-	)
-
-	type boolFlag interface {
-		IsBoolFlag() bool
-	}
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			posArgs = append(posArgs, args[i+1:]...)
-			break
-		}
-
-		if strings.HasPrefix(arg, "-") && arg != "-" {
-			// Extract flag name (strip leading - or --)
-			cleanArg := strings.TrimLeft(arg, "-")
-			flagName := cleanArg
-			hasEqual := false
-
-			if eqIdx := strings.Index(cleanArg, "="); eqIdx != -1 {
-				flagName = cleanArg[:eqIdx]
-				hasEqual = true
-			}
-
-			fl := fs.Lookup(flagName)
-			if fl == nil || hasEqual {
-				// Flag not found in FlagSet or already has =val attached
-				flagArgs = append(flagArgs, arg)
-				continue
-			}
-
-			// Check if boolean flag
-			if bf, ok := fl.Value.(boolFlag); ok && bf.IsBoolFlag() {
-				flagArgs = append(flagArgs, arg)
-			} else {
-				flagArgs = append(flagArgs, arg)
-				// Consume next argument as flag value if available and not a flag
-				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-					i++
-					flagArgs = append(flagArgs, args[i])
-				}
-			}
-		} else {
-			posArgs = append(posArgs, arg)
-		}
-	}
-
-	if err := fs.Parse(flagArgs); err != nil {
-		return nil, err
-	}
-
-	return posArgs, nil
-}
+// ParseInterspersedFlags parses a FlagSet correctly with full POSIX semantics:
+// clumping (-la), attached values (-I*.tmp), and fuzzy typo suggestions.
+var ParseInterspersedFlags = argkit.ParseInterspersedFlags
 
 // StringVar binds a string flag with optional short alias.
-func StringVar(fs *flag.FlagSet, p *string, name, short, value, usage string) {
-	fs.StringVar(p, name, value, usage)
-
-	if short != "" && short != name {
-		fs.StringVar(p, short, value, usage)
-	}
-}
+var StringVar = argkit.StringVar
 
 // BoolVar binds a boolean flag with optional short alias.
-func BoolVar(fs *flag.FlagSet, p *bool, name, short string, value bool, usage string) {
-	fs.BoolVar(p, name, value, usage)
-
-	if short != "" && short != name {
-		fs.BoolVar(p, short, value, usage)
-	}
-}
+var BoolVar = argkit.BoolVar
 
 // IntVar binds an integer flag with optional short alias.
-func IntVar(fs *flag.FlagSet, p *int, name, short string, value int, usage string) {
-	fs.IntVar(p, name, value, usage)
+var IntVar = argkit.IntVar
 
-	if short != "" && short != name {
-		fs.IntVar(p, short, value, usage)
-	}
-}
+// Int64Var binds an int64 flag with optional short alias.
+var Int64Var = argkit.Int64Var
+
+// Float64Var binds a float64 flag with optional short alias.
+var Float64Var = argkit.Float64Var
+
+// DurationVar binds a time.Duration flag with optional short alias.
+var DurationVar = argkit.DurationVar

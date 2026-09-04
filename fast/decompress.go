@@ -7,9 +7,9 @@ package fast
 import (
 	"io"
 
+	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 

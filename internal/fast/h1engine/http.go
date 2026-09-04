@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
@@ -543,6 +544,9 @@ func (resp *Response) BodyGunzipWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func gunzipData(p []byte, maxBodySize int) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return compress.Gunzip(p, nil)
+	}
 	var bb ByteBuffer
 	_, err := writeGunzip(&bb, p, maxBodySize)
 	if err != nil {
@@ -586,6 +590,9 @@ func (resp *Response) BodyUnbrotliWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func unBrotliData(p []byte, maxBodySize int) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return compress.Unbrotli(p, nil)
+	}
 	var bb ByteBuffer
 	_, err := writeUnbrotli(&bb, p, maxBodySize)
 	if err != nil {
@@ -657,6 +664,9 @@ func (resp *Response) BodyUnzstdWithLimit(maxBodySize int) ([]byte, error) {
 }
 
 func unzstdData(p []byte, maxBodySize int) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return compress.Unzstd(p, nil)
+	}
 	var bb ByteBuffer
 	_, err := writeUnzstd(&bb, p, maxBodySize)
 	if err != nil {
@@ -666,6 +676,9 @@ func unzstdData(p []byte, maxBodySize int) ([]byte, error) {
 }
 
 func inflateData(p []byte, maxBodySize int) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return compress.Inflate(p, nil)
+	}
 	var bb ByteBuffer
 	_, err := writeInflate(&bb, p, maxBodySize)
 	if err != nil {
@@ -691,9 +704,21 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (req *Request) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
-	switch string(req.Header.ContentEncoding()) {
-	case "":
+	enc := string(req.Header.ContentEncoding())
+	if enc == "" {
 		return req.Body(), nil
+	}
+	if maxBodySize <= 0 {
+		res, err := compress.Decompress(enc, req.Body(), nil)
+		if err != nil {
+			if errors.Is(err, compress.ErrUnsupportedEncoding) {
+				return nil, ErrContentEncodingUnsupported
+			}
+			return nil, err
+		}
+		return res, nil
+	}
+	switch enc {
 	case "deflate":
 		return req.BodyInflateWithLimit(maxBodySize)
 	case "gzip":
@@ -722,9 +747,21 @@ func (resp *Response) BodyUncompressed() ([]byte, error) {
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (resp *Response) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
-	switch string(resp.Header.ContentEncoding()) {
-	case "":
+	enc := string(resp.Header.ContentEncoding())
+	if enc == "" {
 		return resp.Body(), nil
+	}
+	if maxBodySize <= 0 {
+		res, err := compress.Decompress(enc, resp.Body(), nil)
+		if err != nil {
+			if errors.Is(err, compress.ErrUnsupportedEncoding) {
+				return nil, ErrContentEncodingUnsupported
+			}
+			return nil, err
+		}
+		return res, nil
+	}
+	switch enc {
 	case "deflate":
 		return resp.BodyInflateWithLimit(maxBodySize)
 	case "gzip":

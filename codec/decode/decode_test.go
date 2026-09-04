@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/borrow"
+	"github.com/lemon4ksan/foundation/codec/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/testkit/assert"
@@ -21,8 +22,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
-
-	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 )
 
 type errorReader struct{}

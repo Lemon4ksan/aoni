@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/lemon4ksan/foundation/codec/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 

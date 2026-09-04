@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
@@ -31,7 +32,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/mod"
 )
 

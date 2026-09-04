@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/lemon4ksan/aoni v0.6.2-0.20260827200526-54cf9dd762a2
-	github.com/lemon4ksan/foundation v0.0.0-20260828115039-3138d4a24c98
+	github.com/lemon4ksan/foundation v0.0.0-20260904063358-d88efac513fc
 	github.com/oschwald/maxminddb-golang/v2 v2.4.1
 	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.12
