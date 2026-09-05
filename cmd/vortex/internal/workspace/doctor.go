@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/cmd/vortex/internal/tui"
+	tui "github.com/lemon4ksan/foundation/tuikit"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 

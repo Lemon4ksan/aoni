@@ -20,7 +20,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/cmd/vortex/internal/tui"
+	tui "github.com/lemon4ksan/foundation/tuikit"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/lint"
 	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
