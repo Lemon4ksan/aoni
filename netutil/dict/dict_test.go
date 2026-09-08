@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
+
 	"github.com/lemon4ksan/aoni/netutil/dict"
 )
 
@@ -176,4 +179,88 @@ func TestStorePrecedenceAndEviction(t *testing.T) {
 	if store.Bytes() > 1024 {
 		t.Fatalf("store memory limit exceeded: %d > 1024", store.Bytes())
 	}
+}
+
+func TestDictionary_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("freshness_checks", func(t *testing.T) {
+		t.Parallel()
+
+		var nilDict *dict.Dictionary
+		assert.False(t, nilDict.IsFresh(time.Now()))
+
+		zeroExpiryDict := &dict.Dictionary{}
+		assert.True(t, zeroExpiryDict.IsFresh(time.Now()))
+
+		futureExpiry := &dict.Dictionary{ExpiresAt: time.Now().Add(time.Hour)}
+		assert.True(t, futureExpiry.IsFresh(time.Now()))
+
+		pastExpiry := &dict.Dictionary{ExpiresAt: time.Now().Add(-time.Hour)}
+		assert.False(t, pastExpiry.IsFresh(time.Now()))
+	})
+
+	t.Run("matches_nil_and_dest_predicates", func(t *testing.T) {
+		t.Parallel()
+
+		var nilDict *dict.Dictionary
+		assert.False(t, nilDict.Matches(nil, ""))
+
+		baseURL, _ := url.Parse("https://example.com/dir/file")
+		d := &dict.Dictionary{
+			BaseURL:   baseURL,
+			Match:     "/dir/*",
+			MatchDest: []string{"document", "script"},
+		}
+
+		assert.False(t, d.Matches(nil, "document"))
+		assert.True(t, dict.MatchDest(nil, "any"))
+		assert.False(t, dict.MatchDest([]string{"document"}, ""))
+		assert.True(t, dict.MatchDest([]string{"document"}, "DOCUMENT"))
+		assert.False(t, dict.MatchDest([]string{"document"}, "image"))
+	})
+
+	t.Run("same_origin_edge", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, dict.IsSameOrigin(nil, nil))
+
+		u1, _ := url.Parse("https://example.com:443/a")
+		u2, _ := url.Parse("http://example.com:443/b")
+		assert.False(t, dict.IsSameOrigin(u1, u2))
+
+		u3, _ := url.Parse("https://example.com:8443/a")
+		assert.False(t, dict.IsSameOrigin(u1, u3))
+	})
+
+	t.Run("parse_use_as_dictionary_errors", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dict.ParseUseAsDictionary("", nil)
+		assert.ErrorIs(t, err, dict.ErrInvalidUseAsDictionary)
+
+		_, err = dict.ParseUseAsDictionary("match", nil)
+		assert.ErrorIs(t, err, dict.ErrInvalidUseAsDictionary)
+
+		_, err = dict.ParseUseAsDictionary("id=\"test\"", nil)
+		assert.ErrorIs(t, err, dict.ErrMissingMatchPattern)
+
+		respURL, _ := url.Parse("https://example.com/api/v1/resource")
+		meta, err := dict.ParseUseAsDictionary("id=\"test\"", respURL)
+		require.NoError(t, err)
+		assert.Equal(t, "/api/v1/*", meta.Match)
+	})
+
+	t.Run("parse_available_dictionary_errors", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := dict.ParseAvailableDictionary("not_bracketed")
+		assert.ErrorIs(t, err, dict.ErrInvalidAvailableDictionary)
+
+		_, err = dict.ParseAvailableDictionary(":short:")
+		assert.ErrorIs(t, err, dict.ErrInvalidAvailableDictionary)
+
+		_, err = dict.ParseAvailableDictionary(":invalid_base64_symbols!!!:")
+		assert.ErrorIs(t, err, dict.ErrInvalidAvailableDictionary)
+	})
 }

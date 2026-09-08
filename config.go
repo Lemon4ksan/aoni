@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
@@ -1264,7 +1263,7 @@ func clonePtr[T any](p *T) *T {
 		return nil
 	}
 
-	return generic.Ptr(*p)
+	return new(*p)
 }
 
 // RequestConfig aggregates request-scoped execution options, transport overrides,

@@ -7,6 +7,7 @@ package coalesce_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -14,21 +15,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/resiliency/coalesce"
 )
 
-func TestRequestCoalescing(t *testing.T) {
+type errReader struct{}
+
+func (e *errReader) Read([]byte) (int, error) {
+	return 0, errors.New("read fault")
+}
+
+func (e *errReader) Close() error {
+	return nil
+}
+
+func TestRequestCoalescing_Success(t *testing.T) {
 	t.Parallel()
+
+	const goroutines = 30
 
 	g := coalesce.NewGroup()
 
-	var networkCalls int32
+	var (
+		networkCalls atomic.Int32
+		entered      atomic.Int32
+		wg           sync.WaitGroup
+	)
 
 	handler := func() (*http.Response, error) {
-		atomic.AddInt32(&networkCalls, 1)
-		time.Sleep(50 * time.Millisecond) // Simulate slow network response
+		networkCalls.Add(1)
+
+		for entered.Load() < goroutines {
+			time.Sleep(2 * time.Millisecond)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -38,14 +61,13 @@ func TestRequestCoalescing(t *testing.T) {
 		}, nil
 	}
 
-	const goroutines = 50
-
-	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
+
+			entered.Add(1)
 
 			resp, err := g.Do(context.Background(), "GET:https://api.crypto.com/ticker/btc", handler)
 			require.NoError(t, err)
@@ -59,41 +81,123 @@ func TestRequestCoalescing(t *testing.T) {
 
 	wg.Wait()
 
-	// Exactly 1 network call should have occurred for all 50 concurrent requests!
 	require.Equal(
 		t,
 		int32(1),
-		atomic.LoadInt32(&networkCalls),
-		"Singleflight should coalesce 50 parallel requests into 1",
+		networkCalls.Load(),
+		"Singleflight should coalesce parallel requests into 1",
 	)
+}
+
+func TestRequestCoalescing_Errors(t *testing.T) {
+	t.Parallel()
+
+	g := coalesce.NewGroup()
+
+	t.Run("nil_response_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := g.Do(context.Background(), "key_nil", func() (*http.Response, error) {
+			return nil, nil
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nil response from handler")
+	})
+
+	t.Run("handler_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		expectedErr := errors.New("upstream failure")
+		_, err := g.Do(context.Background(), "key_err", func() (*http.Response, error) {
+			return nil, expectedErr
+		})
+		require.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("body_read_error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := g.Do(context.Background(), "key_read_err", func() (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       &errReader{},
+			}, nil
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read fault")
+	})
+
+	t.Run("default_group_usage", func(t *testing.T) {
+		t.Parallel()
+
+		resp, err := coalesce.DefaultGroup.Do(context.Background(), "default_key", func() (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader([]byte("default_ok"))),
+			}, nil
+		})
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, "default_ok", string(body))
+	})
 }
 
 func TestTypedGroup(t *testing.T) {
 	t.Parallel()
 
-	g := coalesce.NewTypedGroup[string, int]()
+	t.Run("typed_group_coalescing", func(t *testing.T) {
+		t.Parallel()
 
-	var (
-		callCount atomic.Int64
-		wg        sync.WaitGroup
-	)
+		g := coalesce.NewTypedGroup[string, int]()
 
-	for i := 0; i < 30; i++ {
-		wg.Add(1)
+		const numGoroutines = 20
 
-		go func() {
-			defer wg.Done()
+		var (
+			callCount atomic.Int64
+			entered   atomic.Int64
+			wg        sync.WaitGroup
+		)
 
-			val, err := g.Do("user:42", func() (int, error) {
-				callCount.Add(1)
-				time.Sleep(30 * time.Millisecond)
-				return 42, nil
-			})
-			require.NoError(t, err)
-			require.Equal(t, 42, val)
-		}()
-	}
+		for range numGoroutines {
+			wg.Add(1)
 
-	wg.Wait()
-	require.Equal(t, int64(1), callCount.Load())
+			go func() {
+				defer wg.Done()
+
+				entered.Add(1)
+
+				val, err := g.Do("user:42", func() (int, error) {
+					callCount.Add(1)
+					// Wait until all sibling goroutines have reached g.Do
+					for entered.Load() < numGoroutines {
+						time.Sleep(2 * time.Millisecond)
+					}
+
+					time.Sleep(10 * time.Millisecond)
+
+					return 42, nil
+				})
+				require.NoError(t, err)
+				require.Equal(t, 42, val)
+			}()
+		}
+
+		wg.Wait()
+		require.Equal(t, int64(1), callCount.Load())
+	})
+
+	t.Run("typed_group_error_propagation", func(t *testing.T) {
+		t.Parallel()
+
+		g := coalesce.NewTypedGroup[string, string]()
+		expectedErr := errors.New("typed error")
+
+		_, err := g.Do("err_key", func() (string, error) {
+			return "", expectedErr
+		})
+		require.ErrorIs(t, err, expectedErr)
+	})
 }

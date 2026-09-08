@@ -14,13 +14,13 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dns"
 )
 
-type mockResolver struct {
+type mockStaleResolver struct {
 	calls atomic.Int32
 	addrs []net.IPAddr
 	delay time.Duration
 }
 
-func (m *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+func (m *mockStaleResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	m.calls.Add(1)
 
 	if m.delay > 0 {
@@ -35,7 +35,7 @@ func (m *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPA
 }
 
 func TestStaleResolver_BasicAndStale(t *testing.T) {
-	mock := &mockResolver{
+	mock := &mockStaleResolver{
 		addrs: []net.IPAddr{{IP: net.ParseIP("192.0.2.1")}},
 	}
 
@@ -92,7 +92,7 @@ func TestStaleResolver_BasicAndStale(t *testing.T) {
 }
 
 func TestStaleResolver_LookupNetIP(t *testing.T) {
-	mock := &mockResolver{
+	mock := &mockStaleResolver{
 		addrs: []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}},
 	}
 

@@ -727,7 +727,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		client = r.applyDigestAuth(client)
 	}
 
-	var stackBuf [stackModCapacity]RequestModifier
+	var stackBuf [stackModCap]RequestModifier
 
 	mods := r.buildModifiers(&stackBuf)
 
@@ -802,7 +802,7 @@ func (r *RequestBuilder) unexpectedStatusError(resp *http.Response, finalPath st
 }
 
 // buildModifiers constructs value modifiers for headers, auth, body serialization, decoding, and telemetry.
-func (r *RequestBuilder) buildModifiers(stackBuf *[stackModCapacity]RequestModifier) []RequestModifier {
+func (r *RequestBuilder) buildModifiers(stackBuf *[stackModCap]RequestModifier) []RequestModifier {
 	estimatedCap := len(r.headerEntries) + len(r.headers) + len(r.queryEntries) + len(r.appliedMods)
 	if r.bearerToken != "" || r.basicAuth != nil || r.body != nil || r.protoBody != nil || r.timeout > 0 {
 		estimatedCap += 4
@@ -813,7 +813,7 @@ func (r *RequestBuilder) buildModifiers(stackBuf *[stackModCapacity]RequestModif
 	}
 
 	var mods []RequestModifier
-	if estimatedCap <= stackModCapacity && stackBuf != nil {
+	if estimatedCap <= stackModCap && stackBuf != nil {
 		mods = stackBuf[:0]
 	} else {
 		mods = make([]RequestModifier, 0, estimatedCap)

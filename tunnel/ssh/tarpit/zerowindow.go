@@ -27,6 +27,12 @@ func ZeroWindowFreeze(ctx context.Context, conn net.Conn, holdDuration time.Dura
 		holdDuration = 10 * time.Minute
 	}
 
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		_ = tcpConn.SetReadBuffer(1024)
 	}

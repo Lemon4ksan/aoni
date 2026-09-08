@@ -422,3 +422,127 @@ func TestLoadBalancer_SelectHealthy_And_DoResult(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+func TestLoadBalancer_FindBackend_And_Edge(t *testing.T) {
+	t.Parallel()
+
+	t.Run("find_backend_matching_and_missing", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := New(Config{}, "http://b1", "http://b2")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		found := lb.FindBackend(func(b *Backend) bool {
+			return b.URL == "http://b1"
+		})
+		require.True(t, found.IsPresent())
+		val, ok := found.Value()
+		require.True(t, ok)
+		assert.Equal(t, "http://b1", val.URL)
+
+		missing := lb.FindBackend(func(b *Backend) bool {
+			return b.URL == "http://nonexistent"
+		})
+		assert.False(t, missing.IsPresent())
+	})
+
+	t.Run("select_healthy_none_when_all_unhealthy", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := New(Config{MaxFails: 1}, "http://b1")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		lb.backends[0].tracker.MarkFailed()
+
+		opt := lb.SelectHealthy()
+		assert.False(t, opt.IsPresent())
+	})
+
+	t.Run("do_result_failure_when_all_fail", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := New(Config{MaxFails: 1}, "http://b1")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		lb.backends[0].tracker.MarkFailed()
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
+		require.NoError(t, err)
+
+		res := lb.DoResult(req)
+		assert.False(t, res.IsSuccess())
+		_, resErr := res.Unwrap()
+		assert.Error(t, resErr)
+	})
+
+	t.Run("set_backend_pool_empty_ignored", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := New(Config{}, "http://b1")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		lb.SetBackendPool(nil)
+		assert.Equal(t, 1, lb.Stats().TotalBackends)
+	})
+
+	t.Run("failover_chain_to_healthy_backend", func(t *testing.T) {
+		t.Parallel()
+
+		s1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		}))
+		t.Cleanup(s1.Close)
+
+		s2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(s2.Close)
+
+		s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(s3.Close)
+
+		lb, err := New(Config{
+			Strategy: RoundRobin,
+			MaxFails: 1,
+		}, s1.URL, s2.URL, s3.URL)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		lb.current.Store(2) // Next Add(1) yields 3 % 3 == 0
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
+		require.NoError(t, err)
+
+		resp, err := lb.Do(req)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.False(t, lb.backends[0].IsAvailable())
+		assert.False(t, lb.backends[1].IsAvailable())
+		assert.True(t, lb.backends[2].IsAvailable())
+	})
+
+	t.Run("large_backend_pool_greater_than_stack_limit", func(t *testing.T) {
+		t.Parallel()
+
+		urls := make([]string, 35)
+		for i := range urls {
+			urls[i] = "http://127.0.0.1:90" + string(rune('0'+i%10))
+		}
+
+		lb, err := New(Config{Strategy: Random}, urls...)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		opt := lb.SelectHealthy()
+		assert.True(t, opt.IsPresent())
+	})
+}

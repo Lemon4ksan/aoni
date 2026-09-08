@@ -14,12 +14,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
+	"reflect"
 	"strings"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
@@ -44,7 +48,7 @@ var (
 // NoResponse is a sentinel type indicating a request that produces no unmarshaled body structure.
 type NoResponse struct{}
 
-const stackModCapacity = 16
+const stackModCap = 16
 
 // --- Raw Non-Generic HTTP Methods on *Client ---
 
@@ -53,14 +57,6 @@ const stackModCapacity = 16
 // # Resource Management
 //
 // Caller MUST close resp.Body to prevent socket leaks.
-//
-// # Example
-//
-//	resp, err := client.Get(ctx, "/users/42")
-//	if err != nil {
-//	    return err
-//	}
-//	defer resp.Body.Close()
 func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
@@ -71,68 +67,23 @@ func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) 
 //   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
 //   - [proto.Message] -> Protobuf binary payload with "Content-Type: application/x-protobuf"
 //   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
-//   - `[]byte` / `string` -> Raw payload
-//
-// # Resource Management
-//
-// Caller MUST close resp.Body to prevent socket leaks.
-//
-// # Example
-//
-//	resp, err := client.Post(ctx, "/users", CreateUserReq{Name: "Bob"})
+//   - `[]byte` / `string` / [io.Reader] -> Raw payload (no default Content-Type header)
 func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return nil, err
-		}
-
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
-	}
-
-	return c.Request(ctx, http.MethodPost, path, mods...)
+	return c.Fetch(ctx, http.MethodPost, path, body, mods...)
 }
 
 // Put executes a raw HTTP PUT request carrying body and returns the raw [*http.Response].
 //
-// # Resource Management
-//
-// Caller MUST close resp.Body to prevent socket leaks.
+// See [Client.Post] for automatic body detection and serialization rules.
 func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return nil, err
-		}
-
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
-	}
-
-	return c.Request(ctx, http.MethodPut, path, mods...)
+	return c.Fetch(ctx, http.MethodPut, path, body, mods...)
 }
 
 // Patch executes a raw HTTP PATCH request carrying body and returns the raw [*http.Response].
 //
-// # Resource Management
-//
-// Caller MUST close resp.Body to prevent socket leaks.
+// See [Client.Post] for automatic body detection and serialization rules.
 func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return nil, err
-		}
-
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
-	}
-
-	return c.Request(ctx, http.MethodPatch, path, mods...)
+	return c.Fetch(ctx, http.MethodPatch, path, body, mods...)
 }
 
 // Delete executes a raw HTTP DELETE request and returns the raw [*http.Response].
@@ -155,27 +106,21 @@ func (c *Client) Options(ctx context.Context, path string, mods ...RequestModifi
 
 // Fetch executes an arbitrary raw HTTP method request and returns the raw [*http.Response].
 //
-// # Resource Management
-//
-// Caller MUST close resp.Body to prevent socket leaks.
+// See [Client.Post] for automatic body detection and serialization rules.
 func (c *Client) Fetch(
 	ctx context.Context,
 	method, path string,
 	body any,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return nil, err
-		}
+	var stackBuf [stackModCap]RequestModifier
 
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	allMods, err := prepareBodyMods(body, mods, &stackBuf)
+	if err != nil {
+		return nil, err
 	}
 
-	return c.Request(ctx, method, path, mods...)
+	return c.Request(ctx, method, path, allMods...)
 }
 
 // --- Generic Typed HTTP Methods on *Client ---
@@ -225,11 +170,6 @@ func (c *Client) GetTo[Resp any](
 }
 
 // GetInto executes an HTTP GET request and decodes the response directly into target without heap allocations.
-//
-// # Example
-//
-//	var user User
-//	err := client.GetInto(ctx, "/users/42", &user)
 func (c *Client) GetInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -255,45 +195,16 @@ func (c *Client) GetEx[Resp any](
 }
 
 // PostTo executes an HTTP POST request carrying body and unmarshals the response into *Resp.
-//
-// The body argument is automatically detected and serialized:
-//   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
-//   - [proto.Message] -> Protobuf binary payload with "Content-Type: application/x-protobuf"
-//   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
-//   - `[]byte` / `string` -> Raw payload
-//
-// # Resource Management
-//
-// The response body is automatically drained and closed. Callers do NOT need to call Body.Close().
-//
-// # Example
-//
-//	created, err := client.PostTo[User](ctx, "/users", CreateUserReq{Name: "Bob"})
 func (c *Client) PostTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside decodeResponseTo
-	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[Resp](c, resp)
+	return c.FetchTo[Resp](ctx, http.MethodPost, path, body, mods...)
 }
 
-// PostInto executes an HTTP POST request and unmarshals the response payload directly into target.
+// PostInto executes an HTTP POST request carrying body and unmarshals the response payload directly into target.
 func (c *Client) PostInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -301,25 +212,10 @@ func (c *Client) PostInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside HandleResponse
-	resp, err := c.Request(ctx, http.MethodPost, path, allMods...)
-	if err != nil {
-		return err
-	}
-
-	return HandleResponse(resp, target, c)
+	return c.FetchInto[Resp](ctx, http.MethodPost, path, body, target, mods...)
 }
 
-// PostEx executes an HTTP POST request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PostEx executes an HTTP POST request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PostEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -330,35 +226,16 @@ func (c *Client) PostEx[Resp any](
 }
 
 // PutTo executes an HTTP PUT request carrying body and unmarshals the response into *Resp.
-//
-// # Example
-//
-//	updated, err := client.PutTo[User](ctx, "/users/42", UpdateUserReq{Name: "Robert"})
 func (c *Client) PutTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside decodeResponseTo
-	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[Resp](c, resp)
+	return c.FetchTo[Resp](ctx, http.MethodPut, path, body, mods...)
 }
 
-// PutInto executes an HTTP PUT request and unmarshals the response payload directly into target.
+// PutInto executes an HTTP PUT request carrying body and unmarshals the response payload directly into target.
 func (c *Client) PutInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -366,25 +243,10 @@ func (c *Client) PutInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside HandleResponse
-	resp, err := c.Request(ctx, http.MethodPut, path, allMods...)
-	if err != nil {
-		return err
-	}
-
-	return HandleResponse(resp, target, c)
+	return c.FetchInto[Resp](ctx, http.MethodPut, path, body, target, mods...)
 }
 
-// PutEx executes an HTTP PUT request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PutEx executes an HTTP PUT request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PutEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -395,35 +257,16 @@ func (c *Client) PutEx[Resp any](
 }
 
 // PatchTo executes an HTTP PATCH request carrying body and unmarshals the response into *Resp.
-//
-// # Example
-//
-//	patched, err := client.PatchTo[User](ctx, "/users/42", map[string]any{"status": "active"})
 func (c *Client) PatchTo[Resp any](
 	ctx context.Context,
 	path string,
 	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside decodeResponseTo
-	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
-	if err != nil {
-		return nil, err
-	}
-
-	return decodeResponseTo[Resp](c, resp)
+	return c.FetchTo[Resp](ctx, http.MethodPatch, path, body, mods...)
 }
 
-// PatchInto executes an HTTP PATCH request and unmarshals the response payload directly into target.
+// PatchInto executes an HTTP PATCH request carrying body and unmarshals the response payload directly into target.
 func (c *Client) PatchInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -431,25 +274,10 @@ func (c *Client) PatchInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return err
-	}
-
-	var stackBuf [stackModCapacity]RequestModifier
-
-	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
-
-	//nolint:bodyclose // body is closed inside HandleResponse
-	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...)
-	if err != nil {
-		return err
-	}
-
-	return HandleResponse(resp, target, c)
+	return c.FetchInto[Resp](ctx, http.MethodPatch, path, body, target, mods...)
 }
 
-// PatchEx executes an HTTP PATCH request and returns both the unmarshaled *Resp and raw [*http.Response].
+// PatchEx executes an HTTP PATCH request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
 func (c *Client) PatchEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -460,10 +288,6 @@ func (c *Client) PatchEx[Resp any](
 }
 
 // DeleteTo executes an HTTP DELETE request and unmarshals any returned response payload into *Resp.
-//
-// # Example
-//
-//	status, err := client.DeleteTo[DeleteStatus](ctx, "/users/42")
 func (c *Client) DeleteTo[Resp any](
 	ctx context.Context,
 	path string,
@@ -510,19 +334,15 @@ func (c *Client) FetchTo[Resp any](
 	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return nil, err
-		}
+	var stackBuf [stackModCap]RequestModifier
 
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	allMods, err := prepareBodyMods(body, mods, &stackBuf)
+	if err != nil {
+		return nil, err
 	}
 
 	//nolint:bodyclose // body is closed inside decodeResponseTo
-	resp, err := c.Request(ctx, method, path, mods...)
+	resp, err := c.Request(ctx, method, path, allMods...)
 	if err != nil {
 		return nil, err
 	}
@@ -538,19 +358,15 @@ func (c *Client) FetchInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	if body != nil {
-		bodyReader, err := validateAndMarshal(body)
-		if err != nil {
-			return err
-		}
+	var stackBuf [stackModCap]RequestModifier
 
-		var stackBuf [stackModCapacity]RequestModifier
-
-		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
+	allMods, err := prepareBodyMods(body, mods, &stackBuf)
+	if err != nil {
+		return err
 	}
 
 	//nolint:bodyclose // body is closed inside HandleResponse
-	resp, err := c.Request(ctx, method, path, mods...)
+	resp, err := c.Request(ctx, method, path, allMods...)
 	if err != nil {
 		return err
 	}
@@ -558,7 +374,7 @@ func (c *Client) FetchInto[Resp any](
 	return HandleResponse(resp, target, c)
 }
 
-// DoInto is an alias for FetchInto.
+// DoInto is an alias for [Client.FetchInto].
 func (c *Client) DoInto[Resp any](
 	ctx context.Context,
 	method, path string,
@@ -579,7 +395,7 @@ func (c *Client) FetchEx[Resp any](
 	return executeToEx[Resp](ctx, c, method, path, body, mods)
 }
 
-// DoEx is an alias for FetchEx.
+// DoEx is an alias for [Client.FetchEx].
 func (c *Client) DoEx[Resp any](
 	ctx context.Context,
 	method, path string,
@@ -627,7 +443,7 @@ func executeToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var (
 		raw      *http.Response
-		stackBuf [stackModCapacity]RequestModifier
+		stackBuf [stackModCap]RequestModifier
 	)
 
 	reqMods := withCaptureMod(&stackBuf, &raw, mods)
@@ -645,57 +461,59 @@ func executeToEx[Resp any](
 }
 
 // HandleResponse processes and decodes an HTTP response stream into a target structure or API error.
-func HandleResponse(resp *http.Response, target, c any) error {
+func HandleResponse(resp *http.Response, target, client any) error {
 	if resp == nil {
 		return ErrNilResponse
 	}
 
-	dec := responseDecoder{}
+	h := newResponseHandler(resp, target, client)
 
-	if !dec.SetCapturer(resp) {
+	if !h.captureResponse() {
 		defer CloseResponse(resp)
 	}
 
-	dec.DumpDiagnostics(resp, c)
+	h.dumpDiagnostics()
 
-	decoder := resolveDecoder(resp)
-
-	if err := dec.ValidateState(resp, decoder); err != nil {
+	if err := h.validate(); err != nil {
 		return err
 	}
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return dec.DecodeAPIError(resp)
+	if h.isErrorStatus() {
+		return h.decodeAPIError()
 	}
 
-	if target == nil || resp.StatusCode == http.StatusNoContent || isNoResponseTarget(target) {
-		_, _ = fio.CopyZeroAlloc(io.Discard, resp.Body)
-		return nil
+	if h.shouldDiscardBody() {
+		return h.drainAndDiscard()
 	}
 
-	return dec.DecodeSuccess(resp, target, c, decoder)
+	return h.decodeSuccess()
 }
 
-func isNoResponseTarget(target any) bool {
-	switch target.(type) {
-	case NoResponse, *NoResponse, **NoResponse:
-		return true
-	default:
-		return false
+// responseHandler encapsulates the lifecycle and decoding pipeline of an HTTP response.
+type responseHandler struct {
+	resp    *http.Response
+	target  any
+	client  any
+	cfg     *RequestConfig
+	decoder decode.Decoder
+}
+
+func newResponseHandler(resp *http.Response, target, client any) responseHandler {
+	cfg := extractRequestConfig(resp)
+
+	return responseHandler{
+		resp:    resp,
+		target:  target,
+		client:  client,
+		cfg:     cfg,
+		decoder: resolveDecoder(resp, cfg),
 	}
 }
 
-type responseDecoder struct{}
-
-func (responseDecoder) SetCapturer(resp *http.Response) bool {
-	if resp.Request == nil {
-		return false
-	}
-
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg != nil {
-		if targetPtr, ok := cfg.Capturer.(**http.Response); ok && targetPtr != nil {
-			*targetPtr = resp
+func (h *responseHandler) captureResponse() bool {
+	if h.cfg != nil {
+		if targetPtr, ok := h.cfg.Capturer.(**http.Response); ok && targetPtr != nil {
+			*targetPtr = h.resp
 			return true
 		}
 	}
@@ -703,65 +521,41 @@ func (responseDecoder) SetCapturer(resp *http.Response) bool {
 	return false
 }
 
-func (responseDecoder) DumpDiagnostics(resp *http.Response, c any) {
-	if resp.Request == nil {
-		return
-	}
-
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg == nil || !cfg.Debug {
-		return
-	}
-
-	reqDump := dumpMultipart(resp.Request)
-	if len(reqDump) == 0 {
-		reqDump, _ = httputil.DumpRequestOut(resp.Request, true)
-	}
-
-	var respDump []byte
-	if telemetry.IsStreamingResponse(resp) {
-		respDump = []byte(
-			resp.Proto + " " + resp.Status + "\r\nContent-Type: " + resp.Header.Get(
-				"Content-Type",
-			) + "\r\n\r\n[streaming body omitted]",
-		)
-	} else {
-		respDump, _ = httputil.DumpResponse(resp, true)
-	}
-
-	fmt.Fprintf(
-		os.Stderr,
-		"--- [aoni Debug: %s %s] ---\nRequest:\n%s\nResponse:\n%s\n-------------------------\n",
-		resp.Request.Method,
-		resp.Request.URL.String(),
-		bytesconv.B2S(requestutil.RedactHeaders(reqDump)),
-		bytesconv.B2S(requestutil.RedactHeaders(respDump)),
-	)
+func (h *responseHandler) isErrorStatus() bool {
+	return h.resp.StatusCode < http.StatusOK || h.resp.StatusCode >= http.StatusMultipleChoices
 }
 
-func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decoder) error {
-	if resp == nil || resp.Body == nil || decode.IsRawDecoder(decoder) {
+func (h *responseHandler) shouldDiscardBody() bool {
+	return h.target == nil || h.resp.StatusCode == http.StatusNoContent || isNoResponseTarget(h.target)
+}
+
+func (h *responseHandler) drainAndDiscard() error {
+	_, err := iokit.CopyZeroAlloc(io.Discard, h.resp.Body)
+	return err
+}
+
+func (h *responseHandler) validate() error {
+	if h.resp.Body == nil || decode.IsRawDecoder(h.decoder) {
 		return nil
 	}
 
-	if resp.StatusCode < http.StatusBadRequest {
-		contentType := resp.Header.Get("Content-Type")
+	if h.resp.StatusCode < http.StatusBadRequest {
+		contentType := h.resp.Header.Get("Content-Type")
 		if contentType == "" || decode.IsStructuredMediaType(contentType) {
 			return nil
 		}
 	}
 
-	peekableReader := ResolvePeekableReader(resp)
-
-	if err := d.checkHTML(peekableReader); err != nil {
+	peekable := ResolvePeekableReader(h.resp)
+	if err := h.checkHTML(peekable); err != nil {
 		return err
 	}
 
-	return d.checkMIMEType(resp)
+	return h.checkMIMEType()
 }
 
-func (responseDecoder) checkMIMEType(resp *http.Response) error {
-	contentType := resp.Header.Get("Content-Type")
+func (h *responseHandler) checkMIMEType() error {
+	contentType := h.resp.Header.Get("Content-Type")
 	if contentType == "" {
 		return nil
 	}
@@ -775,7 +569,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 	return nil
 }
 
-func (responseDecoder) checkHTML(buf *bufio.Reader) error {
+func (h *responseHandler) checkHTML(buf *bufio.Reader) error {
 	peekBytes, err := buf.Peek(128)
 	if (err != nil && err != io.EOF) || len(peekBytes) == 0 {
 		return nil
@@ -798,50 +592,24 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
 }
 
-// ResolvePeekableReader returns a peekable reader for the response body.
-func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
-	if b, ok := resp.Body.(*fio.BufioReadCloser); ok && b.Reader != nil {
-		return b.Reader
-	}
+func (h *responseHandler) decodeAPIError() error {
+	bodyBytes, _ := io.ReadAll(io.LimitReader(h.resp.Body, 1024*1024))
+	apiErr := &APIError{StatusCode: h.resp.StatusCode, Body: bodyBytes}
 
-	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
-		if r := br.BufioReader(); r != nil {
-			return r
-		}
-	}
-
-	wrapped := fio.NewBufioReadCloser(resp.Body, resp.Body)
-	resp.Body = wrapped
-
-	return wrapped.Reader
-}
-
-func (responseDecoder) DecodeAPIError(resp *http.Response) error {
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	apiErr := &APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
-
-	if resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil && cfg.ErrorModel != nil {
-			if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
-				apiErr.Model = cfg.ErrorModel
-			}
+	if h.cfg != nil && h.cfg.ErrorModel != nil {
+		if err := json.Unmarshal(bodyBytes, h.cfg.ErrorModel); err == nil {
+			apiErr.Model = h.cfg.ErrorModel
 		}
 	}
 
 	return apiErr
 }
 
-func (responseDecoder) DecodeSuccess(
-	resp *http.Response,
-	target any,
-	c any,
-	decoder decode.Decoder,
-) error {
-	if br := extractBaseResponse(c, resp); br != nil {
-		br.SetData(target)
+func (h *responseHandler) decodeSuccess() error {
+	if br := h.extractBaseResponse(); br != nil {
+		br.SetData(h.target)
 
-		if err := decoder.Decode(resp.Body, br); err != nil {
+		if err := h.decoder.Decode(h.resp.Body, br); err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
@@ -856,11 +624,11 @@ func (responseDecoder) DecodeSuccess(
 		return nil
 	}
 
-	if target == nil {
+	if h.target == nil {
 		return nil
 	}
 
-	err := decoder.Decode(resp.Body, target)
+	err := h.decoder.Decode(h.resp.Body, h.target)
 	if errors.Is(err, io.EOF) {
 		return nil
 	}
@@ -868,20 +636,18 @@ func (responseDecoder) DecodeSuccess(
 	return err
 }
 
-func extractBaseResponse(c any, resp *http.Response) BaseResponse {
-	if resp != nil && resp.Request != nil {
-		if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil {
-			switch {
-			case cfg.DisableBaseResponse:
-				return nil
-			case cfg.BaseResponseOverride != nil:
-				return cfg.BaseResponseOverride()
-			}
+func (h *responseHandler) extractBaseResponse() BaseResponse {
+	if h.cfg != nil {
+		switch {
+		case h.cfg.DisableBaseResponse:
+			return nil
+		case h.cfg.BaseResponseOverride != nil:
+			return h.cfg.BaseResponseOverride()
 		}
 	}
 
-	if c != nil {
-		if cli, ok := c.(*Client); ok {
+	if h.client != nil {
+		if cli, ok := h.client.(*Client); ok {
 			if cli == nil {
 				return nil
 			}
@@ -889,9 +655,75 @@ func extractBaseResponse(c any, resp *http.Response) BaseResponse {
 			return cli.BaseResponse()
 		}
 
-		if p, ok := c.(BaseResponseProvider); ok && p != nil {
+		if p, ok := h.client.(BaseResponseProvider); ok && p != nil {
 			return p.BaseResponse()
 		}
+	}
+
+	return nil
+}
+
+func (h *responseHandler) dumpDiagnostics() {
+	if h.cfg == nil || !h.cfg.Debug || h.resp.Request == nil {
+		return
+	}
+
+	reqDump := dumpMultipart(h.resp.Request)
+	if len(reqDump) == 0 {
+		reqDump, _ = httputil.DumpRequestOut(h.resp.Request, true)
+	}
+
+	var respDump []byte
+	if telemetry.IsStreamingResponse(h.resp) {
+		respDump = []byte(
+			h.resp.Proto + " " + h.resp.Status + "\r\nContent-Type: " + h.resp.Header.Get(
+				"Content-Type",
+			) + "\r\n\r\n[streaming body omitted]",
+		)
+	} else {
+		respDump, _ = httputil.DumpResponse(h.resp, true)
+	}
+
+	fmt.Fprintf(
+		os.Stderr,
+		"--- [aoni Debug: %s %s] ---\nRequest:\n%s\nResponse:\n%s\n-------------------------\n",
+		h.resp.Request.Method,
+		h.resp.Request.URL.String(),
+		bytesconv.B2S(requestutil.RedactHeaders(reqDump)),
+		bytesconv.B2S(requestutil.RedactHeaders(respDump)),
+	)
+}
+
+func isNoResponseTarget(target any) bool {
+	switch target.(type) {
+	case NoResponse, *NoResponse, **NoResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolvePeekableReader returns a peekable reader for the response body.
+func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
+	if b, ok := resp.Body.(*iokit.BufioReadCloser); ok && b.Reader != nil {
+		return b.Reader
+	}
+
+	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
+		if r := br.BufioReader(); r != nil {
+			return r
+		}
+	}
+
+	wrapped := iokit.NewBufioReadCloser(resp.Body, resp.Body)
+	resp.Body = wrapped
+
+	return wrapped.Reader
+}
+
+func extractRequestConfig(resp *http.Response) *RequestConfig {
+	if resp != nil && resp.Request != nil {
+		return GetRequestConfig(resp.Request.Context())
 	}
 
 	return nil
@@ -917,36 +749,33 @@ func dumpMultipart(req *http.Request) []byte {
 	)
 }
 
-func resolveDecoder(resp *http.Response) decode.Decoder {
-	if resp != nil && resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil {
-			if cfg.ForceContentType != "" {
-				return decode.LookupDecoder(cfg.ForceContentType)
+func resolveDecoder(resp *http.Response, cfg *RequestConfig) decode.Decoder {
+	if cfg != nil {
+		if cfg.ForceContentType != "" {
+			return decode.LookupDecoder(cfg.ForceContentType)
+		}
+
+		if cfg.Decoder != nil {
+			if d, ok := cfg.Decoder.(decode.Decoder); ok && d != nil {
+				return d
 			}
 
-			if cfg.Decoder != nil {
-				if d, ok := cfg.Decoder.(decode.Decoder); ok && d != nil {
-					return d
+			return cfg.Decoder
+		}
+
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "" {
+			if d := cfg.LookupDecoder(contentType); d != nil {
+				if dec, ok := d.(decode.Decoder); ok && dec != nil {
+					return dec
 				}
 
-				return cfg.Decoder
+				return decode.DecoderFunc(d.Decode)
 			}
+		}
 
-			contentType := resp.Header.Get("Content-Type")
-			if contentType != "" {
-				if d := cfg.LookupDecoder(contentType); d != nil {
-					if dec, ok := d.(decode.Decoder); ok && dec != nil {
-						return dec
-					}
-
-					return decode.DecoderFunc(d.Decode)
-				}
-			}
-
-			if cfg.AutoDecode && contentType != "" {
-				return decode.LookupDecoder(contentType)
-			}
+		if cfg.AutoDecode && contentType != "" {
+			return decode.LookupDecoder(contentType)
 		}
 	}
 
@@ -961,88 +790,159 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 			if !decode.IsRawDecoder(d) {
 				return d
 			}
-
-			mediaType, _, _ := strings.Cut(contentType, ";")
-
-			mediaType = strings.TrimSpace(mediaType)
-			switch {
-			case bytesconv.EqualFoldASCII(mediaType, "application/xml"),
-				bytesconv.EqualFoldASCII(mediaType, "text/xml"):
-				return decode.XMLDecoder
-			case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
-				bytesconv.EqualFoldASCII(mediaType, "application/protobuf"):
-				return decode.ProtoDecoder
-			case bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"),
-				bytesconv.EqualFoldASCII(mediaType, "application/grpc-web"),
-				bytesconv.EqualFoldASCII(mediaType, "application/grpc-web-text"):
-				return decode.GRPCWebDecoder
-			}
 		}
 	}
 
 	return decode.JSONDecoder
 }
 
-func validateAndMarshal(payload any) (io.Reader, error) {
-	if _, ok := payload.(RequestModifier); ok {
-		return nil, ErrModifierAsBody
-	}
+// --- Payload Serialization ---
 
-	if r, ok := payload.(io.Reader); ok {
-		return r, nil
-	}
-
-	if payload == nil {
-		return nil, nil
-	}
-
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
-	}
-
-	if bytes.Equal(bodyBytes, nullJSONBytes) {
-		bodyBytes = nil
-	}
-
-	return bytes.NewReader(bodyBytes), nil
+type preparedPayload struct {
+	bodyReader    io.Reader
+	contentType   string
+	contentLength int64
+	getBody       func() (io.ReadCloser, error)
 }
 
-func withJSONBodyMods(
-	stackBuf *[stackModCapacity]RequestModifier,
-	bodyReader io.Reader,
+func (p preparedPayload) IsEmpty() bool {
+	return p.bodyReader == nil
+}
+
+func (p preparedPayload) HasContentType() bool {
+	return p.contentType != ""
+}
+
+// PrependTo prepends the serialized body and content-type headers to the modifiers slice.
+func (p preparedPayload) PrependTo(
 	mods []RequestModifier,
+	stackBuf *[stackModCap]RequestModifier,
 ) []RequestModifier {
-	if bodyReader == nil {
+	if p.IsEmpty() {
 		return mods
 	}
 
+	totalLen := len(mods) + generic.Ternary(p.HasContentType(), 2, 1)
+
 	var allMods []RequestModifier
-
-	totalLen := len(mods) + 2
-
-	if totalLen <= stackModCapacity && stackBuf != nil {
+	if totalLen <= stackModCap && stackBuf != nil {
 		allMods = stackBuf[:0]
 	} else {
 		allMods = make([]RequestModifier, 0, totalLen)
 	}
 
-	allMods = append(allMods, mod.WithBody(bodyReader), mod.WithHeader("Content-Type", "application/json"))
+	allMods = append(allMods, mod.WithBody(p.bodyReader))
+	if p.HasContentType() {
+		allMods = append(allMods, mod.WithHeader("Content-Type", p.contentType))
+	}
+
 	allMods = append(allMods, mods...)
 
 	return allMods
 }
 
+func payloadFromBytes(b []byte, contentType string) preparedPayload {
+	return preparedPayload{
+		bodyReader:    bytes.NewReader(b),
+		contentType:   contentType,
+		contentLength: int64(len(b)),
+		getBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(b)), nil
+		},
+	}
+}
+
+func payloadFromString(s, contentType string) preparedPayload {
+	return preparedPayload{
+		bodyReader:    strings.NewReader(s),
+		contentType:   contentType,
+		contentLength: int64(len(s)),
+		getBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(s)), nil
+		},
+	}
+}
+
+func validateAndMarshal(payload any) (preparedPayload, error) {
+	if payload == nil {
+		return preparedPayload{}, nil
+	}
+
+	switch v := payload.(type) {
+	case RequestModifier:
+		return preparedPayload{}, ErrModifierAsBody
+
+	case io.Reader:
+		return preparedPayload{bodyReader: v, contentLength: -1}, nil
+
+	case []byte:
+		return payloadFromBytes(v, ""), nil
+
+	case string:
+		return payloadFromString(v, ""), nil
+
+	case url.Values:
+		return payloadFromString(v.Encode(), "application/x-www-form-urlencoded"), nil
+
+	case *url.Values:
+		if v == nil {
+			return preparedPayload{}, nil
+		}
+
+		return payloadFromString(v.Encode(), "application/x-www-form-urlencoded"), nil
+
+	case proto.Message:
+		if v == nil || (reflect.ValueOf(v).Kind() == reflect.Pointer && reflect.ValueOf(v).IsNil()) {
+			return preparedPayload{}, nil
+		}
+
+		bodyBytes, err := proto.Marshal(v)
+		if err != nil {
+			return preparedPayload{}, fmt.Errorf("aoni: failed to marshal protobuf payload: %w", err)
+		}
+
+		return payloadFromBytes(bodyBytes, "application/x-protobuf"), nil
+
+	default:
+		bodyBytes, err := json.Marshal(v)
+		if err != nil {
+			return preparedPayload{}, fmt.Errorf("aoni: failed to marshal JSON payload: %w", err)
+		}
+
+		if bytes.Equal(bodyBytes, nullJSONBytes) {
+			return preparedPayload{}, nil
+		}
+
+		return payloadFromBytes(bodyBytes, "application/json"), nil
+	}
+}
+
+func prepareBodyMods(
+	body any,
+	mods []RequestModifier,
+	stackBuf *[stackModCap]RequestModifier,
+) ([]RequestModifier, error) {
+	if body == nil {
+		return mods, nil
+	}
+
+	payload, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	return payload.PrependTo(mods, stackBuf), nil
+}
+
 func withCaptureMod(
-	stackBuf *[stackModCapacity]RequestModifier,
+	stackBuf *[stackModCap]RequestModifier,
 	target **http.Response,
 	mods []RequestModifier,
 ) []RequestModifier {
 	totalLen := len(mods) + 1
 
 	var allMods []RequestModifier
-
-	if totalLen <= stackModCapacity && stackBuf != nil {
+	if totalLen <= stackModCap && stackBuf != nil {
 		allMods = stackBuf[:0]
 	} else {
 		allMods = make([]RequestModifier, 0, totalLen)

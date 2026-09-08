@@ -62,6 +62,14 @@ func (g *FastGRPCClient) Invoke[Resp any](
 	defer req.Release()
 
 	req.SetContext(ctx)
+
+	result := new(Resp)
+
+	msg, ok := any(result).(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("aoni/fast: response type %T does not implement proto.Message", result)
+	}
+
 	req.SetMethod(http.MethodPost)
 	req.SetURL(path)
 	req.SetHeader(header.ContentType, header.MIMEApplicationGRPC)
@@ -75,13 +83,6 @@ func (g *FastGRPCClient) Invoke[Resp any](
 		return nil, err
 	}
 	defer resp.Close()
-
-	result := new(Resp)
-
-	msg, ok := any(result).(proto.Message)
-	if !ok {
-		return nil, fmt.Errorf("aoni/fast: response type %T does not implement proto.Message", result)
-	}
 
 	if _, err := grpc.UnmarshalFrame(bytes.NewReader(resp.BodyBytes()), msg); err != nil {
 		return nil, err
@@ -297,6 +298,11 @@ func (c *Client) FetchTo[Resp any](
 	}
 
 	result := new(Resp)
+	if resp.StatusCode() == http.StatusNoContent || resp.StatusCode() == http.StatusResetContent ||
+		len(resp.UnsafeBodyBytes()) == 0 {
+		return result, nil
+	}
+
 	if err := decode.Payload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), result); err != nil {
 		return nil, err
 	}
@@ -320,6 +326,11 @@ func (c *Client) FetchInto[Resp any](
 
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 		return &aoni.APIError{StatusCode: resp.StatusCode(), Body: resp.BodyBytes()}
+	}
+
+	if target == nil || resp.StatusCode() == http.StatusNoContent || resp.StatusCode() == http.StatusResetContent ||
+		len(resp.UnsafeBodyBytes()) == 0 {
+		return nil
 	}
 
 	return decode.Payload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), target)

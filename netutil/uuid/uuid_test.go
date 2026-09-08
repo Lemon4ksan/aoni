@@ -16,13 +16,49 @@ import (
 func TestUUIDFacade(t *testing.T) {
 	t.Parallel()
 
-	u4 := uuid.MustNewV4()
-	assert.True(t, uuid.IsValid(u4.String()))
+	t.Run("v4_generation_and_validation", func(t *testing.T) {
+		t.Parallel()
 
-	u7 := uuid.MustNewV7()
-	assert.True(t, uuid.IsValid(u7.String()))
+		u4, err := uuid.NewV4()
+		require.NoError(t, err)
+		assert.Equal(t, uuid.StringLength, len(u4.String()))
+		assert.True(t, uuid.IsValid(u4.String()))
 
-	parsed, err := uuid.Parse(u4.String())
-	require.NoError(t, err)
-	assert.Equal(t, u4, parsed)
+		mustU4 := uuid.MustNewV4()
+		assert.True(t, uuid.IsValid(mustU4.String()))
+	})
+
+	t.Run("v7_generation_and_validation", func(t *testing.T) {
+		t.Parallel()
+
+		u7, err := uuid.NewV7()
+		require.NoError(t, err)
+		assert.Equal(t, uuid.StringLength, len(u7.String()))
+		assert.True(t, uuid.IsValid(u7.String()))
+
+		mustU7 := uuid.MustNewV7()
+		assert.True(t, uuid.IsValid(mustU7.String()))
+	})
+
+	t.Run("parse_and_must_parse", func(t *testing.T) {
+		t.Parallel()
+
+		validStr := "018f4a12-8876-789a-bcde-f0123456789a"
+		parsed, err := uuid.Parse(validStr)
+		require.NoError(t, err)
+		assert.Equal(t, validStr, parsed.String())
+
+		mustParsed := uuid.MustParse(validStr)
+		assert.Equal(t, parsed, mustParsed)
+
+		_, err = uuid.Parse("invalid-uuid")
+		require.Error(t, err)
+	})
+
+	t.Run("nil_and_max_constants", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "00000000-0000-0000-0000-000000000000", uuid.Nil.String())
+		assert.Equal(t, "ffffffff-ffff-ffff-ffff-ffffffffffff", uuid.Max.String())
+	})
 }

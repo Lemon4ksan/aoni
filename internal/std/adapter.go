@@ -50,7 +50,7 @@ func NewHTTPDoerAdapter(doer HTTPDoer) core.RequestDoer {
 
 // Do executes a unified [core.Request] via the underlying [HTTPDoer]. Safe for concurrent execution.
 func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
-	if a == nil || a.doer == nil {
+	if a == nil || a.doer == nil || req == nil {
 		return nil, ErrNilRequest
 	}
 

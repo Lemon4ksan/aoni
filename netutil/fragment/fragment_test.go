@@ -258,3 +258,67 @@ func TestFragmentedConn_Write_Error(t *testing.T) {
 
 	_ = fragConn.Close()
 }
+
+func TestFragmentedConn_Pattern(t *testing.T) {
+	t.Parallel()
+
+	server, client := net.Pipe()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = client.Close()
+	})
+
+	cfg := &Config{
+		Pattern:       []byte("SPLIT"),
+		PatternOffset: 0,
+		MaxDelay:      1 * time.Millisecond,
+	}
+
+	fragConn := NewFragmentedConn(client, cfg)
+
+	data := []byte("prefixSPLITsuffix")
+
+	var received []byte
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		buf := make([]byte, 1024)
+		for {
+			n, err := server.Read(buf)
+			if n > 0 {
+				received = append(received, buf[:n]...)
+			}
+
+			if err != nil || len(received) >= len(data) {
+				break
+			}
+		}
+	}()
+
+	n, err := fragConn.Write(data)
+	require.NoError(t, err)
+	assert.Equal(t, len(data), n)
+
+	select {
+	case <-done:
+		assert.Equal(t, data, received)
+	case <-time.After(time.Second):
+		t.Fatal("timeout reading patterned fragments")
+	}
+}
+
+func TestFragmentedConn_LimitBytes_Defaults(t *testing.T) {
+	t.Parallel()
+
+	_, client := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+
+	c1 := NewFragmentedConn(client, &Config{LimitBytes: -1}).(*FragmentedConn)
+	assert.Equal(t, int64(0), c1.LimitBytes)
+
+	c2 := NewFragmentedConn(client, &Config{LimitBytes: 0}).(*FragmentedConn)
+	assert.Equal(t, int64(4096), c2.LimitBytes)
+}
