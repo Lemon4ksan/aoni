@@ -151,6 +151,19 @@ func UnwrapAs[T any](target any) (T, bool) {
 	return generic.Zero[T](), false
 }
 
+// UnwrapClient peels away decorator layers and returns the innermost [*Client].
+func UnwrapClient(target any) *Client {
+	if c, ok := target.(*Client); ok {
+		return c
+	}
+
+	if unwrapped, ok := UnwrapAs[*Client](target); ok {
+		return unwrapped
+	}
+
+	return nil
+}
+
 func unwrapNext(curr any) any {
 	switch u := curr.(type) {
 	case interface{ Unwrap() *Client }:

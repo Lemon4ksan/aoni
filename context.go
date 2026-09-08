@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	fio "github.com/lemon4ksan/foundation/iokit"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	frand "github.com/lemon4ksan/foundation/silicon/randkit"
+	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -25,10 +25,10 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// AsReplayable wraps an [io.ReadCloser] into a replayable stream ([fio.ReplayableBody])
+// AsReplayable wraps an [io.ReadCloser] into a replayable stream ([iokit.ReplayableBody])
 // using in-memory byte buffers or tee-buffered fallbacks to support stream rewinding.
-func AsReplayable(rc io.ReadCloser) fio.ReplayableBody {
-	return fio.AsReplayable(rc)
+func AsReplayable(rc io.ReadCloser) iokit.ReplayableBody {
+	return iokit.AsReplayable(rc)
 }
 
 // ResponseTrace extracts fine-grained execution metrics and network timing details
@@ -142,7 +142,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += frand.Jitter(window)
+		delay += randkit.Jitter(window)
 	}
 
 	if delay <= 0 {
@@ -228,7 +228,7 @@ func GetRetryOverride(ctx context.Context) generic.Optional[core.RetryOverride] 
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
-			return furl.Parse(raw)
+			return urlkit.Parse(raw)
 		}
 
 		if base != nil {

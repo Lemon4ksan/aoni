@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"time"
 
-	flog "github.com/lemon4ksan/foundation/async/logkit"
+	log "github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
@@ -355,6 +355,77 @@ func (c *Client) Head(ctx context.Context, path string, mods ...RequestModifier)
 	return c.Request(ctx, http.MethodHead, path, mods...)
 }
 
+// Get executes a raw HTTP GET request against path and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
+}
+
+// Post executes a raw HTTP POST request carrying body and returns the raw [*http.Response].
+//
+// The body argument is automatically detected and serialized:
+//   - Struct / Map / Slice -> JSON payload with "Content-Type: application/json"
+//   - [proto.Message] -> Protobuf binary payload with "Content-Type: application/x-protobuf"
+//   - [url.Values] -> Form payload with "Content-Type: application/x-www-form-urlencoded"
+//   - `[]byte` / `string` / [io.Reader] -> Raw payload (no default Content-Type header)
+func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return c.Fetch(ctx, http.MethodPost, path, body, mods...)
+}
+
+// Put executes a raw HTTP PUT request carrying body and returns the raw [*http.Response].
+//
+// See [Client.Post] for automatic body detection and serialization rules.
+func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return c.Fetch(ctx, http.MethodPut, path, body, mods...)
+}
+
+// Patch executes a raw HTTP PATCH request carrying body and returns the raw [*http.Response].
+//
+// See [Client.Post] for automatic body detection and serialization rules.
+func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return c.Fetch(ctx, http.MethodPatch, path, body, mods...)
+}
+
+// Delete executes a raw HTTP DELETE request and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Options executes a raw HTTP OPTIONS request and returns the raw [*http.Response].
+//
+// # Resource Management
+//
+// Caller MUST close resp.Body to prevent socket leaks.
+func (c *Client) Options(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodOptions, path, mods...)
+}
+
+// Fetch executes an arbitrary raw HTTP method request and returns the raw [*http.Response].
+//
+// See [Client.Post] for automatic body detection and serialization rules.
+func (c *Client) Fetch(
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) (*http.Response, error) {
+	var stackBuf [stackModCap]RequestModifier
+
+	allMods, err := prepareBodyMods(body, mods, &stackBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.Request(ctx, method, path, allMods...)
+}
+
 // doBaremetal executes a request on the minimal allocation path - bypassing AcquireTx,
 // NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
 // and no per-request mods or config are present.
@@ -591,7 +662,7 @@ func (c *Client) BrowserID() BrowserID {
 // Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
 func (c *Client) Logger() core.Logger {
 	if c.cfg.Defaults.Logger == nil {
-		return flog.Discard
+		return log.Discard
 	}
 
 	return c.cfg.Defaults.Logger
