@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/ctxkit"
+	"github.com/lemon4ksan/foundation/async/ctxkit"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -29,13 +29,13 @@ type (
 // WithProxyAddress returns a new Context carrying the active proxy URL string for cookie jar partitioning.
 // Yields a child context containing proxyCtxKey with value addr.
 func WithProxyAddress(ctx context.Context, addr string) context.Context {
-	return asyncctx.WithValue(ctx, proxyCtxKey{}, addr)
+	return ctxkit.WithValue(ctx, proxyCtxKey{}, addr)
 }
 
 // GetProxyAddress retrieves the active proxy URL string stored in the context.
 // Returns the proxy URL string if present; otherwise returns an empty string.
 func GetProxyAddress(ctx context.Context) string {
-	return asyncctx.GetOr(ctx, proxyCtxKey{}, "")
+	return ctxkit.GetOr(ctx, proxyCtxKey{}, "")
 }
 
 // WithPartitionKey returns a Context carrying a CHIPS (RFC 6265bis) top-level site partition key.
@@ -43,12 +43,12 @@ func GetProxyAddress(ctx context.Context) string {
 // Specification Adherence:
 // Conforms to RFC 6265bis CHIPS (Cookies Having Independent Partitioned State) specification.
 func WithPartitionKey(ctx context.Context, key string) context.Context {
-	return asyncctx.WithValue(ctx, partitionCtxKey{}, key)
+	return ctxkit.WithValue(ctx, partitionCtxKey{}, key)
 }
 
 // GetPartitionKey retrieves the active CHIPS top-level site partition key or Network Isolation Key from context.
 func GetPartitionKey(ctx context.Context) string {
-	if k := asyncctx.GetOr(ctx, partitionCtxKey{}, ""); k != "" {
+	if k := ctxkit.GetOr(ctx, partitionCtxKey{}, ""); k != "" {
 		return k
 	}
 
@@ -373,6 +373,13 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		_ = pj.backend.Save(pj.proxyURL, flushList)
 	}
 }
+
+// Finder defines a capability interface for cookie jars that support direct named cookie lookups.
+type Finder interface {
+	FindCookie(u *url.URL, name string) (*http.Cookie, bool)
+}
+
+var _ Finder = (*ProxyIsolatedJar)(nil)
 
 // FindCookie searches for a cookie by name for a given URL and reports whether it was found.
 func (p *ProxyIsolatedJar) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {

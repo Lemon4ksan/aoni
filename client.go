@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -279,7 +280,7 @@ func (c *Client) doPipeline(
 
 	resp, err := c.execute(req, c.resolvePipeline(req))
 	if err != nil {
-		return nil, &Error{Op: "request failed", Err: err}
+		return nil, &Error{Op: "execute", Err: err}
 	}
 
 	return resp, nil
@@ -327,26 +328,6 @@ func (c *Client) RequestScoped(
 	defer scope.Release()
 
 	return fn(scope, resp)
-}
-
-// GetScoped executes an HTTP GET request within an auto-releasing [borrow.Scope] context.
-func (c *Client) GetScoped(
-	ctx context.Context,
-	path string,
-	fn func(s *borrow.Scope, resp *http.Response) error,
-	mods ...RequestModifier,
-) error {
-	return c.RequestScoped(ctx, http.MethodGet, path, fn, mods...)
-}
-
-// PostScoped executes an HTTP POST request within an auto-releasing [borrow.Scope] context.
-func (c *Client) PostScoped(
-	ctx context.Context,
-	path string,
-	fn func(s *borrow.Scope, resp *http.Response) error,
-	mods ...RequestModifier,
-) error {
-	return c.RequestScoped(ctx, http.MethodPost, path, fn, mods...)
 }
 
 // Head executes an HTTP HEAD request against path to inspect headers without fetching the body.
@@ -454,7 +435,7 @@ func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Re
 
 	resp, err := c.engine.Do(req)
 	if err != nil {
-		return nil, &Error{Op: "request failed", Err: err}
+		return nil, &Error{Op: "execute", Err: err}
 	}
 
 	return resp, nil
@@ -487,7 +468,7 @@ func (c *Client) Do(req Request) (Response, error) {
 
 	resp, err := c.execute(httpReq, c.resolvePipeline(httpReq)) //nolint:bodyclose
 	if err != nil {
-		return nil, &Error{Op: "request failed", Err: err}
+		return nil, &Error{Op: "execute", Err: err}
 	}
 
 	return NewStdResponse(resp), nil
@@ -495,6 +476,12 @@ func (c *Client) Do(req Request) (Response, error) {
 
 // Close releases background janitor workers and engine resources. Safe for repeated calls.
 func (c *Client) Close() {
+	c.CloseIdleConnections()
+
+	if closer, ok := c.engine.(io.Closer); ok {
+		_ = closer.Close()
+	}
+
 	if c.coreEngine != nil {
 		c.coreEngine.Close()
 	}
@@ -590,8 +577,8 @@ func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
 		return nil, false
 	}
 
-	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
-		return pJar.FindCookie(u, name)
+	if finder, ok := jar.(cookie.Finder); ok {
+		return finder.FindCookie(u, name)
 	}
 
 	return generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
@@ -619,11 +606,7 @@ func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
 
 // GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
 func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
-	if val, ok := c.GetCookieValue(u, name); ok {
-		return generic.Some(val)
-	}
-
-	return generic.None[string]()
+	return generic.From(c.GetCookieValue(u, name))
 }
 
 // Inspector yields the diagnostic [telemetry.TrafficInspector] if configured.
@@ -642,21 +625,7 @@ func (c *Client) TLSConfig() *tls.Config {
 
 // BrowserID inspects active TLS dialers to deduce the active [BrowserID] profile.
 func (c *Client) BrowserID() BrowserID {
-	if c.cfg.Fingerprint.BrowserID != BrowserNone {
-		return c.cfg.Fingerprint.BrowserID
-	}
-
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok || httpClient.Transport == nil {
-		return BrowserNone
-	}
-
-	tr, ok := httpClient.Transport.(*http.Transport)
-	if ok && tr.DialTLSContext != nil {
-		return BrowserChrome
-	}
-
-	return BrowserNone
+	return c.cfg.Fingerprint.BrowserID
 }
 
 // Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
@@ -692,14 +661,20 @@ func (c *Client) LogValue() slog.Value {
 
 // Transport retrieves the underlying [*http.Transport] from the engine.
 func (c *Client) Transport() *http.Transport {
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok || httpClient.Transport == nil {
+	if c == nil || c.engine == nil {
 		return nil
 	}
 
-	tr, _ := UnwrapAs[*http.Transport](httpClient.Transport)
+	if httpClient, ok := UnwrapAs[*http.Client](c.engine); ok && httpClient.Transport != nil {
+		tr, _ := UnwrapAs[*http.Transport](httpClient.Transport)
+		return tr
+	}
 
-	return tr
+	if tp, ok := UnwrapAs[interface{ Transport() *http.Transport }](c.engine); ok {
+		return tp.Transport()
+	}
+
+	return nil
 }
 
 // InitRequestConfig attaches or retrieves a pooled [RequestConfig] on the request context.
@@ -719,7 +694,7 @@ func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 
 // CloseIdleConnections closes all idle keep-alive connections maintained in the pool.
 func (c *Client) CloseIdleConnections() {
-	if closer, ok := c.engine.(interface{ CloseIdleConnections() }); ok {
+	if closer, ok := UnwrapAs[interface{ CloseIdleConnections() }](c.engine); ok {
 		closer.CloseIdleConnections()
 	}
 }
@@ -776,7 +751,7 @@ func (c *Client) ensureUserAgent() {
 func (c *Client) resolveURL(path string) (*url.URL, error) {
 	u, err := urlkit.Resolve(c.prepared.BaseURL, path)
 	if err != nil {
-		return nil, &Error{Op: "failed to resolve URL", Err: err}
+		return nil, &Error{Op: "resolve_url", Err: err}
 	}
 
 	return u, nil

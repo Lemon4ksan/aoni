@@ -60,22 +60,25 @@ func Handle(resp *http.Response, target, client any) error {
 
 // Handler encapsulates the lifecycle and decoding pipeline of an HTTP response.
 type Handler struct {
-	resp    *http.Response
-	target  any
-	client  any
-	cfg     *pipeline.RequestConfig
-	decoder decode.Decoder
+	resp             *http.Response
+	target           any
+	client           any
+	cfg              *pipeline.RequestConfig
+	decoder          decode.Decoder
+	hasCustomDecoder bool
 }
 
 func newHandler(resp *http.Response, target, client any) Handler {
 	cfg := extractRequestConfig(resp)
+	dec, hasCustom := resolveDecoder(resp, cfg)
 
 	return Handler{
-		resp:    resp,
-		target:  target,
-		client:  client,
-		cfg:     cfg,
-		decoder: resolveDecoder(resp, cfg),
+		resp:             resp,
+		target:           target,
+		client:           client,
+		cfg:              cfg,
+		decoder:          dec,
+		hasCustomDecoder: hasCustom,
 	}
 }
 
@@ -210,42 +213,45 @@ func (h *Handler) decodeSuccess() error {
 		return nil
 	}
 
-	switch v := h.target.(type) {
-	case core.DirectConsumer:
-		return v.ReadFromReader(h.resp.Body)
+	if consumer, ok := h.target.(core.DirectConsumer); ok {
+		return consumer.ReadFromReader(h.resp.Body)
+	}
 
-	case *[]byte:
-		b, err := io.ReadAll(h.resp.Body)
-		if err != nil {
-			return err
-		}
-
-		*v = b
-
-		return nil
-
-	case *string:
-		b, err := io.ReadAll(h.resp.Body)
-		if err != nil {
-			return err
-		}
-
-		*v = string(b)
-
-		return nil
-
-	case io.Writer:
-		_, err := io.Copy(v, h.resp.Body)
-		return err
-
-	default:
-		err := h.decoder.Decode(h.resp.Body, h.target)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-
+	if w, ok := h.target.(io.Writer); ok {
+		_, err := io.Copy(w, h.resp.Body)
 		return err
 	}
+
+	if !h.hasCustomDecoder {
+		switch v := h.target.(type) {
+		case *[]byte:
+			b, err := io.ReadAll(h.resp.Body)
+			if err != nil {
+				return err
+			}
+
+			*v = b
+
+			return nil
+
+		case *string:
+			b, err := io.ReadAll(h.resp.Body)
+			if err != nil {
+				return err
+			}
+
+			*v = string(b)
+
+			return nil
+		}
+	}
+
+	err := h.decoder.Decode(h.resp.Body, h.target)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+
+	return err
 }
 
 func (h *Handler) extractBaseResponse() core.BaseResponse {
@@ -353,33 +359,33 @@ func dumpMultipart(req *http.Request) []byte {
 	)
 }
 
-func resolveDecoder(resp *http.Response, cfg *pipeline.RequestConfig) decode.Decoder {
+func resolveDecoder(resp *http.Response, cfg *pipeline.RequestConfig) (decode.Decoder, bool) {
 	if cfg != nil {
 		if cfg.ForceContentType != "" {
-			return decode.LookupDecoder(cfg.ForceContentType)
+			return decode.LookupDecoder(cfg.ForceContentType), true
 		}
 
 		if cfg.Decoder != nil {
 			if d, ok := cfg.Decoder.(decode.Decoder); ok && d != nil {
-				return d
+				return d, true
 			}
 
-			return cfg.Decoder
+			return cfg.Decoder, true
 		}
 
 		contentType := resp.Header.Get("Content-Type")
 		if contentType != "" {
 			if d := cfg.LookupDecoder(contentType); d != nil {
 				if dec, ok := d.(decode.Decoder); ok && dec != nil {
-					return dec
+					return dec, true
 				}
 
-				return decode.DecoderFunc(d.Decode)
+				return decode.DecoderFunc(d.Decode), true
 			}
 		}
 
 		if cfg.AutoDecode && contentType != "" {
-			return decode.LookupDecoder(contentType)
+			return decode.LookupDecoder(contentType), false
 		}
 	}
 
@@ -387,15 +393,15 @@ func resolveDecoder(resp *http.Response, cfg *pipeline.RequestConfig) decode.Dec
 		contentType := resp.Header.Get("Content-Type")
 		if contentType != "" {
 			if contentType == "application/json" || contentType == "application/json; charset=utf-8" {
-				return decode.JSONDecoder
+				return decode.JSONDecoder, false
 			}
 
 			d := decode.LookupDecoder(contentType)
 			if !decode.IsRawDecoder(d) {
-				return d
+				return d, false
 			}
 		}
 	}
 
-	return decode.JSONDecoder
+	return decode.JSONDecoder, false
 }

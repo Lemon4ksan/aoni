@@ -37,6 +37,10 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
+// ============================================================================
+// Section 1: Protocols, Networks & Fundamental Constants
+// ============================================================================
+
 const (
 	// AlpnH3 specifies the Application-Layer Protocol Negotiation (ALPN) token
 	// for negotiating HTTP/3 over QUIC transport during TLS 1.3 handshakes (RFC 9114).
@@ -202,6 +206,10 @@ var DefaultSensitiveHeaders = []string{
 	"X-Auth-Token",
 }
 
+// ============================================================================
+// Section 2: Root Config (Pure DTO)
+// ============================================================================
+
 // Config is the root Data Transfer Object (DTO) aggregating all client settings.
 // It is 100% pure data with no dynamic runtime state or active mutex locks.
 //
@@ -284,6 +292,10 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
 	}
 }
+
+// ============================================================================
+// Section 3: Engine & Connection Pool Configuration
+// ============================================================================
 
 // EngineConfig governs low-level HTTP execution engine parameters, connection pool boundaries,
 // socket I/O memory buffers, protocol-specific keep-alive probes, and redirect policies.
@@ -492,6 +504,10 @@ const (
 	ExpBusyPoll
 )
 
+// ============================================================================
+// Section 4: L3/L4 Network Layer Configuration
+// ============================================================================
+
 // NetworkConfig configures L3/L4 transport parameters, proxy routing, custom DNS resolution,
 // dual-stack IPv4/IPv6 racing (Happy Eyeballs v2 / RFC 8305), SSRF guards, and kernel socket options.
 type NetworkConfig struct {
@@ -544,6 +560,10 @@ type NetworkConfig struct {
 	HappyEyeballsDelay time.Duration
 
 	// HedgingDelay sets the fixed fallback duration before launching a secondary speculative request.
+	//
+	// Precedence & Pipeline Interaction:
+	// Serves as default dial hedging delay. If [PipelineConfig.Hedging] is nil, HedgingDelay and
+	// [NetworkConfig.DynamicHedging] are automatically synthesized into a [HedgingConfig] during request execution.
 	HedgingDelay time.Duration
 
 	// InterfaceName binds outgoing sockets to a designated network interface (e.g. "eth0", "wlan0", "wg0").
@@ -700,6 +720,10 @@ func (d DecoderMap) Clone() DecoderMap {
 	return cloned
 }
 
+// ============================================================================
+// Section 5: Fingerprint & Evasion Layer Configuration (TLS / H2 / H3 / p0f)
+// ============================================================================
+
 // FingerprintConfig controls TLS ClientHello emulation, HTTP/2 SETTINGS frames,
 // header order serialization, p0f OS stack spoofing, and ECH/0-RTT features.
 //
@@ -818,6 +842,10 @@ func (f FingerprintConfig) IsBaremetalEligible() bool {
 	return !f.RequiresRequestContext() && f.PacketPadding == nil
 }
 
+// ============================================================================
+// Section 6: Client Defaults Configuration (L7 Application Defaults)
+// ============================================================================
+
 // ClientDefaults configures default headers, interceptor hooks, resource limits, decoders, and pipeline policies.
 type ClientDefaults struct {
 	// BaseURL is the default root endpoint used to resolve relative request paths (RFC 3986).
@@ -829,10 +857,16 @@ type ClientDefaults struct {
 
 	// MaxResponseSize caps response body reads in bytes to prevent Out-Of-Memory (OOM) crashes.
 	// Set to <= 0 for unlimited. Default: 10MB (10 * 1024 * 1024 bytes).
+	//
+	// Precedence:
+	// Acts as global default. Overridden if [PipelineConfig.SizeLimit] is set to a non-zero value.
 	MaxResponseSize int64
 
 	// MultiReadThreshold sets the RAM buffering boundary (in bytes) before spilling over to temporary disk files.
 	// Enables replayable/rewindable stream reading ([io.Seeker]) without unbounded heap growth.
+	//
+	// Precedence:
+	// Acts as global default. Overridden if [PipelineConfig.MultiReadThreshold] is set to a non-zero value.
 	MultiReadThreshold int64
 
 	// MultiReadDisableDisk forces in-memory-only buffering, failing if MultiReadThreshold is exceeded.
@@ -983,6 +1017,10 @@ func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 	return res
 }
 
+// ============================================================================
+// Section 7: Pipeline Configuration (5-Stage Execution Engine)
+// ============================================================================
+
 // PipelineConfig coordinates the behavior, resilience policies, and evasion capabilities
 // of the 5-stage transaction execution pipeline.
 //
@@ -1020,7 +1058,10 @@ type PipelineConfig struct {
 	// If an initial request has not returned headers within the configured percentile RTT (e.g. p95),
 	// a secondary speculative request is launched concurrently. The first socket to deliver valid headers
 	// wins the race, and the losing socket is cancelled immediately to preserve bandwidth.
-	// If nil, speculative hedging is disabled.
+	//
+	// Precedence:
+	// When nil, automatically synthesized from [NetworkConfig.HedgingDelay] and [NetworkConfig.DynamicHedging].
+	// When non-nil, explicitly overrides network-level hedging defaults.
 	Hedging *HedgingConfig
 
 	// Cache configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
@@ -1053,7 +1094,10 @@ type PipelineConfig struct {
 	// Protects the runtime from decompression bombs, malicious endless chunked streams, and accidental
 	// gigabyte downloads by bounding body reads with an [io.LimitReader]. Exceeding this boundary
 	// terminates the stream immediately with an error before heap exhaustion occurs.
-	// Set to <= 0 for unlimited body streaming. Default: 10MB (10 * 1024 * 1024 bytes).
+	// Set to <= 0 for unlimited body streaming.
+	//
+	// Precedence:
+	// If set to 0 (unset), automatically inherits [ClientDefaults.MaxResponseSize] (default: 10MB).
 	SizeLimit int64
 
 	// MultiReadThreshold defines the RAM buffering capacity (in bytes) for rewindable response streams.
@@ -1063,6 +1107,9 @@ type PipelineConfig struct {
 	// Payloads exceeding this threshold transparently spill over to temporary disk files, enabling unlimited
 	// stream rewindability ([io.Seeker]) without exhausting server memory.
 	// Set to 0 to disable memory caching and force direct streaming.
+	//
+	// Precedence:
+	// If set to 0 (unset), automatically inherits [ClientDefaults.MultiReadThreshold].
 	MultiReadThreshold int64
 
 	// RotateUA enables automatic User-Agent and Client Hints rotation across sequential transactions.
@@ -1266,6 +1313,10 @@ func clonePtr[T any](p *T) *T {
 	return new(*p)
 }
 
+// ============================================================================
+// Section 8: Request Context & Internal Pipeline Bridges
+// ============================================================================
+
 // RequestConfig aggregates request-scoped execution options, transport overrides,
 // tracing carriers, and custom metadata attached to an in-flight HTTP transaction.
 type RequestConfig = pipeline.RequestConfig
@@ -1287,6 +1338,10 @@ func CloseResponse(resp *http.Response) {
 }
 
 func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
+	if cfg.Network == "" && c.cfg.Network.Network != "" {
+		cfg.Network = c.cfg.Network.Network.String()
+	}
+
 	if !cfg.SSRFGuard {
 		cfg.SSRFGuard = c.cfg.Network.SSRFGuard
 	}
@@ -1309,6 +1364,18 @@ func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 
 	if cfg.ProxyAddr == nil {
 		cfg.ProxyAddr = c.cfg.Network.ProxyAddr
+	}
+
+	if cfg.DNSResolver == nil {
+		cfg.DNSResolver = c.cfg.Network.DNSResolver
+	}
+
+	if cfg.HostRewrite == nil {
+		cfg.HostRewrite = c.cfg.Network.HostRewrite
+	}
+
+	if cfg.Fragment == nil {
+		cfg.Fragment = c.cfg.Network.FragmentConfig
 	}
 
 	if cfg.P0fSignature == nil {
@@ -1396,6 +1463,10 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 
 	if pipe.SizeLimit == 0 {
 		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
+	}
+
+	if pipe.MultiReadThreshold == 0 && c.cfg.Defaults.MultiReadThreshold != 0 {
+		pipe.MultiReadThreshold = c.cfg.Defaults.MultiReadThreshold
 	}
 
 	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
@@ -1580,6 +1651,10 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 
 	return res
 }
+
+// ============================================================================
+// Section 9: Redirect Policies & Transport Helpers
+// ============================================================================
 
 // AllowedDomainsRedirectPolicy constructs an [http.Client.CheckRedirect] policy function
 // restricting HTTP redirects strictly to allowed domain patterns (e.g., "*.example.com").

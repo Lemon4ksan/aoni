@@ -121,7 +121,7 @@ func TestFluent_BatchGetTo(t *testing.T) {
 		paths[i] = fmt.Sprintf("%s/item?id=%d", ts.URL, i)
 	}
 
-	items, err := aoni.BatchGetTo[Item](context.Background(), nil, paths)
+	items, err := aoni.BatchFetchTo[Item](context.Background(), nil, http.MethodGet, paths)
 	require.NoError(t, err)
 	require.Len(t, items, 10)
 	for i := range 10 {
@@ -244,7 +244,7 @@ func BenchmarkFluent_BatchGetTo50(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		items, err := aoni.BatchGetTo[Item](context.Background(), nil, paths)
+		items, err := aoni.BatchFetchTo[Item](context.Background(), nil, http.MethodGet, paths)
 		if err != nil || len(items) != 50 {
 			b.Fatalf("batch error: %v", err)
 		}

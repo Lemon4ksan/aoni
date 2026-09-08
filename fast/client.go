@@ -979,6 +979,10 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
 
+	if pipe.MultiReadThreshold == 0 && c.cfg.Defaults.MultiReadThreshold != 0 {
+		pipe.MultiReadThreshold = c.cfg.Defaults.MultiReadThreshold
+	}
+
 	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true
 	}

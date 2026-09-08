@@ -105,7 +105,7 @@ func TestAoni_FetchScoped(t *testing.T) {
 	}
 
 	called := false
-	err := aoni.GetScoped[User](context.Background(), nil, ts.URL, func(scope *borrow.Scope, val User, resp *http.Response) error {
+	err := aoni.FetchScoped[User](context.Background(), nil, http.MethodGet, ts.URL, func(scope *borrow.Scope, val User, resp *http.Response) error {
 		called = true
 		require.Equal(t, 42, val.ID)
 		require.Equal(t, "scoped_user", val.Name)
