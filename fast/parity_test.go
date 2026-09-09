@@ -121,10 +121,6 @@ func TestFastClient_CookieParity(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "abc123xyz", c.Value)
 
-		cOpt := client.FindCookieOptional(targetURL, "session_id")
-		require.True(t, cOpt.IsPresent())
-		assert.Equal(t, "abc123xyz", cOpt.MustValue().Value)
-
 		_, missing := client.FindCookie(targetURL, "nonexistent")
 		assert.False(t, missing)
 
@@ -132,10 +128,6 @@ func TestFastClient_CookieParity(t *testing.T) {
 		val, okVal := client.GetCookieValue(targetURL, "role")
 		require.True(t, okVal)
 		assert.Equal(t, "admin", val)
-
-		valOpt := client.GetCookieValueOptional(targetURL, "role")
-		require.True(t, valOpt.IsPresent())
-		assert.Equal(t, "admin", valOpt.ValueOr("guest"))
 	})
 
 	t.Run("aoni.Client", func(t *testing.T) {
@@ -155,10 +147,6 @@ func TestFastClient_CookieParity(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "abc123xyz", c.Value)
 
-		cOpt := client.FindCookieOptional(targetURL, "session_id")
-		require.True(t, cOpt.IsPresent())
-		assert.Equal(t, "abc123xyz", cOpt.MustValue().Value)
-
 		_, missing := client.FindCookie(targetURL, "nonexistent")
 		assert.False(t, missing)
 
@@ -166,10 +154,6 @@ func TestFastClient_CookieParity(t *testing.T) {
 		val, okVal := client.GetCookieValue(targetURL, "role")
 		require.True(t, okVal)
 		assert.Equal(t, "admin", val)
-
-		valOpt := client.GetCookieValueOptional(targetURL, "role")
-		require.True(t, valOpt.IsPresent())
-		assert.Equal(t, "admin", valOpt.ValueOr("guest"))
 	})
 }
 

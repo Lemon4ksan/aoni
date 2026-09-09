@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package fast provides an ultra-high-throughput, zero-allocation multi-protocol HTTP client engine.
+// Package fast provides a high-throughput multi-protocol HTTP client engine
+// supporting HTTP/1.1 (via fasthttp), HTTP/2, and HTTP/3.
 //
-// It provides a high-level, Swift-inspired API on top of fasthttp, uTLS, native HTTP/2 framing,
-// and native HTTP/3 QUIC, designed for extreme-throughput environments (1.87M+ RPS) with absolute zero
-// heap allocations under parallel I/O.
+// The engine minimizes heap allocations on request hot paths through buffer pooling,
+// protocol multiplexing, and direct byte representations.
 //
 // # Architectural Encapsulation
 //

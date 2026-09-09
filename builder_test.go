@@ -20,14 +20,6 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
-type customAuth struct {
-	token string
-}
-
-func (c customAuth) AuthModifier() aoni.RequestModifier {
-	return mod.WithHeader("X-Custom-Auth", c.token)
-}
-
 func TestRequestBuilder_AuthProtocols(t *testing.T) {
 	t.Run("BearerAuth replaced by BasicAuth without conflicting state", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,15 +35,15 @@ func TestRequestBuilder_AuthProtocols(t *testing.T) {
 
 		client := aoni.New()
 		resp, err := client.R().
-			SetAuth(aoni.BearerAuth("legacy_token")).
-			SetAuth(aoni.BasicAuth("admin", "secret123")).
+			SetAuth(mod.WithBearer("legacy_token")).
+			SetAuth(mod.WithBasicAuth("admin", "secret123")).
 			Get(ts.URL)
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
-	t.Run("Custom Authenticator protocol", func(t *testing.T) {
+	t.Run("Custom Auth modifier", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			customHeader := r.Header.Get("X-Custom-Auth")
 			assert.Equal(t, "my-secret-key", customHeader)
@@ -62,12 +54,35 @@ func TestRequestBuilder_AuthProtocols(t *testing.T) {
 
 		client := aoni.New()
 		resp, err := client.R().
-			SetAuth(customAuth{token: "my-secret-key"}).
+			SetAuth(mod.WithHeader("X-Custom-Auth", "my-secret-key")).
 			Get(ts.URL)
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
+}
+
+func TestRequestBuilder_ConsumedGuard(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	client := aoni.New()
+	req := client.R()
+	resp, err := req.Get(ts.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Second execution on consumed builder MUST return ErrBuilderConsumed
+	_, err = req.Get(ts.URL)
+	require.ErrorIs(t, err, aoni.ErrBuilderConsumed)
+
+	// Acquiring a fresh builder from the client works as expected
+	req2 := client.R()
+	resp2, err := req2.Get(ts.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 }
 
 func TestRequestBuilder_BodyReplacement(t *testing.T) {

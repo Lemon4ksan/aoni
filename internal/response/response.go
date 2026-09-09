@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"slices"
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
@@ -160,8 +161,7 @@ func (h *Handler) checkHTML(buf *bufio.Reader) error {
 		return nil
 	}
 
-	firstNonSpace := requestutil.FindFirstNonWhitespaceByte(peekBytes)
-	if firstNonSpace != '<' {
+	if requestutil.FindFirstNonWhitespaceByte(peekBytes) != '<' {
 		return nil
 	}
 
@@ -182,8 +182,19 @@ func (h *Handler) decodeAPIError() error {
 	apiErr := &core.APIError{StatusCode: h.resp.StatusCode, Body: bodyBytes}
 
 	if h.cfg != nil && h.cfg.ErrorModel != nil {
-		if err := json.Unmarshal(bodyBytes, h.cfg.ErrorModel); err == nil {
+		switch m := h.cfg.ErrorModel.(type) {
+		case *[]byte:
+			*m = slices.Clone(bodyBytes)
 			apiErr.Model = h.cfg.ErrorModel
+		case *string:
+			*m = string(bodyBytes)
+			apiErr.Model = h.cfg.ErrorModel
+		default:
+			if h.decoder != nil && h.decoder.Decode(bytes.NewReader(bodyBytes), h.cfg.ErrorModel) == nil {
+				apiErr.Model = h.cfg.ErrorModel
+			} else if json.Unmarshal(bodyBytes, h.cfg.ErrorModel) == nil {
+				apiErr.Model = h.cfg.ErrorModel
+			}
 		}
 	}
 

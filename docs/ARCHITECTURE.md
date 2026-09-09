@@ -1,173 +1,144 @@
-# Architecture & Silicon Engine Specification
+# Architecture & System Design
+
+This document describes the layered architecture, package boundaries, and concurrency/memory invariants of the `aoni` repository.
 
 ```text
     ┌──────────────────────────────────────────────────────────────────┐
-    │                          VORTEX TOOLCHAIN                        │
-    │   AST Generator • Mock Server • Live Web Inspector • CI Drift    │
+    │                      Layer 4: Public APIs                        │
+    │   aoni (net/http client) • fast (fasthttp/H2/H3) • option • mod  │
     └─────────────────────────────────┬────────────────────────────────┘
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
-    │                             AONI CORE                            │
-    │   RFC 9110/9113/9114 • Happy Eyeballs v3 • Stealth TLS / JA4     │
-    │   ┌───────────────────────────┐    ┌──────────────────────────┐  │
-    │   │      Standard Engine      │    │       Fast Engine        │  │
-    │   │ (100% net/http Drop-in)   │    │ (2.34M+ RPS / Zero Alloc)│  │
-    │   └───────────────────────────┘    └──────────────────────────┘  │
+    │              Layer 3: Policies, Codecs & Features                │
+    │   resiliency • cookie • codec • realtime • fingerprint • tunnel  │
     └─────────────────────────────────┬────────────────────────────────┘
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
-    │                         FOUNDATION RUNTIME                       │
-    │   SWAR/SIMD • Off-Heap Slabs • HugePages • Fast Lock-Free Prims  │
+    │                Layer 2: Engines & Pipeline                       │
+    │   internal/pipeline • internal/fast/h1/h2/h3 • internal/core     │
+    └─────────────────────────────────┬────────────────────────────────┘
+                                      │
+    ┌─────────────────────────────────▼────────────────────────────────┐
+    │              Layer 1: Wire Protocols & OS Details                │
+    │   internal/quic • internal/qpack • internal/sys                  │
     └──────────────────────────────────────────────────────────────────┘
 ```
 
-> **The Core Engineering Axiom**:
-> *"Networking is not an abstract I/O stream; it is the structured serialization and transfer of hardware cache lines over silicon. Every byte allocated in the application layer is a CPU cycle stolen from wire throughput."*
+---
 
-## 1. The Three-Layer Architecture
+## 1. The 4-Tier Layered Architecture
 
-`aoni` is structured into three strictly decoupled, mathematically verified architectural tiers.
+The repository is structured into four distinct layers with strict unidirectional dependency rules: higher layers may depend on lower layers, but lower layers never depend on higher layers.
 
-### Tier 1: `foundation` (Hardware & OS Abstraction)
-The substrate beneath the protocol engine. Operates directly on cache lines, OS virtual memory pages, and 64-bit CPU registers:
-- **`silicon/offheap`**: Single-cycle bump allocation (`Arena`), RAII scopes (`Scope`), and lock-free typed memory slabs (`SlabAllocator[T]`) backed by OS kernel pages (`mmap` / `VirtualAlloc`). Completely bypasses Go runtime GC scan pauses.
-- **`silicon/simd`**: SWAR (SIMD Within A Register) vectorized algorithms scanning 8 to 64 bytes per instruction for CRLF boundaries, header terminators, and byte lookups.
-- **`silicon/clock` / `timekit`**: Nanosecond coarse monotonic clock reducing `time.Now()` syscall overhead to a single atomic integer read (0.28 ns).
-- **`bufkit`**: Lock-free SPSC ring buffers and scatter-gather page chains with 64-byte cache-line padding.
-- **`netutil/iouring`**: Linux `io_uring` direct SQ/CQ ring-buffer memory-mapped socket engine bypassing kernel syscalls.
-- **`net/url`**: Zero-allocation sharded URL cache and query composer eliminating dynamic string allocations on hot routes.
+### Layer 4: Public APIs
+The entry points consumed by application code:
+- **`package aoni`**: The primary HTTP client facade (`aoni.Client`). Fully compatible with `net/http.RoundTripper`, standard contexts, and standard Go middleware.
+- **`package fast`**: Dedicated high-throughput engine (`fast.Client`) built on top of `fasthttp` with native HTTP/2 and HTTP/3 support for latency-critical and high-concurrency workloads.
+- **`package option`**: Client-level configuration options applied at construction (`option.WithBaseURL`, `option.WithTimeout`, `option.WithChrome`).
+- **`package mod`**: Request-level modifiers applied per call (`mod.WithHeader`, `mod.WithBearer`, `mod.WithJSON`).
 
-### Tier 2: `aoni` (Protocol Engine & Dual Engines)
-The core networking citadel, strictly locked to immutable IETF RFC and Chromium specifications:
-- **Dual Engines under a Single Ergonomic Interface**:
-  - `aoni.Client` (*Standard Engine*): 100% standard library compatibility (`net/http.RoundTripper`, standard middlewares, context deadlines).
-  - `fast.Client` (*Fast Engine*): Ultra-high-throughput silicon pipeline built on parallel I/O and `pool.PerPStorage`, achieving **2.34M+ parallel RPS at absolute 0 allocs/op**.
-- **Chromium-Grade Resilience**:
-  - **Happy Eyeballs v3**: Dynamic racing across HTTP/3 (QUIC), HTTP/2, and HTTP/1.1 with configurable initial pacing delays.
-  - **Auto-Recovery**: Automatic connection pool invalidation and rerouting on HTTP 421 (*Misdirected Request*), HTTP 408 (*Timeout*), and HTTP 425 (*Too Early*).
-  - **Early Hints (RFC 8297)**: Speculative connection pre-warming and DNS preresolution.
-  - **Stale DNS (RFC 8767)**: 0ms stale host resolution with background asynchronous deduplicated refreshing.
-- **Stealth & Evasion**:
-  - Pure-Go JA3/JA4/JA4H fingerprint emulation.
-  - TCP/IP p0f SYN/ACK packet signature spoofing.
-  - Post-Quantum TLS 1.3 Key Exchange (FIPS 203 `X25519MLKEM768` / Kyber768).
-  - TLS 1.3 Encrypted Client Hello (ECH via DoH/DoQ RFC 9460).
-  - Chromium Network Isolation Keys (NIK / NAK) and CHIPS cookie partitioning.
-  - Extensible Priorities (RFC 9218) and Compression Dictionaries (RFC 9651).
-- **Real-Time Protocols & gRPC Streaming**:
-  - Pure-Go gRPC client (`grpc/`): Unary, Server-Streaming, Client-Streaming, and Bidirectional Full-Duplex HTTP/2 framing with uTLS stealth impersonation and trailer validation.
-  - WebSockets over HTTP/2 Extended CONNECT (RFC 8441), SSE, and NDJSON real-time event pipelines.
-- **L3/L4 Encrypted Tunneling & Network Perimeter (`tunnel/`)**:
-  - `tunnel/ssh` (RFC 4251–4254): Multi-hop SSH jump hosts, dynamic SOCKS5 forwarding, reverse SSH gateway with TLS SNI routing, and embedded PTY/SFTP servers.
-  - `tunnel/masque` (RFC 9298): CONNECT-UDP / CONNECT-IP encapsulation over HTTP/3.
-  - `tunnel/tun`: Generic cross-platform L3 virtual network interface adapter interface (OS drivers in `aoni/x/tunnel/tun`).
-  - `tunnel/inbound`: Dual HTTP/SOCKS5 sniffing proxy server with automatic protocol detection.
+### Layer 3: Policies, Codecs & Extensions
+Self-contained packages that provide specialized networking capabilities:
+- **`cookie`**: RFC 6265bis compliant cookie storage and proxy-isolated jars (`ProxyIsolatedJar`).
+- **`codec`**: Type-safe decoders for JSON, XML, Protocol Buffers, and gRPC-Web framing.
+- **`resiliency`**: Retries, backoff strategies, circuit breakers, caching (RFC 9111), and connection hedging.
+- **`fingerprint`**: Browser impersonation profiles (Chrome, Firefox, Safari), JA4 hashing, and TLS ClientHello customization.
+- **`realtime`**: WebSockets, Server-Sent Events (SSE), and chunked NDJSON streaming.
+- **`tunnel`**: SOCKS5, HTTP CONNECT, and MASQUE (RFC 9298) encapsulation.
 
-### Tier 3: `vortex` (Developer Toolchain & Observability)
-The developer platform and static analysis engine:
-- **Declarative AST Codegen**: Compiles OpenAPI 3.1 / TypeSpec contracts into type-safe, zero-allocation Go client SDKs with built-in retry policies.
-- **Interactive Live Web Inspector (`vortex traffic inspect -ui`)**: Real-time diagnostic web dashboard streaming live HTTP/H2/H3 transaction frames and JA4 hashes via SSE.
-- **In-Memory Mock Engine**: Sub-microsecond HTTP simulation engine for deterministic unit tests with 0 socket overhead.
-- **Automated CI Contract Drift Detector**: Compares local codebases against remote OpenAPI specs to block breaking API changes.
+### Layer 2: Execution Engines & Pipeline
+Internal orchestration layers that coordinate requests:
+- **`internal/pipeline`**: The 5-stage middleware pipeline (pre-flight, request mutation, transport execution, post-flight, response validation).
+- **`internal/fast/h1engine`**: HTTP/1.1 socket pooling and connection management based on `fasthttp`.
+- **`internal/fast/h2engine`**: Native HTTP/2 multiplexing with HPACK compression and framing.
+- **`internal/fast/h3engine`**: HTTP/3 connection management and QPACK integration over QUIC.
+- **`internal/core`**: Common internal data structures (`ModifierAtom`, retry policies).
 
-## 2. Safe by Default vs Power-User Fast Path
+### Layer 1: Wire Protocols & OS Primitives
+Low-level protocol implementations and OS kernel interfaces:
+- **`internal/quic`**: Pure-Go implementation of IETF RFC 9000 (QUIC transport) and RFC 9002 (congestion control). **Strictly encapsulated**: client packages do not import QUIC directly.
+- **`internal/qpack`**: RFC 9204 QPACK field compression for HTTP/3.
+- **`internal/sys`**: OS thread affinity and hardware capability detection.
 
-`aoni` eliminates the false dichotomy between *developer ergonomics* and *extreme silicon performance*.
+---
 
-```mermaid
-graph TD
-    User([Developer / System]) --> Choice{Which Engine?}
-    
-    Choice -->|Standard / Business Logic| Std["aoni.Client (Safe by Default)"]
-    Choice -->|Extreme Line-Speed / High RPS| Fast["fast.Client (Power-User Fast Path)"]
-    
-    Std --> S1["100% net/http Compatible"]
-    Std --> S2["Automatic Resource & Body Recycling"]
-    Std --> S3["Standard Middleware Chains"]
-    
-    Fast --> F1["Zero Allocations (0 B/op, 0 allocs/op)"]
-    Fast --> F2["1.87M+ Requests/sec Throughput"]
-    Fast --> F3["Off-Heap Arenas & Pooled Buffers"]
-```
+## 2. Subsystem Isolation & Import Boundaries
 
-### 1. Safe by Default (`aoni.Client`)
-*Recommended for 95% of microservices, scrapers, API clients, and cloud microarchitectures.*
+To keep the codebase maintainable and prevent deep protocol details from leaking into public APIs, the following boundary rules are strictly enforced:
 
-- **Memory Safety**: 100% managed by the Go runtime and standard garbage collector.
-- **Drop-in Compatibility**: Implements `net/http` client interfaces. Works out of the box with standard `http.Handler`, `http.RoundTripper`, and standard OpenTelemetry integrations.
-- **Automatic Resource Cleanup**: Built-in connection pool recycling and stream drain guarantees prevent socket exhaustion and memory leaks even if callers forget to read full payloads.
+### Rule 1: QUIC Encapsulation
+- `internal/quic` is a private protocol implementation.
+- Neither `package aoni` nor `package fast` may import `internal/quic`.
+- HTTP/3 client configuration is handled entirely through `internal/fast/h3engine.NewClientFromSettings()`, taking high-level settings from `fingerprint/h3.Settings`.
+- Outside of `internal/quic`, only protocol drivers (`h3engine`, `x/webtransport`, `tunnel/masque`, `netutil/dns/doq`) may import QUIC.
 
-```go
-// Safe by Default: Concise, safe, and fully typed
-users, err := client.GetTo[[]User](ctx, "https://api.example.com/users")
-```
+### Rule 2: Dual Engine Decoupling
+- `aoni.Client` (`net/http`) and `fast.Client` (`fasthttp`) are independent engines.
+- `aoni` does not import `fast`.
+- Both engines share the same atomic modifier primitive (`aoni.RequestModifier`) and data contracts (`aoni.Request`, `aoni.Response`, `aoni.HTTPRequester`).
 
-### 2. Power-User Fast Path (`fast.Client`)
-*Engineered for real-time HFT gateways, telemetry ingestion pipelines, and ultra-high-concurrency proxies.*
+### Rule 3: Client vs Request Configuration Separation
+- **Client options** belong exclusively in `package option` (`option.With...`). They mutate `*aoni.Config`.
+- **Request modifiers** belong exclusively in `package mod` (`mod.With...`). They produce `aoni.RequestModifier` (`core.ModifierAtom`).
+- The root `aoni` package exports only canonical verbs, constructors, and fundamental contracts.
 
-- **Hardware Line Speed**: Up to **2,480,000+ RPS** on a single workstation with sub-microsecond latency.
-- **Zero Allocations**: Eliminates heap churn (`0 B/op, 0 allocs/op`) through object reuse, stack hints, and off-heap memory slabs.
-- **Zero Type Drift**: Uses generic decoding pipelines (`fastClient.GetTo[T]`, `codec.Decode`) without runtime reflection overhead.
+---
 
-```go
-// Power-User Fast Path: 0 allocations, line speed
-user, err := fastClient.Get[UserResponse](ctx, "https://api.example.com/v1/data")
-if err != nil {
-    return err
-}
-```
+## 3. Dual Engine Comparison: Choosing the Right Client
 
-## 3. Mathematical Proof of Zero-Allocation Pipeline
+| Characteristic | `aoni.Client` (Standard) | `fast.Client` (Fast Path) |
+| :--- | :--- | :--- |
+| **Underlying Engine** | `net/http` (`http.RoundTripper`) | `fasthttp` + native H2/H3 |
+| **Ecosystem Compatibility** | 100% drop-in for standard library | Specialized high-concurrency API |
+| **Protocols** | HTTP/1.1, HTTP/2 | HTTP/1.1, HTTP/2, HTTP/3 (Alt-Svc racing) |
+| **Memory Model** | Standard Go GC | Pooled buffers (`sync.Pool`) |
+| **Response Body** | Stream (`io.ReadCloser`) | Stream or volatile byte buffer |
+| **Recommended Use Case** | Microservices, REST APIs, general HTTP | High-volume scraping, load testing, crawlers |
 
-In standard Go networking, a single HTTP transaction allocates memory in multiple disjoint layers:
+---
 
-| Layer | Standard `net/http` Heap Tax | `aoni/fast` Zero-Allocation Budget | Mechanism |
-| :--- | :--- | :--- | :--- |
-| **URL Parsing** | `~250 B` (string allocations, query maps) | **`0 B`** | Sharded CRC32 URL Cache + SIMD byte scan |
-| **Header Framing** | `~400 B` (`map[string][]string` slices) | **`0 B`** | Flat Byte Array Header VTable |
-| **Buffer Management** | `~4,096 B` (dynamic read/write slices) | **`0 B`** | Tiered `sync.Pool` & Off-Heap Buffer Slabs |
-| **JSON/DTO Decoding** | `~512 B` (interface reflection + copies) | **`0 B`** | Buffer-backed Generic Zero-Copy Decoders |
-| **Total Heap Impact** | **`~5,258 B / req`** | **`0 B / req`** | **Complete GC Elimination** |
+## 4. Concurrency & Memory Invariants
 
-## 4. Fuzzing & Security Armor
+### Client Immutability
+All `Client` instances (`aoni.Client` and `fast.Client`) are **strictly immutable** after creation:
+- All public methods are safe for concurrent invocation by multiple goroutines.
+- Modifying client state via `client.With(opts...)` or `client.Clone()` returns a completely new `Client` instance with deep-copied configuration maps and isolated state. The original client is never mutated.
 
-Every parser, wire decoder, and unsafe memory operation in `aoni` and `foundation` is continuously verified against millions of adversarial byte sequences using continuous fuzz testing (`go test -fuzz`):
+### RequestBuilder Lifecycle
+`RequestBuilder` (`client.R()`) is pooled via `sync.Pool` to avoid allocations:
+- **Not thread-safe**: A `RequestBuilder` instance must be created, configured, and executed within a single goroutine.
+- **Single-use guard**: Once `Execute()` or `Release()` is called, the builder marks itself as `consumed = true`. Any subsequent execution attempt immediately returns `ErrBuilderConsumed`, preventing use-after-free data corruption.
 
-| Parser Target | Specification | Fuzz Target | Verified Resiliency |
-| :--- | :--- | :--- | :--- |
-| **SSE Engine** | HTML5 W3C EventSource | `FuzzSSEStream` | Truncated events, infinite lines, malformed UTF-8 |
-| **NDJSON Engine** | NDJSON / Streaming JSON | `FuzzNDJSONStream` | Split frames, unclosed brackets, binary corruptions |
-| **Cookie Jar** | RFC 6265 / RFC 6265bis CHIPS | `FuzzParseSetCookieHeader` | Malformed attributes, overflow Max-Age, invalid dates |
-| **MASQUE / QUIC** | RFC 9000 / RFC 9298 | `FuzzMASQUEVarint` | 1/2/4/8-byte integer boundary overflows |
-| **SIMD SWAR** | 64-bit Vector Scanning | `FuzzIndexCRLF` | Adversarial cross-register boundary scans |
-| **Off-Heap Slabs** | Direct Kernel Memory | `FuzzArenaAlloc`, `FuzzSlabPoolAlloc` | Out-of-bounds writes, fragmentation checks |
-| **gRPC-Web** | PROTOCOL-HTTP2 5-byte Framing | `FuzzGRPCWebFraming` | Compressed payload corruption, trailer injection |
+### Buffer Lifetime in `fast.Client`
+- `fast.Response` reuses internal byte buffers across requests.
+- Slices returned by `resp.BodyBytes()` or `resp.UnsafeBodyBytes()` are valid **only until the request lifecycle completes or `resp.Close()` is called**.
+- If payload data needs to outlive the request, callers must copy it via `bytes.Clone()` or use `resp.String()`.
 
-To run the automated security fuzzing suite locally:
-```bash
-make fuzz
-```
+---
 
-## 5. Ecosystem Partitioning & The "aoni v1" Manifesto
-
-To guarantee eternal stability and prevent protocol drift, the codebase is partitioned into two clear boundaries:
+## 5. Directory Structure
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│                      aoni Core                           │
-│  Permanently locked to immutable IETF RFCs & W3C specs.  │
-│  Guaranteed 100% backward compatible for 20+ years.      │
-└────────────────────────────┬─────────────────────────────┘
-                             │
-┌────────────────────────────▼─────────────────────────────┐
-│                      aoni/x/...                          │
-│  Independent experimental and third-party modules:       │
-│  • aoni/x/socketio (Socket.IO v5 / Engine.IO v4)         │
-│  • aoni/x/geoip    (MaxMind GeoIP2 MMDB database)        │
-│  • aoni/x/otel     (Zero-dependency OpenTelemetry)       │
-│  • aoni/x/webtransport (WebTransport over HTTP/3)        │
-└──────────────────────────────────────────────────────────┘
+aoni/
+├── client.go, config.go, builder.go, contract.go ...  // Layer 4: Root aoni client
+├── option/                                            // Layer 4: Client configuration options
+├── mod/                                               // Layer 4: Per-request modifiers
+├── fast/                                              // Layer 4: High-throughput client engine
+├── cookie/                                            // Layer 3: RFC 6265 cookie storage & jars
+├── codec/                                             // Layer 3: Response payload decoders
+├── resiliency/                                        // Layer 3: Retry, circuit breaker, caching
+├── fingerprint/                                       // Layer 3: TLS/JA4/HTTP2 browser profiles
+├── realtime/                                          // Layer 3: WebSockets, SSE, streams
+├── tunnel/                                            // Layer 3: SOCKS5, SSH, MASQUE tunnels
+├── netutil/                                           // Layer 3: DNS, proxy utilities, IP tools
+├── grpc/                                              // Layer 3: gRPC-Web transport adapter
+├── internal/                                          // Layers 1–2: Private implementation
+│   ├── pipeline/                                      // Middleware execution engine
+│   ├── core/                                          // Core atomic types (ModifierAtom)
+│   ├── sys/                                           // Platform & OS thread affinity
+│   ├── quic/                                          // RFC 9000 QUIC transport implementation
+│   ├── qpack/                                         // RFC 9204 QPACK encoder/decoder
+│   └── fast/                                          // Fast engine protocol handlers (H1, H2, H3)
+├── x/                                                 // Experimental modules (Socket.IO, WebTransport)
+└── cmd/                                               // CLI tools (vortex)
 ```
-
-> **The "aoni v1" Compatibility & Forever-Frozen Core Manifesto**:
-> *"Code written for **aoni v1.0.0** is guaranteed to compile and run unchanged on any **v1.x** version 5, 10, and 20 years from now. The entire core is permanently locked to immutable IETF RFC and Chromium standards. All experiments, protocol shifts, and third-party adapters live exclusively in the **aoni/x/...** packages."*

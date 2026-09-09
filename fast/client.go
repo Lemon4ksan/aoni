@@ -25,25 +25,23 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// Client encapsulates an ultra-high-performance multi-protocol client
-// seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
+// Client is an HTTP client supporting HTTP/1.1 (via fasthttp), HTTP/2, and HTTP/3.
 //
-// Thread Safety & Concurrency:
-// 100% thread-safe; safe for concurrent invocation across arbitrary goroutines.
+// Concurrency:
+// All methods on Client are safe for concurrent use by multiple goroutines.
 //
-// Memory Lifetime Invariants & Fast-Path Geometry:
-// Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
-// via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
+// Memory Management:
+// Request and response buffers are recycled via internal pools. Callers must not
+// retain or mutate byte slices returned from unsafe body accessors after the request completes.
 type Client struct {
-	// engine encapsulates the underlying h1engine.Client providing extreme-throughput HTTP/1.1 socket pooling.
+	// engine provides underlying HTTP/1.1 connection pooling via fasthttp.
 	engine *h1engine.Client
 
-	// pipeline coordinates the 5-stage middleware, retry, hedging, and telemetry execution chain.
+	// pipeline coordinates middleware, retry, hedging, and telemetry execution.
 	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
 
 	// defaultDial holds the default network dialing function.
@@ -67,17 +65,14 @@ type Client struct {
 	// coreEngine holds precomputed URL prefixes and immutable header byte representations.
 	coreEngine *pipeline.Engine
 
-	// prepared caches zero-allocation byte slices for fast-path URI matching.
+	// prepared caches byte slices for fast-path URI matching.
 	prepared pipeline.PreparedConfig
 
 	// nativeDoer adapts fasthttp request execution into the generic pipeline.
 	nativeDoer fastNativeDoer
 }
 
-// NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
-// native HTTP/2 framing, and native HTTP/3 QUIC support.
-// Applies functional [aoni.ClientOption] layers sequentially to build prepared configuration state.
-// Yields a ready-to-use, thread-safe [Client] pointer configured for zero-allocation execution.
+// NewClient creates a new [Client] configured with the provided functional options.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: defaultFasthttpClient(),
@@ -108,10 +103,6 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 		toPipelineDefaults(c.cfg.Defaults, c.referer),
 		c.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
-
-	if len(c.cfg.Network.CPUAffinityCores) > 0 {
-		sys.ApplyCPUAffinity(c.cfg.Network.CPUAffinityCores)
-	}
 
 	c.nativeDoer.client = c
 
@@ -835,15 +826,6 @@ func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
 	})
 }
 
-// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
-func (c *Client) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
-	if ck, ok := c.FindCookie(u, name); ok {
-		return generic.Some(ck)
-	}
-
-	return generic.None[*http.Cookie]()
-}
-
 // GetCookieValue retrieves the value of a named cookie.
 func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
 	if ck, ok := c.FindCookie(u, name); ok && ck != nil {
@@ -851,15 +833,6 @@ func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
 	}
 
 	return "", false
-}
-
-// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
-func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
-	if val, ok := c.GetCookieValue(u, name); ok {
-		return generic.Some(val)
-	}
-
-	return generic.None[string]()
 }
 
 // LogValue implements [slog.LogValuer] for structured telemetry logging.

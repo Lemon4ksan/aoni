@@ -111,8 +111,8 @@ func (c StatusCode) String() string {
 
 // parseGRPCStatus constructs a [StatusError] from gRPC trailer headers (grpc-status, grpc-message, grpc-status-details-bin).
 func parseGRPCStatus(trailers http.Header) *StatusError {
-	codeStr := trailers.Get("grpc-status")
-	msgStr := trailers.Get("grpc-message")
+	codeStr := getHeaderCaseInsensitive(trailers, "grpc-status")
+	msgStr := getHeaderCaseInsensitive(trailers, "grpc-message")
 
 	code, err := strconv.ParseUint(codeStr, 10, 32)
 	if err != nil {
@@ -127,7 +127,7 @@ func parseGRPCStatus(trailers http.Header) *StatusError {
 	}
 
 	var rawDetails []byte
-	if detailsBin := trailers.Get("grpc-status-details-bin"); detailsBin != "" {
+	if detailsBin := getHeaderCaseInsensitive(trailers, "grpc-status-details-bin"); detailsBin != "" {
 		if decoded, err := DecodeBinaryHeader(detailsBin); err == nil {
 			rawDetails = decoded
 		}

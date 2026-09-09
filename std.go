@@ -16,6 +16,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/std"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/digest"
 )
 
@@ -73,12 +74,12 @@ func (d requesterHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 	mods := make([]RequestModifier, 0, len(req.Header)+1)
 	for k, vv := range req.Header {
 		for _, v := range vv {
-			mods = append(mods, WithHeader(k, v))
+			mods = append(mods, mod.WithHeader(k, v))
 		}
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {
-		mods = append(mods, WithSmartBody(req.Body))
+		mods = append(mods, mod.WithSmartBody(req.Body))
 	}
 
 	return d.r.Request(req.Context(), req.Method, req.URL.String(), mods...)

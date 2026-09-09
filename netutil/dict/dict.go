@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/miyako/generic"
 )
 
 var (
@@ -186,17 +188,9 @@ func matchWildcard(pattern, s string) bool {
 			return true
 		}
 
-		nextWildcard := strings.IndexByte(pattern, '*')
+		prefix, _, ok := strings.Cut(pattern, "*")
 
-		var segment string
-
-		if nextWildcard >= 0 {
-			segment = pattern[:nextWildcard]
-		} else {
-			segment = pattern
-		}
-
-		matchIdx := strings.Index(s, segment)
+		matchIdx := strings.Index(s, generic.Ternary(ok, prefix, pattern))
 		if matchIdx < 0 {
 			return false
 		}
@@ -227,8 +221,7 @@ func ParseUseAsDictionary(header string, respURL *url.URL) (*DictionaryMeta, err
 	}
 
 	// Tokenize comma-separated structured field parameters
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(header, ",") {
 		item := strings.TrimSpace(part)
 		if item == "" {
 			continue
@@ -318,9 +311,8 @@ func parseInnerList(s string) []string {
 
 	var res []string
 
-	for _, token := range strings.Fields(s) {
-		token = strings.Trim(token, " ,;\"")
-		if token != "" {
+	for token := range strings.FieldsSeq(s) {
+		if token = strings.Trim(token, " ,;\""); token != "" {
 			res = append(res, token)
 		}
 	}

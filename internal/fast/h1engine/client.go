@@ -566,8 +566,13 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 
 	c.mOnce.Do(func() {
+		// mLock must be held during map initialization so that concurrent readers
+		// (CloseIdleConnections, ConnsCount, etc.) that acquire mLock.RLock() are
+		// excluded until the maps are fully constructed and visible.
+		c.mLock.Lock()
 		c.m = make(map[string]*HostClient)
 		c.ms = make(map[string]*HostClient)
+		c.mLock.Unlock()
 	})
 	hc, err := c.hostClient(host, isTLS)
 	if err != nil {
@@ -608,8 +613,10 @@ func (c *Client) DoPipelineTimeout(reqs []*Request, resps []*Response, timeout t
 	isTLS := uri.isHTTPS()
 
 	c.mOnce.Do(func() {
+		c.mLock.Lock()
 		c.m = make(map[string]*HostClient)
 		c.ms = make(map[string]*HostClient)
+		c.mLock.Unlock()
 	})
 
 	hc, err := c.hostClient(host, isTLS)

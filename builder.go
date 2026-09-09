@@ -36,14 +36,17 @@ var (
 
 	// ErrRangeNotSatisfiable is returned when the requested byte range exceeds remote file size (HTTP 416).
 	ErrRangeNotSatisfiable = errors.New("aoni: requested byte range not satisfiable by server")
+
+	// ErrBuilderConsumed is returned when attempting to execute a RequestBuilder that has already been executed.
+	ErrBuilderConsumed = errors.New("aoni: RequestBuilder already executed and consumed")
 )
 
-type typedRequestPool struct {
+type requestPool struct {
 	storage *pool.PerPStorage[*RequestBuilder]
 }
 
-func newTypedRequestPool() *typedRequestPool {
-	return &typedRequestPool{
+func newRequestPool() *requestPool {
+	return &requestPool{
 		storage: pool.NewPerPStorage(func() *RequestBuilder {
 			return &RequestBuilder{
 				appliedMods:      make([]RequestModifier, 0, 8),
@@ -57,19 +60,20 @@ func newTypedRequestPool() *typedRequestPool {
 }
 
 // Get retrieves a pooled [RequestBuilder] instance bound to any engine or client.
-func (p *typedRequestPool) Get(doer HTTPRequester) *RequestBuilder {
+func (p *requestPool) Get(doer HTTPRequester) *RequestBuilder {
 	if doer == nil {
 		doer = DefaultClient
 	}
 
 	r := p.storage.Get()
 	r.client = doer
+	r.consumed = false
 
 	return r
 }
 
 // Put recycles a [RequestBuilder] instance back to the core-pinned storage after resetting fields.
-func (p *typedRequestPool) Put(r *RequestBuilder) {
+func (p *requestPool) Put(r *RequestBuilder) {
 	if r == nil {
 		return
 	}
@@ -78,18 +82,15 @@ func (p *typedRequestPool) Put(r *RequestBuilder) {
 	p.storage.Put(r)
 }
 
-var requestBuilderPool = newTypedRequestPool()
+var requestBuilderPool = newRequestPool()
 
 func acquireRequestBuilder(doer HTTPRequester) *RequestBuilder {
 	return requestBuilderPool.Get(doer)
 }
 
-// RequestBuilder is a pooled request builder offering a chainable, fluent configuration API.
+// RequestBuilder provides a chainable API for configuring and executing HTTP requests.
 //
-// All fluent setters directly configure request modifiers and execution policies with zero
-// intermediate state duplication, maximizing performance and adherence to Protocol-Oriented Programming.
-//
-// Thread Safety:
+// Concurrency:
 // RequestBuilder instances are NOT safe for concurrent use across multiple goroutines.
 // They are intended for single-goroutine linear construction and execution before being returned to the pool.
 type RequestBuilder struct {
@@ -102,17 +103,17 @@ type RequestBuilder struct {
 	expectedStatuses []int
 	outputFile       string
 	outputDirectory  string
-	auth             Authenticator
+	authMod          RequestModifier
 	signer           RequestSigner
 	sink             ResponseSink
 	validators       []ResponseValidator
 	pluginErr        error
 	retryOverride    *core.RetryOverride
+	consumed         bool
 }
 
-// R acquires a pooled, zero-allocation fluent [RequestBuilder] bound to this [Client] instance.
-//
-// Automatically recycled back to the core-pinned free-list upon request execution or explicit [RequestBuilder.Release].
+// R acquires a pooled [RequestBuilder] bound to this [Client] instance.
+// The builder is automatically recycled upon request execution or explicit [RequestBuilder.Release].
 //
 // # Example
 //
@@ -154,7 +155,7 @@ func (r *RequestBuilder) Reset() {
 	r.client = nil
 	r.ctx = nil
 	r.result = nil
-	r.auth = nil
+	r.authMod = RequestModifier{}
 	r.signer = nil
 	r.sink = nil
 	r.validators = r.validators[:0]
@@ -175,6 +176,7 @@ func (r *RequestBuilder) Release() {
 		return
 	}
 
+	r.consumed = true
 	r.Reset()
 	requestBuilderPool.Put(r)
 }
@@ -348,22 +350,20 @@ func (r *RequestBuilder) AddValidator(validators ...ResponseValidator) *RequestB
 	return r
 }
 
-// SetAuth assigns a pluggable [Authenticator] to the request.
-func (r *RequestBuilder) SetAuth(auth Authenticator) *RequestBuilder {
-	r.auth = auth
+// SetAuth assigns an authentication modifier to the request, replacing any previous auth configuration.
+func (r *RequestBuilder) SetAuth(auth RequestModifier) *RequestBuilder {
+	r.authMod = auth
 	return r
 }
 
-// SetBearerToken sets the Authorization header to "Bearer <token>".
+// SetBearerToken sets the Authorization header to "Bearer <token>", replacing any previous auth configuration.
 func (r *RequestBuilder) SetBearerToken(token string) *RequestBuilder {
-	r.appliedMods = append(r.appliedMods, mod.WithBearer(token))
-	return r
+	return r.SetAuth(mod.WithBearer(token))
 }
 
-// SetBasicAuth sets the Authorization header to "Basic <base64>".
+// SetBasicAuth sets the Authorization header to "Basic <base64>", replacing any previous auth configuration.
 func (r *RequestBuilder) SetBasicAuth(username, password string) *RequestBuilder {
-	r.appliedMods = append(r.appliedMods, mod.WithBasicAuth(username, password))
-	return r
+	return r.SetAuth(mod.WithBasicAuth(username, password))
 }
 
 // SetPKCE adds PKCE code_challenge and code_challenge_method parameters for OAuth 2.0 requests (RFC 7636 / RFC 9700).
@@ -584,6 +584,12 @@ func (r *RequestBuilder) Connect(path string) (*http.Response, error) {
 // Postconditions:
 //   - Automatically releases the request instance back to the pool upon completion.
 func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
+	if r.consumed {
+		return nil, ErrBuilderConsumed
+	}
+
+	r.consumed = true
+
 	client := r.client
 	if client == nil {
 		client = DefaultClient
@@ -595,9 +601,8 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		return nil, r.pluginErr
 	}
 
-	finalPath := path
 	if len(r.pathParams) > 0 {
-		finalPath = urlkit.BuildPath(path, r.pathParams, nil)
+		path = urlkit.BuildPath(path, r.pathParams, nil)
 	}
 
 	ctx := r.ctx
@@ -605,16 +610,10 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		ctx = context.Background()
 	}
 
-	if ca, ok := r.auth.(ClientConfiguringAuth); ok && ca != nil {
-		client = ca.ConfigureClient(client)
-	}
-
 	mods := r.appliedMods
 
-	if r.auth != nil {
-		if m := r.auth.AuthModifier(); !m.IsZero() {
-			mods = append(mods, m)
-		}
+	if !r.authMod.IsZero() {
+		mods = append(mods, r.authMod)
 	}
 
 	if len(r.multipartFields) > 0 {
@@ -635,10 +634,10 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if r.outputFile != "" || r.outputDirectory != "" {
-		return r.executeDownload(ctx, client, method, finalPath, mods, r.outputFile)
+		return r.executeDownload(ctx, client, method, path, mods, r.outputFile)
 	}
 
-	resp, err := client.Request(ctx, method, finalPath, mods...)
+	resp, err := client.Request(ctx, method, path, mods...)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +648,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		}
 	}
 
-	if err := r.checkExpectedStatus(resp, finalPath); err != nil {
+	if err := r.checkExpectedStatus(resp, path); err != nil {
 		return resp, err
 	}
 
@@ -771,4 +770,63 @@ func (r *RequestBuilder) ExecuteResult[T any](method, path string) (generic.Resu
 // FetchResult executes a request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response or error.
 func (r *RequestBuilder) FetchResult[T any](method, path string) (generic.Result[T], *http.Response) {
 	return r.ExecuteResult[T](method, path)
+}
+
+// Result executes the request and returns a pure [generic.Result], automatically draining and closing the response body.
+func (r *RequestBuilder) Result[T any](method, path string) generic.Result[T] {
+	//nolint:bodyclose // Body is closed by response handler or DrainAndClose.
+	val, resp, err := r.FetchTo[T](method, path)
+	if resp != nil && resp.Body != nil {
+		DrainAndClose(resp)
+	}
+
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	return generic.Success(val)
+}
+
+// ExecuteEither executes the request and unmarshals 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (r *RequestBuilder) ExecuteEither[L, R any](method, path string) (generic.Either[L, R], *http.Response, error) {
+	var (
+		right R
+		left  L
+	)
+
+	r.SetResult(&right).SetError(&left)
+
+	resp, err := r.Execute(method, path)
+	if err != nil {
+		if resp != nil && resp.StatusCode >= http.StatusBadRequest {
+			return generic.Left[L, R](left), resp, nil
+		}
+
+		return generic.Either[L, R]{}, resp, err
+	}
+
+	return generic.Right[L](right), resp, nil
+}
+
+// FetchEither executes a request and unmarshals 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (r *RequestBuilder) FetchEither[L, R any](method, path string) (generic.Either[L, R], *http.Response, error) {
+	return r.ExecuteEither[L, R](method, path)
+}
+
+// GetEither executes a GET request and unmarshals 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (r *RequestBuilder) GetEither[L, R any](path string) (generic.Either[L, R], *http.Response, error) {
+	return r.FetchEither[L, R](http.MethodGet, path)
+}
+
+// PostEither executes a POST request with optional payload and unmarshals 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (r *RequestBuilder) PostEither[L, R any](path string, body ...any) (generic.Either[L, R], *http.Response, error) {
+	if len(body) > 0 {
+		r.SetBody(body[0])
+	}
+
+	return r.FetchEither[L, R](http.MethodPost, path)
 }

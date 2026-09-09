@@ -16,6 +16,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/grpc"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type UserDTO struct {
@@ -44,7 +45,7 @@ func TestClientTypedGet(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	ctx := context.Background()
 
@@ -65,7 +66,7 @@ func TestClientTypedGetInto(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	var user UserDTO
 
@@ -99,7 +100,7 @@ func TestClientTypedPost(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	reqPayload := CreateUserRequest{Name: "Eli", Email: "eli@blackmesa.gov"}
 
@@ -130,7 +131,7 @@ func TestClientTypedPutPatchDelete(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 	ctx := context.Background()
 
 	// Put
@@ -161,7 +162,7 @@ func TestClientTypedEx(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	user, rawResp, err := client.PostEx[UserDTO](context.Background(), "/users", CreateUserRequest{Name: "Seven"})
 	if err != nil {
@@ -189,7 +190,7 @@ func TestClientRaw(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	resp, err := client.Raw().Get(context.Background(), "/raw")
 	if err != nil {
@@ -221,7 +222,7 @@ func TestClientGRPC(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	reqMsg := wrapperspb.String("Ping")
 
@@ -261,7 +262,7 @@ func TestFastClientTyped(t *testing.T) {
 	defer ts.Close()
 
 	ctx := context.Background()
-	fastClient := fast.NewClient(aoni.WithBaseURL(ts.URL))
+	fastClient := fast.NewClient(option.WithBaseURL(ts.URL))
 
 	// GetTo & GetInto
 	user, err := fastClient.GetTo[UserDTO](ctx, "/users/55")
@@ -364,7 +365,7 @@ func TestStandardClient_AllMethods_And_PackageLevel(t *testing.T) {
 	defer ts.Close()
 
 	ctx := context.Background()
-	c := aoni.NewClient(nil, aoni.WithBaseURL(ts.URL))
+	c := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
 	// PutTo, PatchTo, DeleteTo, FetchTo
 	uPut, err := c.PutTo[UserDTO](ctx, "/items/3", UserDTO{ID: 3})

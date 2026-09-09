@@ -420,7 +420,12 @@ func WithNamedPipe(pipePath string) aoni.ClientOption {
 	}
 }
 
-// WithCoreAffinity locks client worker and network polling threads to specific physical CPU cores.
+// WithCoreAffinity sets [aoni.NetworkConfig.CPUAffinityCores] on the config.
+//
+// Deprecated: This option has no effect. It previously locked the NewClient caller's
+// goroutine to specific CPU cores, which was incorrect — I/O goroutines managed by
+// the Go runtime were never affected. Use [sys.LockGoroutineToCore] directly from
+// the goroutine you intend to pin.
 func WithCoreAffinity(cores ...int) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.CPUAffinityCores = cores

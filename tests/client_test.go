@@ -2509,8 +2509,8 @@ func TestClient_AuditFeatures(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client := aoni.New(aoni.WithBaseURL(server.URL), aoni.WithClientTimeout(5*time.Second))
-		resp, err := client.Raw().Get(t.Context(), "/", aoni.WithBearer("secret_token_123"))
+		client := aoni.New(option.WithBaseURL(server.URL), option.WithTimeout(5*time.Second))
+		resp, err := client.Raw().Get(t.Context(), "/", mod.WithBearer("secret_token_123"))
 		require.NoError(t, err)
 		t.Cleanup(func() { aoni.DrainAndClose(resp) })
 
@@ -2629,7 +2629,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 		val := apiErr.LogValue()
 		assert.NotEmpty(t, val.Group())
 
-		client := aoni.New(aoni.WithBaseURL("https://api.apple.com"), aoni.WithChrome())
+		client := aoni.New(option.WithBaseURL("https://api.apple.com"), option.WithChrome())
 		cVal := client.LogValue()
 		assert.NotEmpty(t, cVal.Group())
 	})
@@ -2699,8 +2699,8 @@ func TestClient_AuditFeatures(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		client := aoni.New(
-			aoni.WithBaseURL(server.URL),
-			aoni.WithSoftErrorDetector(func(_ *http.Response, peek []byte) error {
+			option.WithBaseURL(server.URL),
+			option.WithSoftErrorDetector(func(_ *http.Response, peek []byte) error {
 				if bytes.Contains(peek, []byte("g_steamID = false;")) {
 					return errSessionExpired
 				}
@@ -2727,8 +2727,8 @@ func TestClient_AuditFeatures(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		client := aoni.New(
-			aoni.WithBaseURL(server.URL),
-			aoni.WithBlockRedirectTo("/login"),
+			option.WithBaseURL(server.URL),
+			option.WithBlockRedirectTo("/login"),
 		)
 
 		resp, err := client.Raw().Get(t.Context(), "/protected")
@@ -2748,7 +2748,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client := aoni.New(aoni.WithBaseURL(server.URL))
+		client := aoni.New(option.WithBaseURL(server.URL))
 		resp, err := client.Raw().Get(t.Context(), "/")
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -2821,12 +2821,12 @@ func TestClient_AuditFeatures(t *testing.T) {
 
 		client := aoni.New(option.WithBaseURL(server.URL))
 
-		respAuth, errAuth := client.Raw().Get(t.Context(), "/authorize", aoni.WithPKCE(verifier))
+		respAuth, errAuth := client.Raw().Get(t.Context(), "/authorize", mod.WithPKCE(verifier))
 		require.NoError(t, errAuth)
 		defer respAuth.Body.Close()
 		assert.Equal(t, http.StatusOK, respAuth.StatusCode)
 
-		respToken, errToken := client.Raw().Post(t.Context(), "/token", aoni.WithPKCEVerifier(verifier))
+		respToken, errToken := client.Raw().Post(t.Context(), "/token", mod.WithPKCEVerifier(verifier))
 		require.NoError(t, errToken)
 		defer respToken.Body.Close()
 		assert.Equal(t, http.StatusOK, respToken.StatusCode)

@@ -6,24 +6,11 @@ package aoni
 
 import (
 	"context"
-	"io"
 	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/http/header"
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/foundation/timekit"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/netutil/pkce"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
@@ -180,27 +167,27 @@ func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) 
 //	var user User
 //	err := aoni.GetInto(ctx, "https://api.example.com/users/42", &user)
 func GetInto[T any](ctx context.Context, path string, target *T, mods ...RequestModifier) error {
-	return DefaultClient.GetInto[T](ctx, path, target, mods...)
+	return DefaultClient.GetInto(ctx, path, target, mods...)
 }
 
 // PostInto executes a typed POST request carrying body using [DefaultClient] and decodes the response directly into target.
 func PostInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
-	return DefaultClient.PostInto[T](ctx, path, body, target, mods...)
+	return DefaultClient.PostInto(ctx, path, body, target, mods...)
 }
 
 // PutInto executes a typed PUT request carrying body using [DefaultClient] and decodes the response directly into target.
 func PutInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
-	return DefaultClient.PutInto[T](ctx, path, body, target, mods...)
+	return DefaultClient.PutInto(ctx, path, body, target, mods...)
 }
 
 // PatchInto executes a typed PATCH request carrying body using [DefaultClient] and decodes the response directly into target.
 func PatchInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
-	return DefaultClient.PatchInto[T](ctx, path, body, target, mods...)
+	return DefaultClient.PatchInto(ctx, path, body, target, mods...)
 }
 
 // DeleteInto executes a typed DELETE request using [DefaultClient] and decodes the response directly into target.
 func DeleteInto[T any](ctx context.Context, path string, target *T, mods ...RequestModifier) error {
-	return DefaultClient.DeleteInto[T](ctx, path, target, mods...)
+	return DefaultClient.DeleteInto(ctx, path, target, mods...)
 }
 
 // FetchInto executes an arbitrary HTTP method request using [DefaultClient] and decodes the response directly into target.
@@ -211,7 +198,7 @@ func FetchInto[T any](
 	target *T,
 	mods ...RequestModifier,
 ) error {
-	return DefaultClient.FetchInto[T](ctx, method, path, body, target, mods...)
+	return DefaultClient.FetchInto(ctx, method, path, body, target, mods...)
 }
 
 // GetEx executes a typed GET request using [DefaultClient] and returns both the unmarshaled *T and raw [*http.Response].
@@ -331,329 +318,6 @@ func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOp
 	return fn(scopedClient)
 }
 
-// WithHeader constructs an [RequestModifier] setting a single request header key to value.
-func WithHeader(key, value string) RequestModifier {
-	return RequestModifier{
-		Kind:  core.ModHeader,
-		Key:   key,
-		Value: value,
-	}
-}
-
-// WithHeaders constructs an [RequestModifier] bulk-setting multiple HTTP request headers from a map.
-func WithHeaders(headers map[string]string) RequestModifier {
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			for k, v := range headers {
-				req.SetHeader(k, v)
-			}
-		},
-	}
-}
-
-// WithBearer constructs an [RequestModifier] setting an "Authorization: Bearer <token>" header (RFC 6750 §2.1).
-func WithBearer(token string) RequestModifier {
-	return RequestModifier{
-		Kind:  core.ModBearer,
-		Value: token,
-	}
-}
-
-// WithBasicAuth constructs an [RequestModifier] setting HTTP Basic Authentication credentials (RFC 7617).
-func WithBasicAuth(username, password string) RequestModifier {
-	return RequestModifier{
-		Kind:  core.ModBasicAuth,
-		Key:   username,
-		Value: password,
-	}
-}
-
-// WithPKCE constructs an [RequestModifier] adding PKCE code_challenge and code_challenge_method
-// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
-// If method is omitted or empty, S256 is used by default.
-func WithPKCE(verifier string, method ...string) RequestModifier {
-	m := pkce.MethodS256
-	if len(method) > 0 && method[0] != "" {
-		m = method[0]
-	}
-
-	if challenge, err := pkce.ComputeChallenge(verifier, m); err == nil {
-		verifier = challenge
-	}
-
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			req.AddQueryParam("code_challenge", verifier)
-			req.AddQueryParam("code_challenge_method", m)
-		},
-	}
-}
-
-// WithPKCEVerifier constructs an [RequestModifier] adding the code_verifier parameter
-// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
-func WithPKCEVerifier(verifier string) RequestModifier {
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			req.AddQueryParam("code_verifier", verifier)
-		},
-	}
-}
-
-// WithTimeout constructs an [RequestModifier] attaching a deadline timeout to the request context.
-func WithTimeout(d time.Duration) RequestModifier {
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			ctx, cancel := context.WithTimeout(req.Context(), d) //nolint:gosec
-			req.SetContext(ctx)
-			pipeline.GetOrInitRequestConfig(req).RequestTimeoutCancel = cancel
-		},
-	}
-}
-
-// WithRetry constructs an [RequestModifier] setting the maximum retry attempts for the request.
-func WithRetry(attempts int) RequestModifier {
-	policy := core.RetryOverride{MaxAttempts: attempts}
-	if policy.MaxAttempts < 1 {
-		policy.MaxAttempts = 1
-	}
-
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			pipeline.GetOrInitRequestConfig(req).RetryPolicy = &policy
-		},
-	}
-}
-
-// WithUserAgent constructs an [RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
-func WithUserAgent(ua string) RequestModifier {
-	return WithHeader(header.UserAgent, ua)
-}
-
-// WithContentType constructs an [RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
-func WithContentType(ct string) RequestModifier {
-	return WithHeader(header.ContentType, ct)
-}
-
-// WithAccept constructs an [RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
-func WithAccept(accept string) RequestModifier {
-	return WithHeader(header.Accept, accept)
-}
-
-// WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
-func WithIfModifiedSince(t time.Time) RequestModifier {
-	return WithHeader(header.IfModifiedSince, timekit.FormatHTTPDate(t))
-}
-
-// WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
-func WithIfUnmodifiedSince(t time.Time) RequestModifier {
-	return WithHeader(header.IfUnmodifiedSince, timekit.FormatHTTPDate(t))
-}
-
-// WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
-func WithRange(start, end int64) RequestModifier {
-	if start < 0 {
-		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10))
-	}
-
-	if end < 0 {
-		return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-")
-	}
-
-	return WithHeader(header.Range, header.ValueBytes+"="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
-}
-
-// WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
-func WithCacheControl(directives ...string) RequestModifier {
-	return WithHeader(header.CacheControl, strings.Join(directives, ", "))
-}
-
-// WithNoCache constructs an [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
-func WithNoCache() RequestModifier {
-	return WithHeader(header.CacheControl, header.ValueNoCache)
-}
-
-// WithNoStore constructs an [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
-func WithNoStore() RequestModifier {
-	return WithHeader(header.CacheControl, header.ValueNoStore)
-}
-
-// WithBaseURL returns an [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
-//
-// # RFC 3986 Resolution & Slash Normalization
-//
-// Ensures a trailing slash per RFC 3986 §5.2.3 to preserve hierarchical base path segments during relative path resolution.
-// Safely normalizes both leading and trailing slashes so combinations like BaseURL "https://api.com/v1/" + Path "/users"
-// resolve seamlessly to "https://api.com/v1/users" without resetting to root or creating double slashes.
-func WithBaseURL(raw string) ClientOption {
-	return func(cfg *Config) {
-		if raw == "" {
-			cfg.Defaults.BaseURL = &url.URL{}
-			return
-		}
-
-		formatted := raw
-		if !strings.HasSuffix(formatted, "/") {
-			formatted += "/"
-		}
-
-		baseURL, err := url.Parse(formatted)
-		if err != nil {
-			return
-		}
-
-		cfg.Defaults.BaseURL = baseURL
-	}
-}
-
-// WithClientTimeout returns an [ClientOption] configuring the default timeout duration for requests.
-func WithClientTimeout(d time.Duration) ClientOption {
-	return func(cfg *Config) {
-		cfg.Engine.Timeout = d
-	}
-}
-
-// WithClientUserAgent returns an [ClientOption] setting the default User-Agent header for all requests.
-func WithClientUserAgent(ua string) ClientOption {
-	return func(cfg *Config) {
-		if cfg.Defaults.Headers == nil {
-			cfg.Defaults.Headers = make(http.Header)
-		}
-
-		cfg.Defaults.Headers.Set(header.UserAgent, ua)
-	}
-}
-
-// WithChrome returns an [ClientOption] setting the browser profile to Google Chrome.
-func WithChrome() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserChrome
-	}
-}
-
-// WithFirefox returns an [ClientOption] setting the browser profile to Mozilla Firefox.
-func WithFirefox() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserFirefox
-	}
-}
-
-// WithSafari returns an [ClientOption] setting the browser profile to Apple Safari.
-func WithSafari() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserSafari
-	}
-}
-
-// WithSoftErrorDetector returns an [ClientOption] registering callbacks that sniff initial
-// response body bytes to catch application-level soft errors without draining or consuming the body stream.
-func WithSoftErrorDetector(detectors ...SoftErrorDetector) ClientOption {
-	return func(cfg *Config) {
-		cfg.Defaults.SoftErrorDetectors = append(cfg.Defaults.SoftErrorDetectors, detectors...)
-	}
-}
-
-// WithBlockRedirectTo returns an [ClientOption] that halts redirects to matching URLs (e.g. "/login").
-func WithBlockRedirectTo(patterns ...string) ClientOption {
-	return func(cfg *Config) {
-		cfg.Engine.CheckRedirect = BlockPathRedirectPolicy(patterns...)
-	}
-}
-
-// WithSmartBody constructs an [RequestModifier] that dynamically inspects and serializes arbitrary payloads.
-//
-// # Serialization Matrix & Content-Type Resolution
-//
-// WithSmartBody eliminates the need for manual marshaling or header declaration by applying
-// the following zero-reflection type-switch matrix:
-//   - [RequestModifier]: Passed through directly as an existing modifier atom.
-//   - [proto.Message]: Serialized via [proto.Marshal] with Content-Type "application/x-protobuf".
-//   - [url.Values]: URL-encoded form data with Content-Type "application/x-www-form-urlencoded".
-//   - [io.Reader]: Configured as a direct streaming body ([core.ModBodyStream]).
-//   - []byte: Transmitted as raw binary bytes ([core.ModBodyBytes]).
-//   - string: Transmitted as UTF-8 plaintext with Content-Type "text/plain; charset=utf-8".
-//   - Struct / Map / Slice / any other: Serialized via [json.Marshal] with Content-Type "application/json".
-//
-// # Error Handling & Pipeline Interception
-//
-// If serialization fails (e.g. JSON marshaling encountering unsupported channels/functions),
-// WithSmartBody does NOT panic. Instead, it embeds the serialization error into a deferred modifier
-// ([pipeline.RequestConfig.BodyError]), aborting execution cleanly before any data is sent over the network.
-func WithSmartBody(body any) RequestModifier {
-	if body == nil {
-		return RequestModifier{}
-	}
-
-	switch b := body.(type) {
-	case RequestModifier:
-		return b
-
-	case proto.Message:
-		bodyBytes, err := proto.Marshal(b)
-		if err != nil {
-			return RequestModifier{
-				Kind: core.ModCustom,
-				Fn: func(req Request) {
-					pipeline.GetOrInitRequestConfig(req).BodyError = err
-				},
-			}
-		}
-
-		return RequestModifier{
-			Kind:        core.ModBodyBytes,
-			ContentType: header.MIMEApplicationProtobuf,
-			Bytes:       bodyBytes,
-		}
-
-	case url.Values:
-		return RequestModifier{
-			Kind:        core.ModBodyBytes,
-			ContentType: header.MIMEApplicationForm,
-			Bytes:       bytesconv.S2B(b.Encode()),
-		}
-
-	case io.Reader:
-		return RequestModifier{
-			Kind:   core.ModBodyStream,
-			Stream: b,
-		}
-
-	case []byte:
-		return RequestModifier{
-			Kind:  core.ModBodyBytes,
-			Bytes: b,
-		}
-
-	case string:
-		return RequestModifier{
-			Kind:        core.ModBodyBytes,
-			ContentType: header.MIMETextPlainCharsetUTF8,
-			Bytes:       bytesconv.S2B(b),
-		}
-
-	default:
-		bodyBytes, err := json.Marshal(b)
-		if err != nil {
-			return RequestModifier{
-				Kind: core.ModCustom,
-				Fn: func(req Request) {
-					pipeline.GetOrInitRequestConfig(req).BodyError = err
-				},
-			}
-		}
-
-		return RequestModifier{
-			Kind:        core.ModBodyBytes,
-			ContentType: header.MIMEApplicationJSON,
-			Bytes:       bodyBytes,
-		}
-	}
-}
-
 // PeekResponse peeks up to n bytes from resp.Body without consuming or draining the stream.
 // It wraps resp.Body in a buffered reader if not already peekable, preserving full readability.
 func PeekResponse(resp *http.Response, n int) ([]byte, error) {
@@ -662,47 +326,4 @@ func PeekResponse(resp *http.Response, n int) ([]byte, error) {
 	}
 
 	return pipeline.PeekResponseBody(resp, n)
-}
-
-// WithVar replaces a URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).
-func WithVar(key string, value any) RequestModifier {
-	return mod.WithVar(key, value)
-}
-
-// WithVars replaces multiple URI template placeholders using alternating key-value pairs.
-func WithVars(pairs ...any) RequestModifier {
-	return mod.WithVars(pairs...)
-}
-
-// Custom constructs a custom [RequestModifier] wrapping an arbitrary closure function.
-func Custom(fn func(Request)) RequestModifier {
-	return mod.Custom(fn)
-}
-
-// WithModifier registers a default [RequestModifier] or custom modifier function executed on every outbound request.
-//
-// Supported types for fn:
-//   - [RequestModifier]
-//   - func([Request])
-//   - func(*http.Request)
-func WithModifier(fn any) ClientOption {
-	return func(cfg *Config) {
-		switch m := fn.(type) {
-		case RequestModifier:
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, m)
-		case func(Request):
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(m))
-		case func(*http.Request):
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(func(r Request) {
-				m(r.HTTPRequest())
-			}))
-		}
-	}
-}
-
-// WithModifiers registers one or more default [RequestModifier] functions executed on every outbound request.
-func WithModifiers(mods ...RequestModifier) ClientOption {
-	return func(cfg *Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
-	}
 }

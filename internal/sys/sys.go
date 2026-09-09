@@ -41,17 +41,42 @@ func InspectFeatures() Features {
 	}
 }
 
-// ApplyCPUAffinity locks the calling goroutine's OS thread to designated physical CPU cores.
+// LockGoroutineToCore locks the calling goroutine's OS thread to the designated
+// physical CPU cores, preventing OS scheduler thread migration.
 //
-// Concurrency & Runtime Invariant:
-// This function calls [runtime.LockOSThread]. The locked OS thread remains bound to the calling
-// goroutine for its entire execution duration to prevent OS scheduler thread migration.
-// Safe no-op if cores slice is empty or unsupported by the host operating system.
-func ApplyCPUAffinity(cores []int) {
+// This function calls [runtime.LockOSThread] and sets the OS thread CPU affinity mask.
+// The lock persists for the lifetime of the calling goroutine.
+//
+// # Usage Contract
+//
+// This function MUST be called from the goroutine that will perform the CPU-bound
+// or latency-critical work — NOT from library initialization code or constructors.
+// Calling it in a constructor locks the initializing goroutine (often main or a
+// framework goroutine), which is almost never the intended target.
+//
+// Example — pin a dedicated I/O goroutine:
+//
+//	go func() {
+//	    sys.LockGoroutineToCore(0, 2) // pin this goroutine's OS thread to cores 0 and 2
+//	    for req := range workCh {
+//	        process(req)
+//	    }
+//	}()
+//
+// Safe no-op if cores slice is empty or affinity is unsupported by the host OS.
+func LockGoroutineToCore(cores ...int) {
 	if len(cores) == 0 {
 		return
 	}
 
 	runtime.LockOSThread()
 	setThreadAffinityMask(cores)
+}
+
+// ApplyCPUAffinity is an alias for [LockGoroutineToCore] kept for backward compatibility.
+//
+// Deprecated: Use [LockGoroutineToCore] instead. Call it from the goroutine you
+// intend to pin, not from initialization code.
+func ApplyCPUAffinity(cores []int) {
+	LockGoroutineToCore(cores...)
 }

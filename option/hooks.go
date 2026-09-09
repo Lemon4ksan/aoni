@@ -233,8 +233,12 @@ func WithExperimental(flags ...ExperimentalFlag) aoni.ClientOption {
 }
 
 // WithCPUAffinity locks client worker OS threads to designated CPU core indices.
+//
+// Deprecated: This option has no effect. Use [sys.LockGoroutineToCore] directly from
+// the goroutine you intend to pin.
 func WithCPUAffinity(cores ...int) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
+		//nolint:staticcheck // deprecated field assignment kept for backward compatibility
 		cfg.Network.CPUAffinityCores = append(cfg.Network.CPUAffinityCores, cores...)
 	}
 }

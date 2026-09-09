@@ -590,7 +590,12 @@ type NetworkConfig struct {
 	// ExperimentalFlags consolidates opt-in hardware and OS experimental accelerations (io_uring, SIMD, RIO, TCP Fast Open).
 	ExperimentalFlags ExperimentalFlag
 
-	// CPUAffinityCores locks network worker OS threads to designated CPU core indices to eliminate thread migration overhead.
+	// CPUAffinityCores used to lock the client initialization goroutine's OS thread
+	// to designated CPU core indices. This had no effect on the actual I/O goroutines
+	// managed by the Go runtime and incorrectly pinned the caller of NewClient instead.
+	//
+	// Deprecated: Use [sys.LockGoroutineToCore] directly from the goroutine you intend
+	// to pin to specific CPU cores.
 	CPUAffinityCores []int
 }
 
@@ -1041,7 +1046,7 @@ type PipelineConfig struct {
 	// Stateful firewalls and ISP middleboxes classify automated traffic not only by TLS ClientHello
 	// signatures, but also by inter-packet arrival times (IAT) and TCP packet sizing.
 	// DPIJitter disrupts ML-based timing analysis by injecting controlled entropy into socket writes.
-	// If nil, socket writes proceed at full silicon line speed with 0 delay.
+	// If nil, socket writes proceed without delay.
 	DPIJitter *DPIJitterConfig
 
 	// ProxyFailover coordinates automatic proxy endpoint rotation and retry failover.

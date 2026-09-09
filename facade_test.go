@@ -79,7 +79,9 @@ func TestScoped(t *testing.T) {
 		defer resp.Body.Close()
 
 		return resp.StatusCode, nil
-	}, WithClientTimeout(5*time.Second))
+	}, func(cfg *Config) {
+		cfg.Engine.Timeout = 5 * time.Second
+	})
 
 	require.NoError(t, err)
 	assert.True(t, called)

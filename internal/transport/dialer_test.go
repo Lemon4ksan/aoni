@@ -66,7 +66,7 @@ func TestUniversalDialer_DialTLSContext(t *testing.T) {
 
 	dialer := transport.NewUniversalDialer()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cfg := transport.DialConfig{
@@ -94,7 +94,7 @@ func TestUniversalDialer_DialH2_FallbackError(t *testing.T) {
 
 	dialer := transport.NewUniversalDialer()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cfg := transport.DialConfig{

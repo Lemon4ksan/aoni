@@ -23,11 +23,6 @@ func WithMaxBytes(maxBytes int64) StoreOption {
 	}
 }
 
-// WithMaxMemoryBytes is an alias for [WithMaxBytes].
-func WithMaxMemoryBytes(maxBytes int64) StoreOption {
-	return WithMaxBytes(maxBytes)
-}
-
 // WithMaxDictionarySize sets the maximum size in bytes permitted for a single dictionary.
 func WithMaxDictionarySize(maxSize int64) StoreOption {
 	return func(s *Store) {

@@ -123,7 +123,7 @@ func (c *Client) PostInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	return c.FetchInto[Resp](ctx, http.MethodPost, path, body, target, mods...)
+	return c.FetchInto(ctx, http.MethodPost, path, body, target, mods...)
 }
 
 // PostEx executes an HTTP POST request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
@@ -293,7 +293,7 @@ func (c *Client) DoInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	return c.FetchInto[Resp](ctx, method, path, body, target, mods...)
+	return c.FetchInto(ctx, method, path, body, target, mods...)
 }
 
 // FetchEx performs an arbitrary HTTP request and returns both the unmarshaled *Resp and raw [*http.Response].
@@ -429,6 +429,186 @@ func BatchFetchTo[T any](
 	}
 
 	return results, firstErr
+}
+
+// FetchEither executes an HTTP request, decoding:
+//   - 2xx response bodies into type R (Right)
+//   - 4xx/5xx response bodies into type L (Left)
+//
+// Network failures, connection timeouts, or decoding errors are returned as error.
+// The response body stream is automatically drained and closed.
+func FetchEither[L, R any](
+	ctx context.Context,
+	c any,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	var doer HTTPRequester
+	if d, ok := c.(HTTPRequester); ok {
+		doer = d
+	} else if c == nil {
+		doer = DefaultClient
+	}
+
+	var (
+		right R
+		left  L
+	)
+
+	b := acquireRequestBuilder(doer).
+		SetContext(ctx).
+		SetResult(&right).
+		SetError(&left)
+
+	if body != nil {
+		b.SetBody(body)
+	}
+
+	b.Apply(mods...)
+
+	resp, err := b.Execute(method, path)
+	if err != nil {
+		if resp != nil && resp.StatusCode >= http.StatusBadRequest {
+			return generic.Left[L, R](left), resp, nil
+		}
+
+		return generic.Either[L, R]{}, resp, err
+	}
+
+	return generic.Right[L, R](right), resp, nil
+}
+
+// FetchEither executes an HTTP request and decodes 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (c *Client) FetchEither[L, R any](
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	return FetchEither[L, R](ctx, c, method, path, body, mods...)
+}
+
+// GetEither executes an HTTP GET request, decoding 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (c *Client) GetEither[L, R any](
+	ctx context.Context,
+	path string,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	return c.FetchEither[L, R](ctx, http.MethodGet, path, nil, mods...)
+}
+
+// PostEither executes an HTTP POST request, decoding 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func (c *Client) PostEither[L, R any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	return c.FetchEither[L, R](ctx, http.MethodPost, path, body, mods...)
+}
+
+// GetResult executes an HTTP GET request and returns a pure [generic.Result] wrapping the decoded response body.
+// The response body stream is automatically drained and closed.
+func (c *Client) GetResult[T any](
+	ctx context.Context,
+	path string,
+	mods ...RequestModifier,
+) generic.Result[T] {
+	val, err := c.GetTo[T](ctx, path, mods...)
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	if val == nil {
+		return generic.Success(generic.Zero[T]())
+	}
+
+	return generic.Success(*val)
+}
+
+// PostResult executes an HTTP POST request and returns a pure [generic.Result] wrapping the decoded response body.
+// The response body stream is automatically drained and closed.
+func (c *Client) PostResult[T any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) generic.Result[T] {
+	val, err := c.PostTo[T](ctx, path, body, mods...)
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	if val == nil {
+		return generic.Success(generic.Zero[T]())
+	}
+
+	return generic.Success(*val)
+}
+
+// FetchResult executes an HTTP request and returns a pure [generic.Result] wrapping the decoded response body.
+// The response body stream is automatically drained and closed.
+func (c *Client) FetchResult[T any](
+	ctx context.Context,
+	method, path string,
+	body any,
+	mods ...RequestModifier,
+) generic.Result[T] {
+	//nolint:bodyclose // Body is drained and closed in pipeline.
+	val, _, err := c.FetchEx[T](ctx, method, path, body, mods...)
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	if val == nil {
+		return generic.Success(generic.Zero[T]())
+	}
+
+	return generic.Success(*val)
+}
+
+// GetEither executes an HTTP GET request on [DefaultClient], decoding 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func GetEither[L, R any](
+	ctx context.Context,
+	path string,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	return DefaultClient.GetEither[L, R](ctx, path, mods...)
+}
+
+// PostEither executes an HTTP POST request on [DefaultClient], decoding 2xx responses into type R (Right)
+// and 4xx/5xx responses into type L (Left).
+func PostEither[L, R any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (generic.Either[L, R], *http.Response, error) {
+	return DefaultClient.PostEither[L, R](ctx, path, body, mods...)
+}
+
+// GetResult executes an HTTP GET request on [DefaultClient] and returns a pure [generic.Result].
+func GetResult[T any](
+	ctx context.Context,
+	path string,
+	mods ...RequestModifier,
+) generic.Result[T] {
+	return DefaultClient.GetResult[T](ctx, path, mods...)
+}
+
+// PostResult executes an HTTP POST request on [DefaultClient] and returns a pure [generic.Result].
+func PostResult[T any](
+	ctx context.Context,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) generic.Result[T] {
+	return DefaultClient.PostResult[T](ctx, path, body, mods...)
 }
 
 // HandleResponse processes and decodes an HTTP response stream into a target structure or API error.

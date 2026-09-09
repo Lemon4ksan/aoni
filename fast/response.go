@@ -296,7 +296,7 @@ func (f *Response) String() string {
 	return bytesconv.B2S(f.resp.Body())
 }
 
-// JSON decodes the response payload directly into v using the silicon-grade foundation/codec/json engine.
+// JSON decodes the response payload into v using the configured JSON decoder.
 func (f *Response) JSON(v any) error {
 	if f == nil || f.resp == nil {
 		return io.EOF

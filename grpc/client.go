@@ -88,7 +88,9 @@ func Invoke[Resp any](
 		return nil, err
 	}
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return nil, fmt.Errorf("aoni/grpc: error draining response body: %w", err)
+	}
 
 	if err := validateResponseTrailers(resp); err != nil {
 		return nil, err
@@ -130,7 +132,9 @@ func InvokeInto(
 		return err
 	}
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return fmt.Errorf("aoni/grpc: error draining response body: %w", err)
+	}
 
 	return validateResponseTrailers(resp)
 }
@@ -205,10 +209,10 @@ func validateInitialHeaders(resp *http.Response) error {
 func validateResponseTrailers(resp *http.Response) error {
 	trailers := resp.Trailer
 
-	statusCode := trailers.Get(header.GRPCStatus)
+	statusCode := getHeaderCaseInsensitive(trailers, header.GRPCStatus)
 	if statusCode == "" {
 		trailers = resp.Header
-		statusCode = trailers.Get(header.GRPCStatus)
+		statusCode = getHeaderCaseInsensitive(trailers, header.GRPCStatus)
 	}
 
 	if statusCode == "" {
@@ -220,6 +224,24 @@ func validateResponseTrailers(resp *http.Response) error {
 	}
 
 	return nil
+}
+
+func getHeaderCaseInsensitive(h http.Header, key string) string {
+	if h == nil {
+		return ""
+	}
+
+	if val := h.Get(key); val != "" {
+		return val
+	}
+
+	for k, v := range h {
+		if strings.EqualFold(k, key) && len(v) > 0 {
+			return v[0]
+		}
+	}
+
+	return ""
 }
 
 // EncodeBinaryHeader base64-encodes binary metadata for headers ending in "-bin".

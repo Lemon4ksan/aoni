@@ -235,6 +235,7 @@ func TestOption_Baremetal_And_BlockOverrides(t *testing.T) {
 		assert.True(t, cfg.Network.HasExperimental(option.ExpSIMD))
 		assert.True(t, cfg.Network.HasExperimental(option.ExpTCPFastOpen))
 		assert.False(t, cfg.Network.HasExperimental(option.ExpZeroCopy))
+		//nolint:staticcheck // testing deprecated field compatibility
 		assert.Equal(t, []int{0, 2}, cfg.Network.CPUAffinityCores)
 	})
 }

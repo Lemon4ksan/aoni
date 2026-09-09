@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -14,7 +15,7 @@ import (
 	"net/url"
 	"time"
 
-	log "github.com/lemon4ksan/foundation/async/logkit"
+	"github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
@@ -23,31 +24,18 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// Client is an immutable, thread-safe, multi-protocol HTTP, WebSockets, and gRPC client facade.
-// It acts as the primary architectural entry point for high-performance network communications,
-// encapsulating complex transport orchestration—including uTLS fingerprinting, HTTP/2-3 framing,
-// dynamic proxy rotation, anti-DPI packet fragmentation, and OS-level p0f stack spoofing.
+// Client is a thread-safe HTTP client supporting custom transports, TLS fingerprinting,
+// and request/response middleware pipelines.
 //
-// # Architectural Philosophy: Progressive Disclosure of Complexity
-//
-// The client is designed so that basic HTTP operations require zero cognitive overhead and
-// execute along a zero-allocation fast path ("baremetal"). As requirements grow in complexity,
-// enterprise-grade capabilities (such as speculative request hedging, automatic WAF challenge solving,
-// browser TLS impersonation, and MASQUE/SSH tunneling) can be enabled declaratively via functional
-// options without rewriting application logic or breaking existing interfaces.
-//
-// # Concurrency & Thread-Safety Invariants
-//
-// Client instances are strictly immutable once initialized and 100% safe for concurrent access
-// across arbitrary goroutines. Mutation methods such as [Client.With] and [Client.Clone] return newly
-// allocated Client instances with fully isolated configuration DTOs, header maps, and internal state,
-// guaranteeing that concurrent operations never suffer from shared-memory data races.
+// Concurrency:
+// All methods on Client are safe for concurrent use by multiple goroutines.
+// Client instances are immutable after construction; derivation methods such as
+// [Client.With] and [Client.Clone] return a new independent Client instance.
 type Client struct {
 	// cfg holds the immutable snapshot of all client configuration DTOs (defaults, network, fingerprint, engine).
 	cfg Config
@@ -139,30 +127,17 @@ func (c *Client) Unwrap() HTTPDoer {
 
 // Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
 //
-// It is an alias for c.With(), guaranteeing that the returned client is an independent
-// contract with zero shared mutable state, preventing cross-goroutine interference.
+// Clone creates an independent copy of the Client.
+// It is an alias for c.With().
 func (c *Client) Clone() *Client {
 	return c.With()
 }
 
-// With derives a brand new, fully autonomous [Client] contract with the provided functional options applied.
+// With returns a new Client with the provided options applied.
 //
-// # Architectural Philosophy: Clients as Immutable Contracts (Not Shared Mutable State)
-//
-// In traditional net/http ecosystems, [*http.Client] is a mutable container where mutating fields (such as
-// Jar, Timeout, or Transport) introduces insidious cross-goroutine data races and temporal coupling.
-//
-// In aoni, a [Client] is an immutable, value-oriented Execution Contract.
-// Invoking With does NOT perform a shallow struct copy and never mutates the receiver. Instead, it:
-//  1. Snapshots & Isolates Specification: Deep-copies the configuration DTO ([Config.Clone]).
-//  2. Decouples Network Transports: Clones underlying HTTP engines ([CloneHTTPClient]) to isolate socket pools.
-//  3. Decouples Stateful Automata: Fork-isolates navigation state ([pipeline.RefererState]) to prevent history leaks.
-//  4. Recompiles the Pipeline: Rebuilds precomputed routing tables ([pipeline.PreparedConfig]) and middleware stages.
-//
-// Invariants & Concurrency Guarantees:
-//   - The parent client remains 100% untouched and safe for concurrent execution across other goroutines.
-//   - The derived client is a standalone, first-class contract with zero shared mutable references to the parent.
-//   - Ideal for deriving tenant-isolated, route-scoped, or authenticated client variations at runtime.
+// Concurrency:
+// The receiver Client is not modified and remains safe for concurrent use.
+// The returned Client is fully independent with isolated configuration state.
 func (c *Client) With(opts ...ClientOption) *Client {
 	cfg := c.cfg.Clone()
 	generic.ApplyOptions(&cfg, opts...)
@@ -186,24 +161,15 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
-// Request executes an HTTP transaction using the given method, path, and optional modifiers,
-// returning the raw [*http.Response] stream.
+// Request executes an HTTP request using the specified method, path, and modifiers,
+// returning the raw [*http.Response].
 //
-// # Path Resolution Rules (RFC 3986)
-//   - Relative paths (e.g. "/users", "items/1"): Resolved against the configured BaseURL using
-//     precomputed zero-allocation string buffers ([pipeline.PreparedConfig]).
-//   - Absolute URLs (e.g. "https://api.example.com/v1"): Executed directly, completely overriding BaseURL.
+// Path resolution:
+//   - Relative paths (e.g. "/users"): Resolved against the configured BaseURL.
+//   - Absolute URLs (e.g. "https://api.example.com"): Executed directly, overriding BaseURL.
 //
-// # Execution Paths: Baremetal vs Pipeline
-//   - Baremetal Fast Path: When the client has no active pipeline stages (no interceptors, no hooks,
-//     no modifiers, no compression rules), Request executes directly through the engine with 0 heap allocations.
-//   - Full Pipeline Path: When modifiers, telemetry, or hooks are present, Request allocates a pooled
-//     transaction context and runs through the complete 5-stage middleware pipeline.
-//
-// # Resource Management Invariant
-//
-// The caller MUST close the returned response body stream ([http.Response.Body.Close]) when finished
-// to prevent socket leaks and allow connection reuse in the keep-alive pool.
+// Resource management:
+// The caller is responsible for closing the response body (resp.Body.Close()).
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -407,9 +373,9 @@ func (c *Client) Fetch(
 	return c.Request(ctx, method, path, allMods...)
 }
 
-// doBaremetal executes a request on the minimal allocation path - bypassing AcquireTx,
-// NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
-// and no per-request mods or config are present.
+// doBaremetal executes a request directly through the underlying engine,
+// bypassing transaction context allocation and the pipeline.
+// Invoked when no modifiers or pipeline features are active.
 func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Response, error) {
 	u, err := c.resolveURL(path)
 	if err != nil {
@@ -428,8 +394,11 @@ func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Re
 		Host:       u.Host,
 	}
 
-	// Avoid the 2-alloc req.WithContext copy for background/todo contexts with nil Done() channel
-	if ctx != nil && ctx.Done() != nil {
+	// Avoid the 2-alloc req.WithContext copy for the two sentinel background contexts.
+	// Checking ctx.Done() == nil is insufficient: context.WithValue(context.Background(), k, v)
+	// also has a nil Done channel but carries values (trace IDs, auth tokens, etc.) that must
+	// not be silently dropped. Identity comparison against the two stdlib singletons is exact.
+	if ctx != nil && ctx != context.Background() && ctx != context.TODO() {
 		req = req.WithContext(ctx)
 	}
 
@@ -586,15 +555,6 @@ func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
 	})
 }
 
-// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
-func (c *Client) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
-	if ck, ok := c.FindCookie(u, name); ok {
-		return generic.Some(ck)
-	}
-
-	return generic.None[*http.Cookie]()
-}
-
 // GetCookieValue retrieves the value of a named cookie.
 func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
 	if ck, ok := c.FindCookie(u, name); ok && ck != nil {
@@ -602,11 +562,6 @@ func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
 	}
 
 	return "", false
-}
-
-// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
-func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
-	return generic.From(c.GetCookieValue(u, name))
 }
 
 // Inspector yields the diagnostic [telemetry.TrafficInspector] if configured.
@@ -631,7 +586,7 @@ func (c *Client) BrowserID() BrowserID {
 // Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
 func (c *Client) Logger() core.Logger {
 	if c.cfg.Defaults.Logger == nil {
-		return log.Discard
+		return logkit.Discard
 	}
 
 	return c.cfg.Defaults.Logger
@@ -716,9 +671,19 @@ func (c *Client) Preresolve(ctx context.Context, host string) error {
 	return err
 }
 
-// Preconnect proactively establishes a speculative connection (DNS, TCP, and TLS/ALPN handshake)
-// to targetURL without transmitting an HTTP request payload. The warmed connection is kept alive
-// in the transport connection pool, reducing subsequent request latency (TTFB) to 0 ms.
+// Preconnect proactively warms the transport connection pool for targetURL by
+// performing a zero-body HEAD request. This drives a full DNS lookup, TCP dial,
+// and TLS/ALPN handshake, and the resulting connection is retained in the pool
+// for immediate reuse by subsequent requests, eliminating first-byte latency.
+//
+// Note: net/http does not expose a way to warm its pool without sending an actual
+// HTTP request; a HEAD with no body is the lowest-overhead mechanism available.
+//
+// Error handling:
+//   - Transport-level errors (DNS failure, TCP refused, TLS mismatch) are returned
+//     so callers can detect that the host is unreachable before committing work.
+//   - HTTP-level errors (4xx/5xx, e.g. 405 Method Not Allowed) are silently ignored:
+//     the TCP+TLS round-trip succeeded and the pool is already warmed.
 func (c *Client) Preconnect(ctx context.Context, targetURL string) error {
 	u, err := c.resolveURL(targetURL)
 	if err != nil {
@@ -726,14 +691,22 @@ func (c *Client) Preconnect(ctx context.Context, targetURL string) error {
 	}
 
 	resp, err := c.Request(ctx, http.MethodHead, u.String())
-	if err != nil {
-		// Even if server returns non-2xx status (like 405 Method Not Allowed),
-		// the connection has been dialed and TLS negotiated in the pool.
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+
+	if err == nil {
 		return nil
 	}
-	defer resp.Body.Close()
 
-	return nil
+	// HTTP-level error (4xx/5xx): TCP+TLS succeeded, connection pool is warmed.
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return nil
+	}
+
+	// Transport-level error: DNS, TCP dial, or TLS handshake failed — real failure.
+	return err
 }
 
 // ensureUserAgent guarantees a default User-Agent header is set on client request defaults.
@@ -767,10 +740,6 @@ func (c *Client) applyConfig(cfg Config) {
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
-
-	if len(cfg.Network.CPUAffinityCores) > 0 {
-		sys.ApplyCPUAffinity(cfg.Network.CPUAffinityCores)
-	}
 
 	c.pipeline = pipeline.New(
 		c.toPipelineDefaults(),
@@ -809,7 +778,12 @@ func (c *Client) applyDefaultHTTPHeader() http.Header {
 	reqHeader := make(http.Header, len(c.prepared.PrecomputedDefaultHeaders))
 	for i := range c.prepared.PrecomputedDefaultHeaders {
 		h := &c.prepared.PrecomputedDefaultHeaders[i]
-		reqHeader[h.Key] = h.Slice
+		// Use a 3-index slice expression to set cap == len. This guarantees that any
+		// append by net/http or middleware will allocate a fresh backing array rather
+		// than writing into the shared PrecomputedDefaultHeaders slice, preventing
+		// cross-request data corruption and potential data races under parallel load.
+		s := h.Slice
+		reqHeader[h.Key] = s[:len(s):len(s)]
 	}
 
 	return reqHeader

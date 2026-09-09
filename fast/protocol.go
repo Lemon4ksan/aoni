@@ -26,7 +26,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -262,21 +261,7 @@ func (c *Client) getH3Client() *h3engine.Client {
 			tlsCfg.CipherSuites = spec.CipherSuites
 		}
 
-		quicCfg := &quic.Config{
-			EnableDatagrams: true,
-		}
-
-		if h3s := c.cfg.Fingerprint.H3Settings; h3s != nil {
-			quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
-			quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
-			quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
-			quicCfg.MaxConnectionReceiveWindow = h3s.MaxConnectionReceiveWindow
-			quicCfg.MaxIncomingStreams = h3s.MaxIncomingStreams
-			quicCfg.MaxIncomingUniStreams = h3s.MaxIncomingUniStreams
-			quicCfg.EnableDatagrams = h3s.EnableDatagrams
-		}
-
-		c.protocolState.h3Client = h3engine.NewClient(tlsCfg, quicCfg)
+		c.protocolState.h3Client = h3engine.NewClientFromSettings(tlsCfg, c.cfg.Fingerprint.H3Settings)
 	})
 
 	return c.protocolState.h3Client

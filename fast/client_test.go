@@ -269,23 +269,8 @@ func TestFastClient_Cookies_Inspection(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "sess-999", c.Value)
 
-	// FindCookieOptional
-	cOpt := client.FindCookieOptional(u, "session_id")
-	require.True(t, cOpt.IsPresent())
-	assert.Equal(t, "sess-999", cOpt.MustValue().Value)
-
 	// GetCookieValue (string, bool)
 	val, okVal := client.GetCookieValue(u, "role")
 	require.True(t, okVal)
 	assert.Equal(t, "admin", val)
-
-	// GetCookieValueOptional
-	valOpt := client.GetCookieValueOptional(u, "role")
-	require.True(t, valOpt.IsPresent())
-	assert.Equal(t, "admin", valOpt.ValueOr("guest"))
-
-	// Missing cookie
-	_, missing := client.FindCookie(u, "non_existent")
-	assert.False(t, missing)
-	assert.False(t, client.FindCookieOptional(u, "non_existent").IsPresent())
 }
