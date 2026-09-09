@@ -247,7 +247,7 @@ func TestTyped_HTMLDetectionAndPeekableReader(t *testing.T) {
 
 	t.Run("peekable_reader_resolution", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Raw().Get(t.Context(), "/get")
+		resp, err := client.Get(t.Context(), "/get")
 		require.NoError(t, err)
 
 		defer resp.Body.Close()

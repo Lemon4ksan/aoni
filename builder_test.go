@@ -155,17 +155,17 @@ func TestRequestBuilder_ContextAndTimeout(t *testing.T) {
 }
 
 func TestRequestBuilder_PluginSystem(t *testing.T) {
-	t.Run("Use BuilderPlugin", func(t *testing.T) {
+	t.Run("Use builder plugin func", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "plugin-v1", r.Header.Get("X-Plugin-Header"))
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer ts.Close()
 
-		testPlugin := aoni.BuilderPluginFunc(func(r *aoni.RequestBuilder) error {
+		testPlugin := func(r *aoni.RequestBuilder) error {
 			r.SetHeader("X-Plugin-Header", "plugin-v1")
 			return nil
-		})
+		}
 
 		client := aoni.New()
 		resp, err := client.R().
@@ -184,10 +184,10 @@ func TestRequestBuilder_PluginSystem(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		signer := aoni.RequestSignerFunc(func(req *http.Request) error {
+		signer := func(req *http.Request) error {
 			req.Header.Set("X-Signature", "signed-hash-12345")
 			return nil
-		})
+		}
 
 		client := aoni.New()
 		resp, err := client.R().
@@ -206,7 +206,7 @@ func TestRequestBuilder_PluginSystem(t *testing.T) {
 
 		var sinkContent string
 
-		customSink := testSink{onConsume: func(resp *http.Response) error {
+		customSink := func(resp *http.Response) error {
 			b, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return err
@@ -215,7 +215,7 @@ func TestRequestBuilder_PluginSystem(t *testing.T) {
 			sinkContent = string(b)
 
 			return nil
-		}}
+		}
 
 		client := aoni.New()
 		resp, err := client.R().
@@ -234,13 +234,13 @@ func TestRequestBuilder_PluginSystem(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		failValidator := aoni.ResponseValidatorFunc(func(resp *http.Response) error {
+		failValidator := func(resp *http.Response) error {
 			if resp.Header.Get("X-Required-Status") == "denied" {
 				return aoni.ErrUnexpectedStatus
 			}
 
 			return nil
-		})
+		}
 
 		client := aoni.New()
 		_, err := client.R().
@@ -250,18 +250,6 @@ func TestRequestBuilder_PluginSystem(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, aoni.ErrUnexpectedStatus)
 	})
-}
-
-type testSink struct {
-	onConsume func(resp *http.Response) error
-}
-
-func (s testSink) ConsumeResponse(resp *http.Response) error {
-	if s.onConsume != nil {
-		return s.onConsume(resp)
-	}
-
-	return nil
 }
 
 func TestRequestBuilder_HeadersAndQueryParams(t *testing.T) {

@@ -192,7 +192,7 @@ func TestClientRaw(t *testing.T) {
 
 	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
 
-	resp, err := client.Raw().Get(context.Background(), "/raw")
+	resp, err := client.Get(context.Background(), "/raw")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

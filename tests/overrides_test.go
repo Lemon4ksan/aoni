@@ -390,7 +390,7 @@ func TestResponseValidator(t *testing.T) {
 
 		c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-		resp, err := c.Raw().Get(t.Context(), "/",
+		resp, err := c.Get(t.Context(), "/",
 			mod.WithResponseValidator(func(resp *http.Response) error {
 				if resp.Header.Get("X-Status") != "ok" {
 					return errors.New("missing X-Status")
@@ -415,7 +415,7 @@ func TestResponseValidator(t *testing.T) {
 
 		c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-		resp, err := c.Raw().Get(t.Context(), "/",
+		resp, err := c.Get(t.Context(), "/",
 			mod.WithResponseValidator(func(resp *http.Response) error {
 				body, _ := io.ReadAll(resp.Body)
 
@@ -628,7 +628,7 @@ func TestResponseTrace(t *testing.T) {
 
 	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-	resp, err := c.Raw().Get(t.Context(), "/", mod.WithTraceContext())
+	resp, err := c.Get(t.Context(), "/", mod.WithTraceContext())
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

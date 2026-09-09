@@ -51,7 +51,7 @@ func newRequestPool() *requestPool {
 			return &RequestBuilder{
 				appliedMods:      make([]RequestModifier, 0, 8),
 				expectedStatuses: make([]int, 0, 4),
-				validators:       make([]ResponseValidator, 0, 2),
+				validators:       make([]func(*http.Response) error, 0, 2),
 				multipartFields:  make([]mod.MultipartField, 0, 4),
 				pathParams:       make(map[string]string, 4),
 			}
@@ -104,9 +104,9 @@ type RequestBuilder struct {
 	outputFile       string
 	outputDirectory  string
 	authMod          RequestModifier
-	signer           RequestSigner
-	sink             ResponseSink
-	validators       []ResponseValidator
+	signer           func(*http.Request) error
+	sink             func(*http.Response) error
+	validators       []func(*http.Response) error
 	pluginErr        error
 	retryOverride    *core.RetryOverride
 	consumed         bool
@@ -317,14 +317,14 @@ func (r *RequestBuilder) ExpectStatus(codes ...int) *RequestBuilder {
 	return r
 }
 
-// Use registers one or more [BuilderPlugin] extensions to configure the request.
-func (r *RequestBuilder) Use(plugins ...BuilderPlugin) *RequestBuilder {
+// Use registers one or more builder modifier functions to configure the request.
+func (r *RequestBuilder) Use(plugins ...func(*RequestBuilder) error) *RequestBuilder {
 	for _, p := range plugins {
 		if p == nil {
 			continue
 		}
 
-		if err := p.ApplyBuilder(r); err != nil && r.pluginErr == nil {
+		if err := p(r); err != nil && r.pluginErr == nil {
 			r.pluginErr = err
 		}
 	}
@@ -332,21 +332,28 @@ func (r *RequestBuilder) Use(plugins ...BuilderPlugin) *RequestBuilder {
 	return r
 }
 
-// SetSigner sets a pluggable [RequestSigner] for cryptographic request signing.
-func (r *RequestBuilder) SetSigner(signer RequestSigner) *RequestBuilder {
+// SetSigner sets a pluggable function for cryptographic request signing.
+func (r *RequestBuilder) SetSigner(signer func(*http.Request) error) *RequestBuilder {
 	r.signer = signer
 	return r
 }
 
-// SetSink sets a pluggable [ResponseSink] for consuming the response payload.
-func (r *RequestBuilder) SetSink(sink ResponseSink) *RequestBuilder {
+// SetSink sets a pluggable callback function for consuming the response payload.
+func (r *RequestBuilder) SetSink(sink func(*http.Response) error) *RequestBuilder {
 	r.sink = sink
 	return r
 }
 
 // AddValidator registers response validators to inspect HTTP responses before decoding.
-func (r *RequestBuilder) AddValidator(validators ...ResponseValidator) *RequestBuilder {
-	r.validators = append(r.validators, validators...)
+//
+//nolint:bodyclose // Validators inspect responses without taking ownership of response lifecycle.
+func (r *RequestBuilder) AddValidator(validators ...func(*http.Response) error) *RequestBuilder {
+	for _, v := range validators {
+		if v != nil {
+			r.validators = append(r.validators, v)
+		}
+	}
+
 	return r
 }
 
@@ -627,7 +634,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 			Kind: core.ModCustom,
 			Fn: func(req core.Request) {
 				if httpReq := req.HTTPRequest(); httpReq != nil {
-					_ = signer.SignRequest(httpReq)
+					_ = signer(httpReq)
 				}
 			},
 		})
@@ -643,7 +650,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	}
 
 	for i := range r.validators {
-		if err := r.validators[i].ValidateResponse(resp); err != nil {
+		if err := r.validators[i](resp); err != nil {
 			return resp, err
 		}
 	}
@@ -653,7 +660,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if r.sink != nil {
-		if err := r.sink.ConsumeResponse(resp); err != nil {
+		if err := r.sink(resp); err != nil {
 			return resp, err
 		}
 

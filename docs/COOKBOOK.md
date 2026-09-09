@@ -46,7 +46,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
-resp, err := client.Raw().Request(ctx, http.MethodGet, "/vip-endpoint",
+resp, err := client.Request(ctx, http.MethodGet, "/vip-endpoint",
 	mod.WithProxyOverride("http://premium-proxy.local:9090"),
 	mod.WithInsecureSkipVerify(),
 	mod.WithTCPDelay(100*time.Millisecond, 500*time.Millisecond),

@@ -3,10 +3,10 @@ module github.com/lemon4ksan/aoni
 go 1.27.0
 
 require (
-	github.com/lemon4ksan/foundation v0.0.0-20260904063358-d88efac513fc
+	github.com/lemon4ksan/foundation v0.0.0-20260909194919-8b2135816484
 	github.com/pkg/sftp v1.13.11
 	github.com/refraction-networking/utls v1.8.2
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.12

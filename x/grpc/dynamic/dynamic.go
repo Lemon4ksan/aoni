@@ -98,7 +98,7 @@ func (d *DynamicInvoker) InvokeJSON(
 		client = aoni.DefaultClient
 	}
 
-	resp, err := client.Raw().Request(ctx, http.MethodPost, path, grpcMods...)
+	resp, err := client.Request(ctx, http.MethodPost, path, grpcMods...)
 	if err != nil {
 		return "", err
 	}

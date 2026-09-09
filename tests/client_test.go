@@ -495,7 +495,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 			if !tt.mod.IsZero() {
 				var output []byte
 
-				resp, err := client.Raw().Get(t.Context(), "/", tt.mod)
+				resp, err := client.Get(t.Context(), "/", tt.mod)
 				require.NoError(t, err)
 				t.Cleanup(func() { aoni.CloseResponse(resp) })
 
@@ -935,14 +935,14 @@ func TestClient_Cache(t *testing.T) {
 		}),
 	)
 
-	resp1, err := client.Raw().Get(t.Context(), "/")
+	resp1, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
 	assert.Equal(t, "cached content", string(body1))
 
-	resp2, err := client.Raw().Get(t.Context(), "/")
+	resp2, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	body2, _ := io.ReadAll(resp2.Body)
@@ -972,7 +972,7 @@ func TestClient_ProxyFailover(t *testing.T) {
 		}),
 	)
 
-	resp, err := client.Raw().Get(t.Context(), "/")
+	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -1466,7 +1466,7 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 		option.WithUARotationProfiles(profList),
 	)
 
-	resp1, err := client.Raw().Get(t.Context(), "/")
+	resp1, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	defer resp1.Body.Close()
@@ -1474,7 +1474,7 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 	assert.Equal(t, "BrowserA", resp1.Header.Get("X-UA"))
 	assert.Equal(t, "BrandA", resp1.Header.Get("X-Hint"))
 
-	resp2, err := client.Raw().Get(t.Context(), "/")
+	resp2, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	defer resp2.Body.Close()
@@ -1499,7 +1499,7 @@ func TestDPIJitter(t *testing.T) {
 	)
 
 	start := time.Now()
-	resp, err := client.Raw().Get(t.Context(), "/")
+	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -1571,7 +1571,7 @@ func TestHARGenerator(t *testing.T) {
 		}),
 	)
 
-	resp, err := client.Raw().Get(t.Context(), "/")
+	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -1608,7 +1608,7 @@ func TestClient_QueryEncoder(t *testing.T) {
 		option.WithQueryEncoder(customEncoder),
 	)
 
-	_, err := client.Raw().Get(t.Context(), "/", mod.WithQuery(struct{ Dummy string }{Dummy: "value"}))
+	_, err := client.Get(t.Context(), "/", mod.WithQuery(struct{ Dummy string }{Dummy: "value"}))
 	require.NoError(t, err)
 	assert.Equal(t, "custom_key=custom_val", capturedQuery)
 }
@@ -2510,7 +2510,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		client := aoni.New(option.WithBaseURL(server.URL), option.WithTimeout(5*time.Second))
-		resp, err := client.Raw().Get(t.Context(), "/", mod.WithBearer("secret_token_123"))
+		resp, err := client.Get(t.Context(), "/", mod.WithBearer("secret_token_123"))
 		require.NoError(t, err)
 		t.Cleanup(func() { aoni.DrainAndClose(resp) })
 
@@ -2708,7 +2708,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 			}),
 		)
 
-		resp, err := client.Raw().Get(t.Context(), "/")
+		resp, err := client.Get(t.Context(), "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errSessionExpired)
 		assert.Nil(t, resp)
@@ -2731,7 +2731,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 			option.WithBlockRedirectTo("/login"),
 		)
 
-		resp, err := client.Raw().Get(t.Context(), "/protected")
+		resp, err := client.Get(t.Context(), "/protected")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, aoni.ErrRedirectBlocked)
 		if resp != nil && resp.Body != nil {
@@ -2749,7 +2749,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		client := aoni.New(option.WithBaseURL(server.URL))
-		resp, err := client.Raw().Get(t.Context(), "/")
+		resp, err := client.Get(t.Context(), "/")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -2786,7 +2786,7 @@ func TestClient_AuditFeatures(t *testing.T) {
 			option.WithDigestAuth("admin", "secretpass"),
 		)
 
-		resp, err := client.Raw().Get(t.Context(), "/")
+		resp, err := client.Get(t.Context(), "/")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -2821,12 +2821,12 @@ func TestClient_AuditFeatures(t *testing.T) {
 
 		client := aoni.New(option.WithBaseURL(server.URL))
 
-		respAuth, errAuth := client.Raw().Get(t.Context(), "/authorize", mod.WithPKCE(verifier))
+		respAuth, errAuth := client.Get(t.Context(), "/authorize", mod.WithPKCE(verifier))
 		require.NoError(t, errAuth)
 		defer respAuth.Body.Close()
 		assert.Equal(t, http.StatusOK, respAuth.StatusCode)
 
-		respToken, errToken := client.Raw().Post(t.Context(), "/token", mod.WithPKCEVerifier(verifier))
+		respToken, errToken := client.Post(t.Context(), "/token", nil, mod.WithPKCEVerifier(verifier))
 		require.NoError(t, errToken)
 		defer respToken.Body.Close()
 		assert.Equal(t, http.StatusOK, respToken.StatusCode)
