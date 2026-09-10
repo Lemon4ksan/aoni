@@ -47,8 +47,6 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 }
 
 func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
-	var payloadRead bool
-
 	for len(data) >= 5 {
 		flags := data[0]
 		_ = data[4]
@@ -56,10 +54,6 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 		data = data[5:]
 
 		if uint32(len(data)) < length {
-			if payloadRead {
-				return nil
-			}
-
 			return grpcWebReadPayloadErr()
 		}
 
@@ -74,8 +68,10 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 		if done {
 			return nil
 		}
+	}
 
-		payloadRead = true
+	if len(data) > 0 {
+		return grpcWebReadHeaderErr("read_header")
 	}
 
 	return nil
@@ -83,17 +79,11 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 
 // readGRPCWebFrames sequentially reads 5-byte length-prefixed frames from reader and unmarshals payload data into msg.
 func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
-	var payloadRead bool
-
 	framer := transport.NewLengthPrefixedFramer(0)
 	for {
 		flags, payload, err := framer.ReadFrame(reader)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil
-			}
-
-			if errors.Is(err, transport.ErrTruncatedPayload) && payloadRead {
 				return nil
 			}
 
@@ -110,8 +100,6 @@ func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
 		if done {
 			return nil
 		}
-
-		payloadRead = true
 	}
 }
 
