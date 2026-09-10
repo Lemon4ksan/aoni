@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -263,7 +264,7 @@ func DialWebSocketWithConfig(
 		return nil, nil, err
 	}
 
-	baseConn, err := dialBaseConnection(ctx, dialer, parsed)
+	baseConn, err := dialBaseConnection(handshakeReq.Context(), dialer, parsed)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -276,6 +277,19 @@ func DialWebSocketWithConfig(
 	// 2. Try HTTP/2 Extended CONNECT (RFC 8441) if ALPN negotiated "h2"
 	if h2Conn, resp, ok := tryH2ExtendedConnect(ctx, baseConn, targetURL, parsed, handshakeReq); ok {
 		return h2Conn, resp, nil
+	}
+
+	// Protocol Guard (RFC 9113 §3.4 & RFC 8441):
+	// If ALPN negotiated "h2" or "h3", the socket framing is committed to binary frames.
+	// We MUST NOT send plain HTTP/1.1 Upgrade requests into a multiplexed session.
+	if proto := getNegotiatedProtocol(baseConn); proto == aoni.AlpnH2 || proto == aoni.AlpnH3 {
+		_ = baseConn.Close()
+
+		return nil, nil, fmt.Errorf(
+			"%w: server negotiated %s without RFC 8441 Extended CONNECT support (consider option.WithHTTP1Only() or mod.WithForceHTTP1())",
+			ErrBadHandshake,
+			proto,
+		)
 	}
 
 	// 3. Fallback to HTTP/1.1 Upgrade (RFC 6455)
@@ -380,6 +394,28 @@ func dialBaseConnection(ctx context.Context, dialer aoni.WebSocketDialer, parsed
 	return dialer.DialPlainForWS(ctx, addr)
 }
 
+func getNegotiatedProtocol(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+
+	type stdStateGetter interface {
+		ConnectionState() tls.ConnectionState
+	}
+	if cs, ok := conn.(stdStateGetter); ok {
+		return cs.ConnectionState().NegotiatedProtocol
+	}
+
+	type utlsStateGetter interface {
+		ConnectionState() utls.ConnectionState
+	}
+	if cs, ok := conn.(utlsStateGetter); ok {
+		return cs.ConnectionState().NegotiatedProtocol
+	}
+
+	return ""
+}
+
 func tryH3ExtendedConnect(
 	ctx context.Context,
 	baseConn net.Conn,
@@ -387,8 +423,7 @@ func tryH3ExtendedConnect(
 	parsed *parsedURL,
 	req *http.Request,
 ) (Conn, *http.Response, bool) {
-	uConn, ok := baseConn.(*utls.UConn)
-	if !ok || uConn.ConnectionState().NegotiatedProtocol != aoni.AlpnH3 {
+	if getNegotiatedProtocol(baseConn) != aoni.AlpnH3 {
 		return nil, nil, false
 	}
 
@@ -416,8 +451,7 @@ func tryH2ExtendedConnect(
 	parsed *parsedURL,
 	req *http.Request,
 ) (Conn, *http.Response, bool) {
-	uConn, ok := baseConn.(*utls.UConn)
-	if !ok || uConn.ConnectionState().NegotiatedProtocol != aoni.AlpnH2 {
+	if getNegotiatedProtocol(baseConn) != aoni.AlpnH2 {
 		return nil, nil, false
 	}
 

@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/lemon4ksan/aoni/cookie"
@@ -105,6 +106,14 @@ func newDefaultTransport() *http.Transport {
 
 func (c *Client) reapplyH2Settings(tr *http.Transport) {
 	if tr == nil {
+		return
+	}
+
+	if len(c.cfg.Fingerprint.ALPN) > 0 &&
+		!slices.Contains(c.cfg.Fingerprint.ALPN, AlpnH2) &&
+		!slices.Contains(c.cfg.Fingerprint.ALPN, AlpnH3) {
+		tr.ForceAttemptHTTP2 = false
+		tr.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 		return
 	}
 

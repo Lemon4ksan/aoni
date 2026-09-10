@@ -500,4 +500,16 @@ func TestOption_MoreHooks_And_Pipeline(t *testing.T) {
 
 	option.WithHTTP2Config(aoni.HTTP2Config{PingTimeout: 5 * time.Second})(cfg)
 	assert.NotNil(t, cfg.Engine.HTTP2Config)
+
+	option.WithALPN("h2", "http/1.1")(cfg)
+	assert.Equal(t, []string{"h2", "http/1.1"}, cfg.Fingerprint.ALPN)
+
+	option.WithHTTP1Only()(cfg)
+	assert.Equal(t, []string{aoni.AlpnHTTP}, cfg.Fingerprint.ALPN)
+
+	option.WithForceHTTP2()(cfg)
+	assert.Equal(t, []string{aoni.AlpnH2}, cfg.Fingerprint.ALPN)
+
+	option.WithForceHTTP3()(cfg)
+	assert.Equal(t, []string{aoni.AlpnH3}, cfg.Fingerprint.ALPN)
 }

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/logkit"
@@ -739,6 +740,15 @@ func (c *Client) applyConfig(cfg Config) {
 	c.baremetalEligible = c.cfg.IsBaremetalEligible()
 
 	applyEngineConfig(c, cfg.Engine)
+
+	if tr := c.Transport(); tr != nil && len(cfg.Fingerprint.ALPN) > 0 {
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{}
+		}
+
+		tr.TLSClientConfig.NextProtos = slices.Clone(cfg.Fingerprint.ALPN)
+	}
+
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)

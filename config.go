@@ -288,6 +288,7 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		Enable0RTT:         c.Fingerprint.Enable0RTT,
 		ECHConfigList:      c.Fingerprint.ECHConfigList,
 		ConnFilters:        c.Network.ConnFilters,
+		ALPNOverride:       slices.Clone(c.Fingerprint.ALPN),
 		TCPQuickACK:        c.Network.TCPQuickACK,
 		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
 	}
@@ -748,6 +749,10 @@ type FingerprintConfig struct {
 	// TLSClientHelloID overrides BrowserID with a specific uTLS ClientHelloID preset.
 	TLSClientHelloID *utls.ClientHelloID
 
+	// ALPN explicitly configures Application-Layer Protocol Negotiation tokens (e.g. "h2", "http/1.1").
+	// Overrides ALPN tokens announced in uTLS ClientHello without altering cipher suites or TLS extensions.
+	ALPN []string
+
 	// TLSClientHelloSpecProvider dynamically generates a uTLS ClientHelloSpec for each connection,
 	// allowing fine-grained control over TLS extensions, cipher suites, supported curves, and ALPN tokens.
 	TLSClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
@@ -828,6 +833,10 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.ECHConfigList) > 0 {
 		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
+	}
+
+	if len(f.ALPN) > 0 {
+		cloned.ALPN = slices.Clone(f.ALPN)
 	}
 
 	return cloned

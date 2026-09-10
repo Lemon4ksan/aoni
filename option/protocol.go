@@ -5,6 +5,8 @@
 package option
 
 import (
+	"slices"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
@@ -103,4 +105,45 @@ func WithHTTP3(settings ...h3.Settings) aoni.ClientOption {
 			cfg.Fingerprint.H3Settings = &s
 		}
 	}
+}
+
+// WithALPN configures custom Application-Layer Protocol Negotiation (ALPN) tokens for TLS/uTLS handshakes.
+//
+// Overrides default ALPN tokens (such as ["h2", "http/1.1"]) while preserving the active browser TLS fingerprint.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithChrome(),
+//	    option.WithALPN(aoni.AlpnHTTP),
+//	)
+func WithALPN(protos ...string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.ALPN = slices.Clone(protos)
+	}
+}
+
+// WithHTTP1Only restricts TLS ALPN negotiation strictly to HTTP/1.1 ("http/1.1").
+//
+// Disables HTTP/2 and HTTP/3 negotiation while preserving all browser TLS ClientHello fingerprints.
+// Useful for legacy endpoints (such as WebSocket servers behind Cloudflare without RFC 8441 support).
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithChrome(),
+//	    option.WithHTTP1Only(),
+//	)
+func WithHTTP1Only() aoni.ClientOption {
+	return WithALPN(aoni.AlpnHTTP)
+}
+
+// WithForceHTTP2 restricts TLS ALPN negotiation strictly to HTTP/2 ("h2").
+func WithForceHTTP2() aoni.ClientOption {
+	return WithALPN(aoni.AlpnH2)
+}
+
+// WithForceHTTP3 restricts TLS ALPN negotiation strictly to HTTP/3 ("h3").
+func WithForceHTTP3() aoni.ClientOption {
+	return WithALPN(aoni.AlpnH3)
 }

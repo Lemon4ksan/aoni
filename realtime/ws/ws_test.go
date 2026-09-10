@@ -419,6 +419,64 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestDialWebSocket_ForceHTTP1(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := testUpgradeToWS(w, r)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		for {
+			mt, msg, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			_ = ws.WriteMessage(mt, msg)
+		}
+	}))
+	server.EnableHTTP2 = true
+
+	server.StartTLS()
+	defer server.Close()
+
+	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
+
+	t.Run("with_option_http1_only", func(t *testing.T) {
+		client := aoni.NewClient(nil,
+			option.WithTLSFingerprint(aoni.BrowserChrome),
+			option.WithHTTP1Only(),
+			option.WithInsecureSkipVerify(),
+		)
+
+		conn, resp, err := DialWebSocket(t.Context(), client, wssURL)
+		require.NoError(t, err)
+
+		defer conn.Close()
+
+		assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+		assert.Equal(t, "HTTP/1.1", resp.Proto)
+	})
+
+	t.Run("with_modifier_force_http1", func(t *testing.T) {
+		client := aoni.NewClient(nil,
+			option.WithTLSFingerprint(aoni.BrowserChrome),
+			option.WithInsecureSkipVerify(),
+		)
+
+		conn, resp, err := DialWebSocket(t.Context(), client, wssURL, mod.WithForceHTTP1())
+		require.NoError(t, err)
+
+		defer conn.Close()
+
+		assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+		assert.Equal(t, "HTTP/1.1", resp.Proto)
+	})
+}
+
 func TestWSRawConn_RoundTrip(t *testing.T) {
 	t.Parallel()
 
