@@ -40,9 +40,11 @@ var (
 
 // ClientConn manages HTTP/3 frame exchanges over a quic.Conn session (RFC 9114 §3, §4, §6 & §7).
 type ClientConn struct {
-	conn     *quic.Conn
-	qpack    *QPACKCodec
-	settings Settings
+	conn             *quic.Conn
+	transport        *quic.Transport
+	underlyingCloser io.Closer
+	qpack            *QPACKCodec
+	settings         Settings
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -75,10 +77,18 @@ func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 }
 
 func (cc *ClientConn) isClosed() bool {
+	if cc == nil {
+		return true
+	}
+
 	select {
 	case <-cc.closed:
 		return true
 	default:
+		if cc.conn == nil {
+			return true
+		}
+
 		return cc.conn.Context().Err() != nil
 	}
 }
@@ -454,11 +464,22 @@ func (cc *ClientConn) readResponseFrom(
 	return trailers, nil
 }
 
-// Close gracefully terminates the HTTP/3 client connection.
+// Close gracefully terminates the HTTP/3 client connection and releases transport sockets.
 func (cc *ClientConn) Close() error {
 	cc.closeOnce.Do(func() {
 		close(cc.closed)
-		_ = cc.conn.CloseWithError(0x100, "connection closed")
+
+		if cc.conn != nil {
+			_ = cc.conn.CloseWithError(0x100, "connection closed")
+		}
+
+		if cc.transport != nil {
+			_ = cc.transport.Close()
+		}
+
+		if cc.underlyingCloser != nil {
+			_ = cc.underlyingCloser.Close()
+		}
 	})
 
 	return nil

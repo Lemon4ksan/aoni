@@ -220,8 +220,16 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 
 	cc, err := NewClientConn(qConn, c.Settings)
 	if err != nil {
+		_ = qConn.CloseWithError(0x100, "setup failed")
+		_ = tr.Close()
+		_ = batchConn.Close()
+		_ = udpConn.Close()
+
 		return nil, err
 	}
+
+	cc.transport = tr
+	cc.underlyingCloser = batchConn
 
 	c.mutex.Lock()
 	c.conns[host] = cc
@@ -232,8 +240,17 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 
 func (c *Client) removeConn(host string) {
 	c.mutex.Lock()
-	delete(c.conns, host)
+
+	cc, ok := c.conns[host]
+	if ok {
+		delete(c.conns, host)
+	}
+
 	c.mutex.Unlock()
+
+	if ok && cc != nil {
+		_ = cc.Close()
+	}
 }
 
 // Close terminates all active HTTP/3 client connections in the pool.
