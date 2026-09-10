@@ -20,6 +20,8 @@ github.com/lemon4ksan/foundation v0.0.0-20260904063358-d88efac513fc h1:yDQNNy7T8
 github.com/lemon4ksan/foundation v0.0.0-20260904063358-d88efac513fc/go.mod h1:MsA5LvHlsPmx1MBCumICPaT7D0p3f1B51zpGDIEaTKc=
 github.com/lemon4ksan/foundation v0.0.0-20260909194919-8b2135816484 h1:siMNpsaQs3nxQ7EYkafdEXZEOLSJsu80YlgXzyynwt4=
 github.com/lemon4ksan/foundation v0.0.0-20260909194919-8b2135816484/go.mod h1:iPFy+2SgErcf229N6F5Q/xNXFGVQF/zL4MpqOGxHUDQ=
+github.com/lemon4ksan/foundation v0.0.0-20260910154509-e8ac18a42e81 h1:texMn6y3XPgjaybVTGo1uLs29h/QsKKkpNpoO/6aWwI=
+github.com/lemon4ksan/foundation v0.0.0-20260910154509-e8ac18a42e81/go.mod h1:iPFy+2SgErcf229N6F5Q/xNXFGVQF/zL4MpqOGxHUDQ=
 github.com/pkg/diff v0.0.0-20210226163009-20ebb0f2a09e/go.mod h1:pJLUxLENpZxwdsKMEsNbx1VGcRFpLqf3715MtcvvzbA=
 github.com/pkg/sftp v1.13.11 h1:0N92SLTB8JqASJB14ZLHHzFnBV8mG9zw4K7jghEFWuE=
 github.com/pkg/sftp v1.13.11/go.mod h1:uNkH9roSXglNJqM+glJJi+TQXQUm0fXFWqCFmT8hsN0=
