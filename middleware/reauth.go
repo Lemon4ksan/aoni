@@ -30,14 +30,29 @@ type ReAuthConfig struct {
 }
 
 type reauthBarrier struct {
-	mu       sync.Mutex
-	inFlight bool
-	waitChan chan struct{}
-	lastErr  error
+	mu         sync.Mutex
+	inFlight   bool
+	waitChan   chan struct{}
+	lastErr    error
+	generation uint64
 }
 
-func (b *reauthBarrier) execute(ctx context.Context, refreshFn func(context.Context) error) error {
+func (b *reauthBarrier) currentGen() uint64 {
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.generation
+}
+
+func (b *reauthBarrier) execute(ctx context.Context, startGen uint64, refreshFn func(context.Context) error) error {
+	b.mu.Lock()
+	if b.generation > startGen {
+		err := b.lastErr
+		b.mu.Unlock()
+
+		return err
+	}
+
 	if b.inFlight {
 		waitChan := b.waitChan
 		b.mu.Unlock()
@@ -63,6 +78,7 @@ func (b *reauthBarrier) execute(ctx context.Context, refreshFn func(context.Cont
 
 	b.mu.Lock()
 	b.lastErr = err
+	b.generation++
 	b.inFlight = false
 	close(b.waitChan)
 	b.mu.Unlock()
@@ -91,6 +107,7 @@ func ReAuth(cfg ReAuthConfig) aoni.Middleware {
 
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
+			startGen := barrier.currentGen()
 			resp, err := next.Do(req)
 
 			for attempt := 0; attempt < maxRetries; attempt++ {
@@ -106,11 +123,12 @@ func ReAuth(cfg ReAuthConfig) aoni.Middleware {
 					_ = resp.Close()
 				}
 
-				refreshErr := barrier.execute(req.Context(), cfg.Refresh)
+				refreshErr := barrier.execute(req.Context(), startGen, cfg.Refresh)
 				if refreshErr != nil {
 					return nil, fmt.Errorf("%w: %w", ErrReAuthFailed, refreshErr)
 				}
 
+				startGen = barrier.currentGen()
 				resp, err = next.Do(req)
 			}
 
