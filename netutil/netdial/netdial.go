@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 
@@ -488,6 +487,10 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 		return nil, fmt.Errorf("%w: dial proxy %s: %w", ErrProxyConnectFailed, proxyURL.Host, err)
 	}
 
+	return handshakeHTTPProxy(conn, host, port)
+}
+
+func handshakeHTTPProxy(conn net.Conn, host, port string) (net.Conn, error) {
 	target := net.JoinHostPort(host, port)
 	// RFC 9112 §3.2.3: The authority-form (host:port) is used exclusively for HTTP CONNECT requests.
 	// RFC 9112 §3.2: HTTP/1.1 client MUST send a Host header matching the target authority.
@@ -526,8 +529,12 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 
 	_ = conn.SetDeadline(time.Time{})
 
+	// RFC 9112 §6.3 Rule 2 & Chromium HttpProxyClientSocket: Once CONNECT responds with 200 OK,
+	// the tunnel becomes a raw TCP stream. The proxy MUST NOT send extraneous data before TLS handshake.
+	// Reject connection immediately to prevent tunnel poisoning / cleartext payload injection.
 	if br.Buffered() > 0 {
-		return &fio.BufferedConn{Conn: conn, R: br}, nil
+		_ = conn.Close()
+		return nil, fmt.Errorf("%w: extraneous data received after CONNECT 200 OK", ErrProxyConnectFailed)
 	}
 
 	return conn, nil
