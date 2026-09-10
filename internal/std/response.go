@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"sync"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
@@ -21,8 +23,10 @@ var responseStorage = pool.NewPerPStorage(func() *Response {
 
 // Response adapts a standard net/http [*http.Response] to the unified [core.Response] contract.
 type Response struct {
-	resp *http.Response
-	body []byte
+	mu       sync.Mutex
+	resp     *http.Response
+	body     []byte
+	released atomic.Bool
 }
 
 // NewResponse wraps resp into a unified [spec.Response] adapter.
@@ -31,8 +35,11 @@ type Response struct {
 //   - The returned response must be released via [ReleaseResponse] to prevent pool leaks.
 func NewResponse(resp *http.Response) *Response {
 	r := responseStorage.Get()
+	r.mu.Lock()
 	r.resp = resp
 	r.body = nil
+	r.released.Store(false)
+	r.mu.Unlock()
 
 	return r
 }
@@ -43,8 +50,15 @@ func ReleaseResponse(r *Response) {
 		return
 	}
 
+	if r.released.Swap(true) {
+		return
+	}
+
+	r.mu.Lock()
 	r.resp = nil
 	r.body = nil
+	r.mu.Unlock()
+
 	responseStorage.Put(r)
 }
 
@@ -122,6 +136,9 @@ func (s *Response) SetTrailers(trailers map[string][]string) {
 
 // BodyBytes reads, caches, and returns response body bytes.
 func (s *Response) BodyBytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.body != nil {
 		return s.body
 	}
@@ -208,10 +225,14 @@ func (s *Response) SetUncompressed(v bool) {
 
 // Close closes the response body stream and releases the response adapter to the pool.
 func (s *Response) Close() error {
+	s.mu.Lock()
+
 	var err error
 	if s.resp != nil && s.resp.Body != nil {
 		err = s.resp.Body.Close()
 	}
+
+	s.mu.Unlock()
 
 	ReleaseResponse(s)
 

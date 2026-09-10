@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -28,7 +29,8 @@ var stdRequestStorage = pool.NewPerPStorage(func() *Request {
 
 // Request adapts a standard net/http [*http.Request] to the unified [core.Request] contract.
 type Request struct {
-	req *http.Request
+	req      *http.Request
+	released atomic.Bool
 }
 
 // NewRequest wraps req into a pooled [Request] adapter.
@@ -39,6 +41,7 @@ func NewRequest(req *http.Request) *Request {
 
 	r := stdRequestStorage.Get()
 	r.req = req
+	r.released.Store(false)
 
 	return r
 }
@@ -46,6 +49,10 @@ func NewRequest(req *http.Request) *Request {
 // ReleaseRequest returns the request to the pool after execution.
 func ReleaseRequest(r *Request) {
 	if r == nil {
+		return
+	}
+
+	if r.released.Swap(true) {
 		return
 	}
 
