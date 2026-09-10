@@ -127,6 +127,7 @@ type RequestConfig struct {
 	ETagAutomaton                bool
 	AutoDecode                   bool
 	DisableBaseResponse          bool
+	SpecialRecoveryDone          bool
 	BaseResponseOverride         func() core.BaseResponse
 }
 

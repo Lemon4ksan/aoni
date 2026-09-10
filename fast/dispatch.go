@@ -224,7 +224,7 @@ func (c *Client) tryDispatchH3(
 		return nil, err, false
 	}
 
-	if c.isRecoverableStatus(fastResp.StatusCode()) {
+	if c.isRecoverableStatus(ctx, fastResp.StatusCode()) {
 		tr, errRec, _ := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 		return tr, errRec, true
 	}
@@ -260,7 +260,7 @@ func (c *Client) tryDispatchH2(
 		return nil, err, false
 	}
 
-	if c.isRecoverableStatus(fastResp.StatusCode()) {
+	if c.isRecoverableStatus(ctx, fastResp.StatusCode()) {
 		c.removeH2Client(host)
 		trRec, errRec, _ := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 
@@ -291,7 +291,7 @@ func (c *Client) dispatchH1WithFallbacks(
 		return nil, err, false
 	}
 
-	if c.isRecoverableStatus(fastResp.StatusCode()) {
+	if c.isRecoverableStatus(ctx, fastResp.StatusCode()) {
 		tr, errRec, released := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 		return tr, errRec, released
 	}
@@ -316,7 +316,7 @@ func (c *Client) fallbackH1ToH2(
 		return nil, err, false
 	}
 
-	if c.isRecoverableStatus(fastResp.StatusCode()) {
+	if c.isRecoverableStatus(ctx, fastResp.StatusCode()) {
 		c.removeH2Client(host)
 		trRec, errRec, released := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 
@@ -328,10 +328,19 @@ func (c *Client) fallbackH1ToH2(
 	return tr, nil, false
 }
 
-func (c *Client) isRecoverableStatus(code int) bool {
-	return code == http.StatusMisdirectedRequest ||
-		code == http.StatusRequestTimeout ||
-		code == http.StatusTooEarly
+func (c *Client) isRecoverableStatus(ctx context.Context, code int) bool {
+	if code != http.StatusMisdirectedRequest &&
+		code != http.StatusRequestTimeout &&
+		code != http.StatusTooEarly {
+		return false
+	}
+
+	reqCfg := pipeline.GetRequestConfig(ctx)
+	if reqCfg != nil && reqCfg.SpecialRecoveryDone {
+		return false
+	}
+
+	return true
 }
 
 func (c *Client) recoverSpecialStatus(
@@ -339,6 +348,13 @@ func (c *Client) recoverSpecialStatus(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (map[string][]string, error, bool) {
+	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
+	if reqCfg.SpecialRecoveryDone {
+		return nil, nil, false
+	}
+
+	reqCfg.SpecialRecoveryDone = true
+
 	code := fastResp.StatusCode()
 	fastResp.Reset()
 
@@ -357,8 +373,9 @@ func (c *Client) retry425TooEarly(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
+	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
+	reqCfg.SpecialRecoveryDone = true
 
 	host := bytesconv.B2S(fastReq.URI().Host())
 	c.removeH2Client(host)
@@ -373,8 +390,9 @@ func (c *Client) retry421Misdirected(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
+	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
+	reqCfg.SpecialRecoveryDone = true
 
 	host := bytesconv.B2S(fastReq.URI().Host())
 	if c.protocolState.altSvc != nil {
@@ -393,6 +411,9 @@ func (c *Client) retry408Timeout(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
+	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
+	reqCfg.SpecialRecoveryDone = true
+
 	c.removeH2Client(bytesconv.B2S(fastReq.URI().Host()))
 	fastReq.SetConnectionClose()
 
