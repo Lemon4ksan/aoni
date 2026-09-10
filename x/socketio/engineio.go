@@ -23,7 +23,6 @@ const (
 	sioStateClosed sioConnState = iota
 	sioStateOpening
 	sioStateOpen
-	sioStateClosing
 )
 
 type sioEventType int
@@ -45,7 +44,7 @@ func initFSM() *fsm.FSM[sioConnState, sioEventType] {
 		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpen,
 			Event: sioEventTypeClose,
-			To:    sioStateClosing,
+			To:    sioStateClosed,
 		},
 		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosed,
@@ -59,11 +58,6 @@ func initFSM() *fsm.FSM[sioConnState, sioEventType] {
 		},
 		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpening,
-			Event: sioEventTypeClose,
-			To:    sioStateClosed,
-		},
-		fsm.TransitionRule[sioConnState, sioEventType]{
-			From:  sioStateClosing,
 			Event: sioEventTypeClose,
 			To:    sioStateClosed,
 		},
@@ -269,7 +263,6 @@ func (s *Conn) readLoop() {
 
 func (s *Conn) cleanupConnection() {
 	_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
-	_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
 
 	s.stateMu.Lock()
 	s.state = sioStateClosed
@@ -461,6 +454,9 @@ func (s *Conn) heartbeatLoop() {
 					default:
 						close(s.closed)
 					}
+				}
+				if c := s.conn.Load(); c != nil {
+					_ = (*c).Close()
 				}
 
 				s.mu.Unlock()

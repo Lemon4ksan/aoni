@@ -236,7 +236,7 @@ func (c *Client) DoBaremetal(ctx context.Context, method, path string) (aoni.Res
 		}
 	}
 
-	return c.executeFastPath(fastReq, fastResp)
+	return c.executeFastPath(ctx, fastReq, fastResp)
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
@@ -278,7 +278,7 @@ func (c *Client) Request(
 			}
 		}
 
-		return c.executeFastPath(fastReq, fastResp)
+		return c.executeFastPath(ctx, fastReq, fastResp)
 	}
 
 	reqAdapter := NewRequest(fastReq)
@@ -323,8 +323,12 @@ func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
 	}
 }
 
-func (c *Client) executeFastPath(fastReq *h1engine.Request, fastResp *h1engine.Response) (aoni.Response, error) {
-	err := c.engine.Do(fastReq, fastResp)
+func (c *Client) executeFastPath(
+	ctx context.Context,
+	fastReq *h1engine.Request,
+	fastResp *h1engine.Response,
+) (aoni.Response, error) {
+	err := c.doFastHTTPEngine(ctx, fastReq, fastResp)
 	if err != nil {
 		releaseFastPair(fastReq, fastResp)
 
@@ -398,7 +402,10 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 // Do executes a prepared [aoni.Request] contract, routing through the target native protocol engine (H1, H2, or H3).
 func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	if req == nil {
-		req = NewRequest(nil)
+		r := NewRequest(nil)
+		defer r.Release()
+
+		req = r
 	}
 
 	if u := req.URL(); u != "" {

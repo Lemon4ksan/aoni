@@ -556,6 +556,7 @@ type NetworkConfig struct {
 
 	// HappyEyeballsDelay defines the head-start delay between IPv6 and IPv4 connection attempts (RFC 8305 §5).
 	// The client attempts IPv6 first, launching a concurrent IPv4 dial after this delay if IPv6 has not connected.
+	// Evaluated in [transport.UniversalDialer] during dual-stack racing.
 	// Default: 300ms.
 	HappyEyeballsDelay time.Duration
 
@@ -578,12 +579,13 @@ type NetworkConfig struct {
 
 	// SSRFGuard actively inspects resolved IP addresses, blocking outgoing requests to private (RFC 1918),
 	// loopback (127.0.0.0/8), link-local (169.254.0.0/16), and Carrier-Grade NAT (100.64.0.0/10) subnets.
+	// Evaluated in [transport.UniversalDialer] before socket connection.
 	SSRFGuard bool
 
 	// TCPQuickACK enables the TCP_QUICKACK socket option on Linux, disabling delayed ACKs for lower latency.
 	TCPQuickACK bool
 
-	// EnablePowerManagement attaches an OS power lifecycle watcher that purges stale keep-alive connections
+	// EnablePowerManagement attaches an OS power lifecycle watcher ([netutil/power.Watcher]) that purges stale keep-alive connections
 	// upon laptop sleep/wake transitions, preventing silent 15-second write timeouts on dead sockets.
 	EnablePowerManagement bool
 
@@ -758,10 +760,12 @@ type FingerprintConfig struct {
 	// L7 Fingerprint Evasion:
 	// Modern WAFs calculate JA4H and header hashes based on header ordering (e.g. :method, :authority, :scheme, :path).
 	// HeaderOrder ensures outgoing headers strictly match genuine browser serialization order.
+	// Evaluated in [fingerprint/h2.FramedTransport] and [internal/pipeline] during header frame serialization.
 	HeaderOrder []string
 
 	// H2Settings overrides default HTTP/2 SETTINGS and PRIORITY frame parameters
 	// (HEADER_TABLE_SIZE, INITIAL_WINDOW_SIZE, MAX_FRAME_SIZE, MAX_CONCURRENT_STREAMS) to mirror target browsers.
+	// Evaluated in [Client.reapplyH2Settings] and applied to [fingerprint/h2.FramedTransport].
 	H2Settings *h2.Settings
 
 	// H3Settings overrides default QUIC/HTTP/3 flow control receive window limits and QPACK settings.
@@ -769,6 +773,7 @@ type FingerprintConfig struct {
 
 	// P0fSignature spoofs L3/L4 TCP/IP stack parameters (TTL, Window Size, MSS, SYN packet options)
 	// to defeat passive OS fingerprinting systems (p0f / SYN packet analyzers).
+	// Evaluated in [transport.UniversalDialer] during TCP SYN packet construction.
 	P0fSignature *p0f.Signature
 
 	// PacketPadding injects randomized HTTP header padding to disguise exact payload byte lengths against DPI analysis.
@@ -794,6 +799,7 @@ type FingerprintConfig struct {
 	H2Configurer fingerprint.HTTP2Configurer
 
 	// AutoECH automatically resolves Encrypted Client Hello (ECH) keys via DNS HTTPS (Type 65 / RFC 9460) records.
+	// Evaluated in [transport.UniversalDialer] during TLS handshake preparation.
 	AutoECH bool
 
 	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001 / RFC 9846).

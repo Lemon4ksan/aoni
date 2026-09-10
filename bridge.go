@@ -77,6 +77,12 @@ func NewStdClient(c *Client) *http.Client {
 	}
 }
 
+// Std returns an adapted standard library [*http.Client] backed by this Client's pipeline.
+// Outgoing requests executed via this client pass through the entire aoni pipeline.
+func (c *Client) Std() *http.Client {
+	return NewStdClient(c)
+}
+
 // NewTransport constructs an [http.RoundTripper] (as a [*Transport]) configured
 // to route all outgoing requests through the provided aoni [Client] pipeline.
 func NewTransport(c *Client) *Transport {

@@ -187,6 +187,8 @@ func (c *Client) Request(
 
 // ensureRequestConfig resolves or lazily allocates the per-request transaction container ([pipeline.RequestConfig]).
 func (c *Client) ensureRequestConfig(ctx context.Context, hasMods bool) context.Context {
+	ctx = generic.Coalesce(ctx, context.Background())
+
 	if cfg := pipeline.GetRequestConfig(ctx); cfg != nil {
 		c.applyRequestConfigDefaults(cfg)
 		return ctx
@@ -268,7 +270,7 @@ func (c *Client) DoScoped(
 		_ = resp.Close()
 	}()
 
-	scope := borrow.NewScope()
+	scope := borrow.AcquireScope()
 	defer scope.Release()
 
 	return fn(scope, resp)
@@ -290,7 +292,7 @@ func (c *Client) RequestScoped(
 		_ = resp.Body.Close()
 	}()
 
-	scope := borrow.NewScope()
+	scope := borrow.AcquireScope()
 	defer scope.Release()
 
 	return fn(scope, resp)

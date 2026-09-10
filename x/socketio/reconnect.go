@@ -79,7 +79,7 @@ func (s *Conn) attemptReconnection(attempt int, onReconnecting func(int)) bool {
 	s.conn.Store(&conn)
 	s.resetConnectionState()
 
-	if err := s.doHandshake(context.Background()); err != nil {
+	if err := s.doHandshake(ctx); err != nil {
 		_ = conn.Close()
 		return s.handleReconnectFailure()
 	}

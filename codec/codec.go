@@ -133,7 +133,7 @@ func DecodeTo[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
 }
 
-// DecodeToResult unmarshals the response stream from reader into a Swift-inspired [generic.Result].
+// DecodeToResult unmarshals the response stream from reader into a [generic.Result].
 func DecodeToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
 	return decode.ToResult[T](reader, decoder)
 }

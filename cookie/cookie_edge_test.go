@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,15 +86,23 @@ func TestCookie_RFC6265PathAndDomainMatching(t *testing.T) {
 }
 
 type inMemoryStorage struct {
+	mu   sync.RWMutex
 	data map[string][]cookie.Cookie
 }
 
 func (m *inMemoryStorage) Save(key string, cookies []cookie.Cookie) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.data[key] = cookies
+
 	return nil
 }
 
 func (m *inMemoryStorage) Load(key string) ([]cookie.Cookie, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return m.data[key], nil
 }
 

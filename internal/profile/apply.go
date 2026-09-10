@@ -5,8 +5,7 @@
 package profile
 
 import (
-	"sync"
-
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
@@ -14,14 +13,12 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
-var headerMapPool = sync.Pool{
-	New: func() any {
-		return make(map[string]string, 16)
-	},
-}
+var headerMapPool = pool.NewPerPStorage(func() map[string]string {
+	return make(map[string]string, 16)
+})
 
 func acquireHeaderMap() map[string]string {
-	return headerMapPool.Get().(map[string]string)
+	return headerMapPool.Get()
 }
 
 func releaseHeaderMap(m map[string]string) {

@@ -6,35 +6,36 @@ package pipeline
 
 import (
 	"bytes"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 // BufferPool manages reusable byte buffers to achieve zero-allocation operation during response processing.
 type BufferPool struct {
-	pool sync.Pool
+	storage *pool.PerPStorage[*bytes.Buffer]
+	size    int
 }
 
 // GlobalBufferPool is the singleton zero-allocation buffer pool for engine routines.
 var GlobalBufferPool = NewBufferPool(32 * 1024)
 
-// NewBufferPool instantiates a [BufferPool] with initial capacity.
+// NewBufferPool instantiates a [BufferPool] with initial capacity using core-pinned PerPStorage.
 func NewBufferPool(size int) *BufferPool {
 	if size <= 0 {
 		size = 32 * 1024
 	}
 
 	return &BufferPool{
-		pool: sync.Pool{
-			New: func() any {
-				return bytes.NewBuffer(make([]byte, 0, size))
-			},
-		},
+		size: size,
+		storage: pool.NewPerPStorage(func() *bytes.Buffer {
+			return bytes.NewBuffer(make([]byte, 0, size))
+		}),
 	}
 }
 
-// Get borrows a [*bytes.Buffer] from the pool.
+// Get borrows a [*bytes.Buffer] from the pool without cross-core lock contention.
 func (p *BufferPool) Get() *bytes.Buffer {
-	buf := p.pool.Get().(*bytes.Buffer)
+	buf := p.storage.Get()
 	buf.Reset()
 
 	return buf
@@ -51,5 +52,5 @@ func (p *BufferPool) Put(buf *bytes.Buffer) {
 	}
 
 	buf.Reset()
-	p.pool.Put(buf)
+	p.storage.Put(buf)
 }

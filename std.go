@@ -63,11 +63,15 @@ func (d requesterHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 		return nil, ErrNilURL
 	}
 
-	mods := make([]RequestModifier, 0, len(req.Header)+1)
-	for k, vv := range req.Header {
-		for _, v := range vv {
-			mods = append(mods, mod.WithHeader(k, v))
-		}
+	var mods []RequestModifier
+	if len(req.Header) > 0 {
+		mods = append(mods, mod.Custom(func(r Request) {
+			for k, vv := range req.Header {
+				for _, v := range vv {
+					r.AddHeader(k, v)
+				}
+			}
+		}))
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {

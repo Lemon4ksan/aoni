@@ -5,7 +5,6 @@
 package grpc
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"time"
@@ -219,7 +218,7 @@ func withProtoPostMods(
 
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithBody(bytes.NewReader(bodyBytes))
+		stackBuf[0] = mod.WithBodyBytes(bodyBytes)
 		stackBuf[1] = mod.WithHeader(header.ContentType, header.MIMEApplicationProtobuf)
 		stackBuf[2] = mod.WithDecoder(decode.ProtoDecoder)
 		copy(stackBuf[3:], mods)
@@ -230,7 +229,7 @@ func withProtoPostMods(
 	allMods := make([]core.RequestModifier, 0, total)
 	allMods = append(
 		allMods,
-		mod.WithBody(bytes.NewReader(bodyBytes)),
+		mod.WithBodyBytes(bodyBytes),
 		mod.WithHeader(header.ContentType, header.MIMEApplicationProtobuf),
 		mod.WithDecoder(decode.ProtoDecoder),
 	)
@@ -248,7 +247,7 @@ func withWebPostMods(
 
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithBody(bytes.NewReader(frameBytes))
+		stackBuf[0] = mod.WithBodyBytes(frameBytes)
 		stackBuf[1] = mod.WithHeader(header.ContentType, header.MIMEApplicationGRPCWebProto)
 		stackBuf[2] = mod.WithDecoder(decode.GRPCWebDecoder)
 		copy(stackBuf[3:], mods)
@@ -259,7 +258,7 @@ func withWebPostMods(
 	allMods := make([]core.RequestModifier, 0, total)
 	allMods = append(
 		allMods,
-		mod.WithBody(bytes.NewReader(frameBytes)),
+		mod.WithBodyBytes(frameBytes),
 		mod.WithHeader(header.ContentType, header.MIMEApplicationGRPCWebProto),
 		mod.WithDecoder(decode.GRPCWebDecoder),
 	)

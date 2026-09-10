@@ -597,10 +597,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 
 	r.consumed = true
 
-	client := r.client
-	if client == nil {
-		client = DefaultClient
-	}
+	client := generic.Coalesce[HTTPRequester](r.client, DefaultClient)
 
 	defer r.Release()
 
@@ -612,10 +609,7 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		path = urlkit.BuildPath(path, r.pathParams, nil)
 	}
 
-	ctx := r.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := generic.Coalesce(r.ctx, context.Background())
 
 	mods := r.appliedMods
 
@@ -737,6 +731,8 @@ func (r *RequestBuilder) PostTo[T any](path string, body ...any) (T, *http.Respo
 }
 
 // PutTo executes a PUT request with payload and unmarshals the response into T.
+//
+// See [RequestBuilder.PostTo] for payload handling details.
 func (r *RequestBuilder) PutTo[T any](path string, body ...any) (T, *http.Response, error) {
 	if len(body) > 0 {
 		r.SetBody(body[0])
@@ -746,6 +742,8 @@ func (r *RequestBuilder) PutTo[T any](path string, body ...any) (T, *http.Respon
 }
 
 // PatchTo executes a PATCH request with payload and unmarshals the response into T.
+//
+// See [RequestBuilder.PostTo] for payload handling details.
 func (r *RequestBuilder) PatchTo[T any](path string, body ...any) (T, *http.Response, error) {
 	if len(body) > 0 {
 		r.SetBody(body[0])
@@ -755,6 +753,8 @@ func (r *RequestBuilder) PatchTo[T any](path string, body ...any) (T, *http.Resp
 }
 
 // DeleteTo executes a DELETE request and unmarshals the response into T.
+//
+// See [RequestBuilder.GetTo] for unmarshaling details.
 func (r *RequestBuilder) DeleteTo[T any](path string) (T, *http.Response, error) {
 	return r.FetchTo[T](http.MethodDelete, path)
 }
@@ -764,7 +764,8 @@ func (r *RequestBuilder) ExecuteTo[T any](method, path string) (T, *http.Respons
 	return r.FetchTo[T](method, path)
 }
 
-// ExecuteResult executes the request and returns a Swift-inspired [generic.Result].
+// ExecuteResult executes the request and returns a functional [generic.Result] wrapping the unmarshaled response or error.
+// Enables Railway-Oriented Programming (ROP) without repetitive if-err checks.
 func (r *RequestBuilder) ExecuteResult[T any](method, path string) (generic.Result[T], *http.Response) {
 	val, resp, err := r.FetchTo[T](method, path)
 	if err != nil {
@@ -774,7 +775,8 @@ func (r *RequestBuilder) ExecuteResult[T any](method, path string) (generic.Resu
 	return generic.Success(val), resp
 }
 
-// FetchResult executes a request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response or error.
+// FetchResult executes a request and returns a functional [generic.Result] wrapping the unmarshaled response or error.
+// Alias for [RequestBuilder.ExecuteResult].
 func (r *RequestBuilder) FetchResult[T any](method, path string) (generic.Result[T], *http.Response) {
 	return r.ExecuteResult[T](method, path)
 }

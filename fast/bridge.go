@@ -34,6 +34,12 @@ func NewStdClient(c *Client) *http.Client {
 	}
 }
 
+// Std returns an adapted standard library [*http.Client] backed by this fast Client's pipeline.
+// Outgoing requests executed via this client pass through the entire aoni/fast pipeline.
+func (c *Client) Std() *http.Client {
+	return NewStdClient(c)
+}
+
 // NewTransport constructs an [http.RoundTripper] (as a [*Transport]) configured
 // to pass all outgoing requests through the provided fast [Client].
 //

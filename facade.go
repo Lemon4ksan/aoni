@@ -135,27 +135,21 @@ func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestMo
 
 // PutTo executes a 1-line typed PUT request carrying body using [DefaultClient] and decodes the response into T.
 //
-// # Example
-//
-//	updated, err := aoni.PutTo[User](ctx, "https://api.example.com/users/42", UpdateUserReq{Name: "Alice B."})
+// See [PostTo] for automatic body detection, serialization rules, and resource management.
 func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.PutTo[T](ctx, path, body, mods...)
 }
 
 // PatchTo executes a 1-line typed PATCH request carrying body using [DefaultClient] and decodes the response into T.
 //
-// # Example
-//
-//	patched, err := aoni.PatchTo[User](ctx, "https://api.example.com/users/42", map[string]string{"status": "online"})
+// See [PostTo] for automatic body detection, serialization rules, and resource management.
 func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.PatchTo[T](ctx, path, body, mods...)
 }
 
 // DeleteTo executes a 1-line typed DELETE request using [DefaultClient] and decodes any returned payload into T.
 //
-// # Example
-//
-//	status, err := aoni.DeleteTo[DeleteStatus](ctx, "https://api.example.com/users/42")
+// See [GetTo] for automatic decompression, content-type negotiation, and resource management.
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	return DefaultClient.DeleteTo[T](ctx, path, mods...)
 }
@@ -171,21 +165,29 @@ func GetInto[T any](ctx context.Context, path string, target *T, mods ...Request
 }
 
 // PostInto executes a typed POST request carrying body using [DefaultClient] and decodes the response directly into target.
+//
+// See [PostTo] for body serialization rules and [GetInto] for zero-allocation target decoding.
 func PostInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
 	return DefaultClient.PostInto(ctx, path, body, target, mods...)
 }
 
 // PutInto executes a typed PUT request carrying body using [DefaultClient] and decodes the response directly into target.
+//
+// See [PostInto] for details.
 func PutInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
 	return DefaultClient.PutInto(ctx, path, body, target, mods...)
 }
 
 // PatchInto executes a typed PATCH request carrying body using [DefaultClient] and decodes the response directly into target.
+//
+// See [PostInto] for details.
 func PatchInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
 	return DefaultClient.PatchInto(ctx, path, body, target, mods...)
 }
 
 // DeleteInto executes a typed DELETE request using [DefaultClient] and decodes the response directly into target.
+//
+// See [GetInto] for details.
 func DeleteInto[T any](ctx context.Context, path string, target *T, mods ...RequestModifier) error {
 	return DefaultClient.DeleteInto(ctx, path, target, mods...)
 }
@@ -267,11 +269,11 @@ func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (ge
 		return generic.Failure[T](err), resp
 	}
 
-	return generic.Success(*val), resp
+	return generic.Success(generic.Deref(val)), resp
 }
 
 // FetchTyped executes a GET request and returns a strongly-typed [generic.TypedResult] wrapping [*APIError],
-// conforming to Swift-style Typed Throws error models.
+// enabling explicit, type-safe error handling without untyped errors.
 //
 // # Example
 //
@@ -290,7 +292,7 @@ func FetchTyped[T any](
 		return AsTypedResult(generic.Zero[T](), err), resp
 	}
 
-	return generic.SuccessTyped[T, *APIError](*val), resp
+	return generic.SuccessTyped[T, *APIError](generic.Deref(val)), resp
 }
 
 // Scoped executes fn within an isolated, ephemeral [Client] instance configured with opts.
@@ -303,10 +305,7 @@ func FetchTyped[T any](
 //	    return c.GetTo[User](ctx, "/users/1")
 //	}, option.WithChrome(), option.WithTimeout(5*time.Second))
 func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOption) (T, error) {
-	base := client
-	if base == nil {
-		base = DefaultClient
-	}
+	base := generic.Coalesce(client, DefaultClient)
 
 	scopedClient := base.With(opts...)
 	defer scopedClient.Close()

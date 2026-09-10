@@ -11,15 +11,15 @@ import (
 	"io"
 	"net"
 	"sync"
+
+	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 var h2Preface = []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
 
-var h2BufferPool = sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
+var h2BufferPool = pool.NewPerPStorage(func() *bytes.Buffer {
+	return new(bytes.Buffer)
+})
 
 type SettingsDTO struct {
 	HeaderTableSize      uint32
@@ -119,8 +119,14 @@ func (c *FramedConn) Write(b []byte) (int, error) {
 		}
 	}
 
-	buf := h2BufferPool.Get().(*bytes.Buffer)
+	buf := h2BufferPool.Get()
 	buf.Reset()
+
+	defer func() {
+		buf.Reset()
+		h2BufferPool.Put(buf)
+	}()
+
 	buf.Grow(len(preface) + len(replacement) + len(newRemaining) + len(remaining))
 
 	buf.Write(preface)
@@ -133,8 +139,6 @@ func (c *FramedConn) Write(b []byte) (int, error) {
 	buf.Write(remaining)
 
 	written, err := c.Conn.Write(buf.Bytes())
-	h2BufferPool.Put(buf)
-
 	if err != nil {
 		return written, err
 	}

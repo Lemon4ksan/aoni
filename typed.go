@@ -137,6 +137,8 @@ func (c *Client) PostEx[Resp any](
 }
 
 // PutTo executes an HTTP PUT request carrying body and unmarshals the response into *Resp.
+//
+// See [Client.PostTo] for body serialization rules and [Client.GetTo] for automatic response decoding and resource management.
 func (c *Client) PutTo[Resp any](
 	ctx context.Context,
 	path string,
@@ -146,7 +148,9 @@ func (c *Client) PutTo[Resp any](
 	return c.FetchTo[Resp](ctx, http.MethodPut, path, body, mods...)
 }
 
-// PutInto executes an HTTP PUT request carrying body and unmarshals the response payload directly into target.
+// PutInto executes an HTTP PUT request carrying body and unmarshals the response payload directly into target without allocations.
+//
+// See [Client.PostInto] for body serialization rules and [Client.GetInto] for target decoding.
 func (c *Client) PutInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -154,10 +158,12 @@ func (c *Client) PutInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	return c.FetchInto[Resp](ctx, http.MethodPut, path, body, target, mods...)
+	return c.FetchInto(ctx, http.MethodPut, path, body, target, mods...)
 }
 
 // PutEx executes an HTTP PUT request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
+//
+// See [Client.PostEx] for details.
 func (c *Client) PutEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -168,6 +174,8 @@ func (c *Client) PutEx[Resp any](
 }
 
 // PatchTo executes an HTTP PATCH request carrying body and unmarshals the response into *Resp.
+//
+// See [Client.PostTo] for body serialization rules and [Client.GetTo] for automatic response decoding and resource management.
 func (c *Client) PatchTo[Resp any](
 	ctx context.Context,
 	path string,
@@ -177,7 +185,9 @@ func (c *Client) PatchTo[Resp any](
 	return c.FetchTo[Resp](ctx, http.MethodPatch, path, body, mods...)
 }
 
-// PatchInto executes an HTTP PATCH request carrying body and unmarshals the response payload directly into target.
+// PatchInto executes an HTTP PATCH request carrying body and unmarshals the response payload directly into target without allocations.
+//
+// See [Client.PostInto] for body serialization rules and [Client.GetInto] for target decoding.
 func (c *Client) PatchInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -185,10 +195,12 @@ func (c *Client) PatchInto[Resp any](
 	target *Resp,
 	mods ...RequestModifier,
 ) error {
-	return c.FetchInto[Resp](ctx, http.MethodPatch, path, body, target, mods...)
+	return c.FetchInto(ctx, http.MethodPatch, path, body, target, mods...)
 }
 
 // PatchEx executes an HTTP PATCH request carrying body and returns both the unmarshaled *Resp and raw [*http.Response].
+//
+// See [Client.PostEx] for details.
 func (c *Client) PatchEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -199,6 +211,8 @@ func (c *Client) PatchEx[Resp any](
 }
 
 // DeleteTo executes an HTTP DELETE request and unmarshals any returned response payload into *Resp.
+//
+// See [Client.GetTo] for automatic response decoding and resource management.
 func (c *Client) DeleteTo[Resp any](
 	ctx context.Context,
 	path string,
@@ -213,7 +227,9 @@ func (c *Client) DeleteTo[Resp any](
 	return decodeResponseTo[Resp](c, resp)
 }
 
-// DeleteInto executes an HTTP DELETE request and unmarshals the response directly into target.
+// DeleteInto executes an HTTP DELETE request and unmarshals the response directly into target without allocations.
+//
+// See [Client.GetInto] for target decoding and error handling.
 func (c *Client) DeleteInto[Resp any](
 	ctx context.Context,
 	path string,
@@ -230,6 +246,8 @@ func (c *Client) DeleteInto[Resp any](
 }
 
 // DeleteEx executes an HTTP DELETE request and returns both the unmarshaled *Resp and raw [*http.Response].
+//
+// See [Client.GetEx] for details.
 func (c *Client) DeleteEx[Resp any](
 	ctx context.Context,
 	path string,
@@ -476,7 +494,7 @@ func FetchEither[L, R any](
 		return generic.Either[L, R]{}, resp, err
 	}
 
-	return generic.Right[L, R](right), resp, nil
+	return generic.Right[L](right), resp, nil
 }
 
 // FetchEither executes an HTTP request and decodes 2xx responses into type R (Right)
@@ -523,11 +541,7 @@ func (c *Client) GetResult[T any](
 		return generic.Failure[T](err)
 	}
 
-	if val == nil {
-		return generic.Success(generic.Zero[T]())
-	}
-
-	return generic.Success(*val)
+	return generic.Success(generic.Deref(val))
 }
 
 // PostResult executes an HTTP POST request and returns a pure [generic.Result] wrapping the decoded response body.
@@ -543,11 +557,7 @@ func (c *Client) PostResult[T any](
 		return generic.Failure[T](err)
 	}
 
-	if val == nil {
-		return generic.Success(generic.Zero[T]())
-	}
-
-	return generic.Success(*val)
+	return generic.Success(generic.Deref(val))
 }
 
 // FetchResult executes an HTTP request and returns a pure [generic.Result] wrapping the decoded response body.
@@ -564,11 +574,7 @@ func (c *Client) FetchResult[T any](
 		return generic.Failure[T](err)
 	}
 
-	if val == nil {
-		return generic.Success(generic.Zero[T]())
-	}
-
-	return generic.Success(*val)
+	return generic.Success(generic.Deref(val))
 }
 
 // GetEither executes an HTTP GET request on [DefaultClient], decoding 2xx responses into type R (Right)
@@ -712,13 +718,14 @@ func withCaptureMod(
 ) []RequestModifier {
 	totalLen := len(mods) + 1
 
-	var allMods []RequestModifier
 	if totalLen <= stackModCap && stackBuf != nil {
-		allMods = stackBuf[:0]
-	} else {
-		allMods = make([]RequestModifier, 0, totalLen)
+		stackBuf[0] = mod.WithCaptureResponse(target)
+		copy(stackBuf[1:], mods)
+
+		return stackBuf[:totalLen]
 	}
 
+	allMods := make([]RequestModifier, 0, totalLen)
 	allMods = append(allMods, mod.WithCaptureResponse(target))
 	allMods = append(allMods, mods...)
 

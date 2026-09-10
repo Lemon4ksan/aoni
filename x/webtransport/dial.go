@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/qpack"
 	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // DialConfig configures a WebTransport dialing operation.
@@ -173,11 +174,6 @@ func DialWithConn(
 		authority = net.JoinHostPort(parsed.Hostname(), "443")
 	}
 
-	path := parsed.RequestURI()
-	if path == "" {
-		path = "/"
-	}
-
 	var cfg DialConfig
 	for _, opt := range opts {
 		opt(&cfg)
@@ -188,7 +184,7 @@ func DialWithConn(
 		{Name: ":protocol", Value: ConnectProtocolWebTransport},
 		{Name: ":scheme", Value: "https"},
 		{Name: ":authority", Value: authority},
-		{Name: ":path", Value: path},
+		{Name: ":path", Value: generic.Coalesce(parsed.RequestURI(), "/")},
 	}
 
 	if len(cfg.AvailableProtocols) > 0 {

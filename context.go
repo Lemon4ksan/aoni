@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
@@ -61,20 +62,22 @@ func HostRewriteRules(ctx context.Context) map[string]string {
 // Third-party HTTP SDKs (e.g. Resty, AWS SDK, Azure SDK) carrying this context will
 // automatically propagate these modifiers into the aoni execution pipeline.
 // Modifiers are attached using thread-safe slice copying to prevent data races.
+//
+// Preconditions:
+// If ctx is nil, context.Background() is used as the base context.
 func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
 	if len(mods) == 0 {
 		return ctx
 	}
+
+	ctx = generic.Coalesce(ctx, context.Background())
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
 		ctx, cfg = pipeline.AllocRequestConfig(ctx)
 	}
 
-	modsCopy := make([]RequestModifier, 0, len(cfg.Modifiers)+len(mods))
-	modsCopy = append(modsCopy, cfg.Modifiers...)
-	modsCopy = append(modsCopy, mods...)
-	cfg.Modifiers = modsCopy
+	cfg.Modifiers = slices.Concat(cfg.Modifiers, mods)
 
 	return ctx
 }
@@ -150,12 +153,12 @@ func ApplyTCPDelay(ctx context.Context) error {
 	}
 
 	t := pool.AcquireTimer(delay)
+	defer pool.ReleaseTimer(t)
+
 	select {
 	case <-t.C:
-		pool.ReleaseTimer(t)
 		return nil
 	case <-ctx.Done():
-		pool.ReleaseTimer(t)
 		return ctx.Err()
 	}
 }

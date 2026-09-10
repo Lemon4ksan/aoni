@@ -38,7 +38,12 @@ type RequestConfigCtxKey = requestConfigKey
 
 // AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
 // enriched context and the config pointer.
+// If ctx is nil, context.Background() is used as the base context.
 func AllocRequestConfig(ctx context.Context) (context.Context, *RequestConfig) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if existing := GetRequestConfig(ctx); existing != nil {
 		return ctx, existing
 	}
@@ -150,8 +155,14 @@ func (cfg *RequestConfig) LookupDecoder(contentType string) core.ResponseDecoder
 }
 
 // GetRequestConfig retrieves the RequestConfig instance attached to the context.
+// Returns nil if ctx is nil or no RequestConfig is attached.
 func GetRequestConfig(ctx context.Context) *RequestConfig {
+	if ctx == nil {
+		return nil
+	}
+
 	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
+
 	return cfg
 }
 

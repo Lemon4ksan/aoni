@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 
@@ -134,7 +135,7 @@ const (
 	CategoryServerError = core.CategoryServerError
 )
 
-// AsTypedResult converts a standard `(T, error)` tuple into a Swift-style typed `generic.TypedResult[T, *APIError]`.
+// AsTypedResult converts a standard `(T, error)` tuple into a strongly typed `generic.TypedResult[T, *APIError]`.
 //
 // If err is non-nil and not already an [*APIError], it is wrapped into a 500 Internal Server Error [APIError].
 //
@@ -216,9 +217,14 @@ func IsBadRequest(err error) bool {
 }
 
 // IsTimeout reports whether err represents an HTTP 408 Request Timeout, HTTP 504 Gateway Timeout,
-// or a context deadline cancellation ([context.DeadlineExceeded]).
+// a context deadline cancellation ([context.DeadlineExceeded]), or an underlying network timeout ([net.Error]).
 func IsTimeout(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
 

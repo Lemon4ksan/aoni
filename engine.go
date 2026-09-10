@@ -19,6 +19,10 @@ import (
 // DefaultEngine normalizes arbitrary execution targets (RequestDoer, *http.Client, HTTPDoer, or nil)
 // into a standardized, production-ready [HTTPDoer] instance.
 //
+// Architectural Scope:
+// This is a low-level pipeline utility primarily used internally by [NewClient] and
+// custom engine adapters. Application code typically should use [NewClient] or [New] instead.
+//
 // Normalization resolution sequence:
 //  1. Recursive Unwrapping: Traverses targets implementing [Unwrap], Rest(), or Requester().
 //  2. Type-Switch Priority:
