@@ -126,9 +126,7 @@ func (c *Client) Unwrap() HTTPDoer {
 	return c.engine
 }
 
-// Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
-//
-// Clone creates an independent copy of the Client.
+// Clone creates an independent copy of the Client with isolated configuration state.
 // It is an alias for c.With().
 func (c *Client) Clone() *Client {
 	return c.With()

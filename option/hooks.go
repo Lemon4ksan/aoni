@@ -51,6 +51,24 @@ func WithAfterResponse(hook func(resp *http.Response, err error)) aoni.ClientOpt
 	}
 }
 
+// WithModifier registers a default [aoni.RequestModifier] or custom modifier function executed on every outbound request.
+//
+// Supported types for fn:
+//   - [aoni.RequestModifier]
+//   - func([aoni.Request])
+//   - func(*http.Request)
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithModifier(func(req *http.Request) {
+//	        req.Header.Set("X-Custom", "value")
+//	    }),
+//	)
+func WithModifier(fn any) aoni.ClientOption {
+	return aoni.WithModifier(fn)
+}
+
 // WithModifiers registers default [aoni.RequestModifier] functions executed sequentially on every outbound request.
 //
 // # Example
@@ -62,9 +80,7 @@ func WithAfterResponse(hook func(resp *http.Response, err error)) aoni.ClientOpt
 //	    ),
 //	)
 func WithModifiers(mods ...aoni.RequestModifier) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
-	}
+	return aoni.WithModifiers(mods...)
 }
 
 // WithLogger assigns a structured diagnostic [telemetry.Logger] for pipeline and transport event tracing.

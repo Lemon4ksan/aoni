@@ -87,7 +87,7 @@ func (s *baseCryptoStream) Finish() error {
 	return nil
 }
 
-// Writes writes data that should be sent out in CRYPTO frames
+// Write writes data that should be sent out in CRYPTO frames.
 func (s *baseCryptoStream) Write(p []byte) (int, error) {
 	s.writeBuf = append(s.writeBuf, p...)
 	return len(p), nil

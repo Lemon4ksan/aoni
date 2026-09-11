@@ -109,10 +109,9 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
-// Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
+// Clone creates an independent copy of the Client with isolated configuration state.
 //
-// It is an alias for c.With(), guaranteeing that the returned client is an independent
-// contract with zero shared mutable state, preventing cross-goroutine interference.
+// It is an alias for c.With().
 func (c *Client) Clone() *Client {
 	return c.With()
 }

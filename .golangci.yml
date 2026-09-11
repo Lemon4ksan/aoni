@@ -77,6 +77,9 @@ linters:
       - linters: [errcheck, revive, staticcheck, protogetter]
         path: .*(pb\.go|generated\.go)
 
+      - linters: [staticcheck]
+        text: "SA1019: .*golang.org/x/net/http2"
+
       - linters: [gosec]
         text: "G103:"
 
@@ -103,5 +106,4 @@ linters:
     paths:
       - "examples/.*"
       - "tests/.*"
-      - "internal/compress/(flate|fse|huff0|internal|zstd|gzip)/.*"
       - "internal/fast/h1engine/.*"

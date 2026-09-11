@@ -7,10 +7,15 @@ package aoni
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
@@ -325,4 +330,250 @@ func PeekResponse(resp *http.Response, n int) ([]byte, error) {
 	}
 
 	return pipeline.PeekResponseBody(resp, n)
+}
+
+// ============================================================================
+// Facade Request Modifiers
+// ============================================================================
+
+// WithHeader constructs a [RequestModifier] setting a single request header key to value.
+func WithHeader(key, value string) RequestModifier {
+	return mod.WithHeader(key, value)
+}
+
+// WithHeaders constructs a [RequestModifier] bulk-setting multiple HTTP request headers from a map.
+func WithHeaders(headers map[string]string) RequestModifier {
+	return mod.WithHeaders(headers)
+}
+
+// WithBearer constructs a [RequestModifier] setting an "Authorization: Bearer <token>" header (RFC 6750 §2.1).
+func WithBearer(token string) RequestModifier {
+	return mod.WithBearer(token)
+}
+
+// WithBasicAuth constructs a [RequestModifier] setting HTTP Basic Authentication credentials (RFC 7617).
+func WithBasicAuth(username, password string) RequestModifier {
+	return mod.WithBasicAuth(username, password)
+}
+
+// WithPKCE constructs a [RequestModifier] adding PKCE code_challenge and code_challenge_method
+// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
+// If method is omitted or empty, S256 is used by default.
+func WithPKCE(verifier string, method ...string) RequestModifier {
+	return mod.WithPKCE(verifier, method...)
+}
+
+// WithPKCEVerifier constructs a [RequestModifier] adding the code_verifier parameter
+// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
+func WithPKCEVerifier(verifier string) RequestModifier {
+	return mod.WithPKCEVerifier(verifier)
+}
+
+// WithTimeout constructs a [RequestModifier] attaching a deadline timeout to the request context.
+func WithTimeout(d time.Duration) RequestModifier {
+	return mod.WithTimeout(d)
+}
+
+// WithRetry constructs a [RequestModifier] setting the maximum retry attempts for the request.
+func WithRetry(attempts int) RequestModifier {
+	return mod.WithRetry(attempts)
+}
+
+// WithUserAgent constructs a [RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
+func WithUserAgent(ua string) RequestModifier {
+	return mod.WithUserAgent(ua)
+}
+
+// WithContentType constructs a [RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
+func WithContentType(ct string) RequestModifier {
+	return mod.WithContentType(ct)
+}
+
+// WithAccept constructs a [RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
+func WithAccept(accept string) RequestModifier {
+	return mod.WithAccept(accept)
+}
+
+// WithIfModifiedSince constructs a [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
+func WithIfModifiedSince(t time.Time) RequestModifier {
+	return mod.WithIfModifiedSince(t)
+}
+
+// WithIfUnmodifiedSince constructs a [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
+func WithIfUnmodifiedSince(t time.Time) RequestModifier {
+	return mod.WithIfUnmodifiedSince(t)
+}
+
+// WithRange constructs a [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
+func WithRange(start, end int64) RequestModifier {
+	return mod.WithRange(start, end)
+}
+
+// WithCacheControl constructs a [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
+func WithCacheControl(directives ...string) RequestModifier {
+	return mod.WithCacheControl(directives...)
+}
+
+// WithNoCache constructs a [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
+func WithNoCache() RequestModifier {
+	return mod.WithNoCache()
+}
+
+// WithNoStore constructs a [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
+func WithNoStore() RequestModifier {
+	return mod.WithNoStore()
+}
+
+// WithSmartBody constructs a [RequestModifier] that dynamically inspects and serializes arbitrary payloads.
+func WithSmartBody(body any) RequestModifier {
+	return mod.WithSmartBody(body)
+}
+
+// WithVar replaces a URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).
+func WithVar(key string, value any) RequestModifier {
+	return mod.WithVar(key, value)
+}
+
+// WithVars replaces multiple URI template placeholders using alternating key-value pairs.
+func WithVars(pairs ...any) RequestModifier {
+	return mod.WithVars(pairs...)
+}
+
+// WithQuery appends key-value query parameters to the request URL.
+func WithQuery(args ...any) RequestModifier {
+	return mod.WithQuery(args...)
+}
+
+// WithQueryParams encodes a struct, map, or url.Values into request query parameters.
+func WithQueryParams(query any) RequestModifier {
+	return mod.WithQueryParams(query)
+}
+
+// Custom constructs a custom [RequestModifier] wrapping an arbitrary closure function.
+func Custom(fn func(Request)) RequestModifier {
+	return mod.Custom(fn)
+}
+
+// ============================================================================
+// Facade Client Options
+// ============================================================================
+
+// WithBaseURL returns a [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
+//
+// # RFC 3986 Resolution & Slash Normalization
+//
+// Ensures a trailing slash per RFC 3986 §5.2.3 to preserve hierarchical base path segments during relative path resolution.
+// Safely normalizes both leading and trailing slashes so combinations like BaseURL "https://api.com/v1/" + Path "/users"
+// resolve seamlessly to "https://api.com/v1/users" without resetting to root or creating double slashes.
+func WithBaseURL(raw string) ClientOption {
+	return func(cfg *Config) {
+		if raw == "" {
+			cfg.Defaults.BaseURL = &url.URL{}
+			return
+		}
+
+		formatted := raw
+		if !strings.HasSuffix(formatted, "/") {
+			formatted += "/"
+		}
+
+		baseURL, err := url.Parse(formatted)
+		if err != nil {
+			return
+		}
+
+		cfg.Defaults.BaseURL = baseURL
+	}
+}
+
+// WithClientTimeout returns a [ClientOption] configuring the default timeout duration for requests.
+func WithClientTimeout(d time.Duration) ClientOption {
+	return func(cfg *Config) {
+		cfg.Engine.Timeout = d
+	}
+}
+
+// WithClientUserAgent returns a [ClientOption] setting the default User-Agent header for all requests.
+func WithClientUserAgent(ua string) ClientOption {
+	return func(cfg *Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		cfg.Defaults.Headers.Set(header.UserAgent, ua)
+	}
+}
+
+// WithChrome returns a [ClientOption] setting the browser profile to Google Chrome.
+func WithChrome() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserChrome
+	}
+}
+
+// WithFirefox returns a [ClientOption] setting the browser profile to Mozilla Firefox.
+func WithFirefox() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserFirefox
+	}
+}
+
+// WithSafari returns a [ClientOption] setting the browser profile to Apple Safari.
+func WithSafari() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserSafari
+	}
+}
+
+// WithSoftErrorDetector returns a [ClientOption] registering callbacks that sniff initial
+// response body bytes to catch application-level soft errors without draining or consuming the body stream.
+func WithSoftErrorDetector(detectors ...SoftErrorDetector) ClientOption {
+	return func(cfg *Config) {
+		cfg.Defaults.SoftErrorDetectors = append(cfg.Defaults.SoftErrorDetectors, detectors...)
+	}
+}
+
+// WithBlockRedirectTo returns a [ClientOption] that halts redirects to matching URLs (e.g. "/login").
+func WithBlockRedirectTo(patterns ...string) ClientOption {
+	return func(cfg *Config) {
+		cfg.Engine.CheckRedirect = BlockPathRedirectPolicy(patterns...)
+	}
+}
+
+// WithModifier registers a default [RequestModifier] or custom modifier function executed on every outbound request.
+//
+// Supported types for fn:
+//   - [RequestModifier]
+//   - func([Request])
+//   - func(*http.Request)
+func WithModifier(fn any) ClientOption {
+	return func(cfg *Config) {
+		if fn == nil {
+			return
+		}
+
+		switch m := fn.(type) {
+		case RequestModifier:
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, m)
+		case func(Request):
+			if m != nil {
+				cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(m))
+			}
+		case func(*http.Request):
+			if m != nil {
+				cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, Custom(func(r Request) {
+					if req := r.HTTPRequest(); req != nil {
+						m(req)
+					}
+				}))
+			}
+		}
+	}
+}
+
+// WithModifiers registers one or more default [RequestModifier] functions executed on every outbound request.
+func WithModifiers(mods ...RequestModifier) ClientOption {
+	return func(cfg *Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
+	}
 }

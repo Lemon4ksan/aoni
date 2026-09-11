@@ -11,8 +11,6 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	"github.com/lemon4ksan/aoni/internal/sys"
 )
 
@@ -117,10 +115,22 @@ func ApplyTransportOverrides(tr *http.Transport, insecure bool, pool *Connection
 	}
 
 	if h2Cfg != nil {
-		if t2, err := http2.ConfigureTransports(tr); err == nil && t2 != nil {
-			t2.ReadIdleTimeout = h2Cfg.ReadIdleTimeout
-			t2.PingTimeout = h2Cfg.PingTimeout
-			t2.AllowHTTP = h2Cfg.AllowHTTP
+		if tr.HTTP2 == nil {
+			tr.HTTP2 = &http.HTTP2Config{}
+		}
+
+		tr.HTTP2.SendPingTimeout = h2Cfg.ReadIdleTimeout
+		tr.HTTP2.PingTimeout = h2Cfg.PingTimeout
+
+		if h2Cfg.AllowHTTP {
+			if tr.Protocols == nil {
+				var p http.Protocols
+				p.SetHTTP1(true)
+				p.SetHTTP2(true)
+				tr.Protocols = &p
+			}
+
+			tr.Protocols.SetUnencryptedHTTP2(true)
 		}
 	}
 }

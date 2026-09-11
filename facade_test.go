@@ -179,3 +179,63 @@ func TestFacade_OptionsAndIntoEx(t *testing.T) {
 	assert.Equal(t, "Charlie", postUser.Name)
 	assert.Equal(t, 35, postUser.Age)
 }
+
+func TestFacade_RestoredOptionsAndModifiers(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "custom-header-val", r.Header.Get("X-Custom-Header"))
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "42", r.URL.Query().Get("id"))
+		assert.Equal(t, "/users/100", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"FacadeTest","age":99}`))
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	// 1. Create client using restored facade options: WithBaseURL, WithModifier, WithClientTimeout
+	client := New(
+		WithBaseURL(ts.URL),
+		WithClientTimeout(5*time.Second),
+		WithModifier(func(req *http.Request) {
+			req.Header.Set("X-Custom-Header", "custom-header-val")
+		}),
+	)
+	defer client.Close()
+
+	// 2. Perform request using restored facade modifiers: WithVar, WithQuery, WithBearer
+	u, err := client.GetTo[sampleUser](
+		ctx, "users/{uid}",
+		WithVar("uid", 100),
+		WithQuery("id", "42"),
+		WithBearer("test-token"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	assert.Equal(t, "FacadeTest", u.Name)
+	assert.Equal(t, 99, u.Age)
+
+	// 3. Test WithSmartBody, WithRetry, WithUserAgent, WithBasicAuth, etc.
+	modSmart := WithSmartBody(map[string]string{"foo": "bar"})
+	assert.NotEmpty(t, modSmart.Bytes)
+
+	modBasic := WithBasicAuth("alice", "pass")
+	assert.Equal(t, "alice", modBasic.Key)
+	assert.Equal(t, "pass", modBasic.Value)
+
+	modRetry := WithRetry(3)
+	assert.NotNil(t, modRetry.Fn)
+
+	// 4. Test browser options
+	cfg := Config{}
+	WithChrome()(&cfg)
+	assert.Equal(t, BrowserChrome, cfg.Fingerprint.BrowserID)
+
+	WithFirefox()(&cfg)
+	assert.Equal(t, BrowserFirefox, cfg.Fingerprint.BrowserID)
+
+	WithSafari()(&cfg)
+	assert.Equal(t, BrowserSafari, cfg.Fingerprint.BrowserID)
+}
