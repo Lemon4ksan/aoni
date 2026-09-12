@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,7 +64,8 @@ func setupToxiTest(t *testing.T, proxyName, listenAddr string) (*httptest.Server
 		proxy, err = toxiClient.CreateProxy(proxyName, listenAddr, "host.docker.internal:"+targetPort)
 		if err != nil {
 			targetSrv.Close()
-			t.Fatalf("Failed to create toxiproxy: %v (Is Toxiproxy running in Docker?)", err)
+			t.Skipf("Skipping toxiproxy test: %v (Is Toxiproxy running in Docker?)", err)
+			return nil, nil, nil, ""
 		}
 	}
 
@@ -73,6 +75,12 @@ func setupToxiTest(t *testing.T, proxyName, listenAddr string) (*httptest.Server
 }
 
 func TestToxiproxyResilienceAndStress(t *testing.T) {
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:8474", 200*time.Millisecond)
+	if err != nil {
+		t.Skip("Toxiproxy daemon is not running on 127.0.0.1:8474, skipping toxiproxy tests")
+	}
+	_ = conn.Close()
+
 	// We run all tests against the same proxy port, so they must be sequential to avoid port clashes
 	// We use 0.0.0.0:22222 which is exposed by the toxiproxy docker container.
 
