@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.BROWSER_UPDATE_TOKEN }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -93,7 +95,7 @@ jobs:
         if: steps.update.outputs.updated == 'true' && inputs.dry_run != 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BROWSER_UPDATE_TOKEN }}
           commit-message: "chore: update browser profile versions"
           branch: auto/update-browser-versions
           delete-branch: true

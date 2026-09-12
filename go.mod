@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/Shopify/toxiproxy/v2 v2.12.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/klauspost/compress v1.19.1 // indirect

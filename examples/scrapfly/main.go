@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -70,7 +74,7 @@ func main() {
 				} `json:"http2"`
 			}
 			json.Unmarshal(bodyBytes, &p)
-			
+
 			fmt.Printf("[TLS] JA3 Hash: %s\n", p.TLS.JA3Hash)
 			fmt.Printf("[HTTP2] Akamai FP: %s\n", p.HTTP2.AkamaiFingerprint)
 		}

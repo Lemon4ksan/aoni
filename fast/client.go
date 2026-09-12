@@ -373,14 +373,24 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 		}
 	}
 
+	released := false
 	if mustRelease {
-		defer h1engine.ReleaseRequest(fastReq)
+		defer func() {
+			if !released {
+				h1engine.ReleaseRequest(fastReq)
+			}
+		}()
 	}
 
 	fastResp := h1engine.AcquireResponse()
 	ctx := req.Context()
 
 	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
+
+	if autoReleased {
+		released = true
+	}
+
 	if err != nil {
 		if !autoReleased {
 			h1engine.ReleaseResponse(fastResp)
