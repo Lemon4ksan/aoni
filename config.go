@@ -1472,7 +1472,7 @@ func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 
 // resolvePipeline computes the active PipelineConfig for an outgoing HTTP request context.
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
-	if p, ok := pipeline.GetPipeline(req.Context()); ok {
+	if p, ok := pipeline.GetPipelineConfig(req.Context()); ok {
 		return pipelineToAoniConfig(p)
 	}
 

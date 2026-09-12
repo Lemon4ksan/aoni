@@ -963,7 +963,7 @@ func (c *Client) applyPowerManagement(enable bool) {
 }
 
 func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
-	if reqPipe, ok := pipeline.GetPipeline(ctx); ok {
+	if reqPipe, ok := pipeline.GetPipelineConfig(ctx); ok {
 		return reqPipe
 	}
 

@@ -131,8 +131,8 @@ type RequestConfig struct {
 	BaseResponseOverride         func() core.BaseResponse
 }
 
-// GetPipeline retrieves the request-specific PipelineConfig from context.
-func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
+// GetPipelineConfig retrieves the request-specific PipelineConfig from context.
+func GetPipelineConfig(ctx context.Context) (PipelineConfig, bool) {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil && cfg.Pipeline != nil {
 		return *cfg.Pipeline, true

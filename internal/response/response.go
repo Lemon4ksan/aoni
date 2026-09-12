@@ -141,6 +141,10 @@ func (h *Handler) validate() error {
 }
 
 func (h *Handler) checkMIMEType() error {
+	if h.decoder != nil && decode.IsRawDecoder(h.decoder) {
+		return nil
+	}
+
 	contentType := h.resp.Header.Get("Content-Type")
 	if contentType == "" {
 		return nil
@@ -156,6 +160,10 @@ func (h *Handler) checkMIMEType() error {
 }
 
 func (h *Handler) checkHTML(buf *bufio.Reader) error {
+	if h.decoder != nil && decode.IsRawDecoder(h.decoder) {
+		return nil
+	}
+
 	peekBytes, err := buf.Peek(128)
 	if (err != nil && err != io.EOF) || len(peekBytes) == 0 {
 		return nil
