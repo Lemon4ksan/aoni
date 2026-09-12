@@ -5,6 +5,7 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -438,6 +439,15 @@ func rewindRequestBody(req aoni.Request) error {
 			if _, err := seeker.Seek(0, io.SeekStart); err == nil {
 				return nil
 			}
+		}
+
+		if b := req.BodyBytes(); len(b) > 0 {
+			httpReq.Body = io.NopCloser(bytes.NewReader(b))
+			httpReq.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(b)), nil
+			}
+
+			return nil
 		}
 
 		return ErrCannotRewind

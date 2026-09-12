@@ -285,6 +285,9 @@ func (s *Request) ResetHeaders() {
 func (s *Request) SetBodyBytes(body []byte) {
 	s.req.Body = io.NopCloser(bytes.NewReader(body))
 	s.req.ContentLength = int64(len(body))
+	s.req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
 }
 
 // BodyBytes returns the request payload bytes.
@@ -295,6 +298,9 @@ func (s *Request) BodyBytes() []byte {
 
 	b, _ := io.ReadAll(s.req.Body)
 	s.req.Body = io.NopCloser(bytes.NewReader(b))
+	s.req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
 
 	return b
 }
@@ -307,13 +313,15 @@ func (s *Request) SetBodyStream(r io.Reader, contentLength int64) {
 		s.req.Body = io.NopCloser(r)
 	}
 
-	if seeker, ok := r.(io.Seeker); ok {
+	s.req.ContentLength = contentLength
+
+	if seeker, ok := r.(io.ReadSeeker); ok {
 		s.req.GetBody = func() (io.ReadCloser, error) {
 			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 				return nil, err
 			}
 
-			if rc, ok := r.(io.ReadCloser); ok {
+			if rc, ok := seeker.(io.ReadCloser); ok {
 				return rc, nil
 			}
 

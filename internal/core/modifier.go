@@ -300,6 +300,9 @@ func (s *stdReqAdapter) ResetHeaders() {
 func (s *stdReqAdapter) SetBodyBytes(b []byte) {
 	s.req.Body = io.NopCloser(bytes.NewReader(b))
 	s.req.ContentLength = int64(len(b))
+	s.req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
 }
 
 func (s *stdReqAdapter) BodyBytes() []byte {
@@ -309,6 +312,9 @@ func (s *stdReqAdapter) BodyBytes() []byte {
 
 	b, _ := io.ReadAll(s.req.Body)
 	s.req.Body = io.NopCloser(bytes.NewReader(b))
+	s.req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
 
 	return b
 }
@@ -321,6 +327,20 @@ func (s *stdReqAdapter) SetBodyStream(r io.Reader, cl int64) {
 	}
 
 	s.req.ContentLength = cl
+
+	if seeker, ok := r.(io.ReadSeeker); ok {
+		s.req.GetBody = func() (io.ReadCloser, error) {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
+
+			if rc, ok := seeker.(io.ReadCloser); ok {
+				return rc, nil
+			}
+
+			return io.NopCloser(seeker), nil
+		}
+	}
 }
 func (s *stdReqAdapter) BodyStream() io.Reader      { return s.req.Body }
 func (s *stdReqAdapter) HTTPRequest() *http.Request { return s.req }
