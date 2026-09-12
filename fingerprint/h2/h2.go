@@ -375,9 +375,7 @@ func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, 
 	}
 
 	host, _, _ := net.SplitHostPort(addr)
-	if tlsCfg.ServerName == "" {
-		tlsCfg.ServerName = host
-	}
+	tlsCfg.ServerName = generic.Coalesce(tlsCfg.ServerName, host)
 
 	d := &tls.Dialer{NetDialer: &net.Dialer{}, Config: tlsCfg}
 
@@ -400,11 +398,7 @@ func canonicalAddr(u *url.URL) string {
 		return ":443"
 	}
 
-	if strings.Contains(host, ":") {
-		return host
-	}
-
-	return host + ":443"
+	return generic.Ternary(strings.Contains(host, ":"), host, host+":443")
 }
 
 // http1RoundTrip executes an HTTP/1.1 transaction over an existing TLS connection if ALPN negotiation falls back.

@@ -7,6 +7,7 @@ package h3engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 
@@ -370,6 +371,10 @@ func (cc *ClientConn) readResponseFrom(
 
 		switch frameType {
 		case FrameTypeHeaders:
+			if payloadLen > 16*1024*1024 {
+				return nil, fmt.Errorf("aoni/h3engine: headers payload too large: %d", payloadLen)
+			}
+
 			var (
 				headerBlock   []byte
 				heapHeaderBuf *[]byte

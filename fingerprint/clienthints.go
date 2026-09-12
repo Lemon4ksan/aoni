@@ -7,6 +7,8 @@ package fingerprint
 import (
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
 
@@ -106,20 +108,12 @@ func extractChromeVersion(ua string) string {
 // extractMajorVersion extracts the leading major version number from a semver string.
 func extractMajorVersion(fullVersion string) string {
 	major, _, _ := strings.Cut(fullVersion, ".")
-	if major == "" {
-		return "120"
-	}
-
-	return major
+	return generic.Coalesce(major, "120")
 }
 
 // resolveFormFactor reports whether the target OS corresponds to a Mobile or Desktop form factor.
 func resolveFormFactor(os profiles.OSKey) string {
-	if os.IsMobile() {
-		return `"Mobile"`
-	}
-
-	return `"Desktop"`
+	return generic.Ternary(os.IsMobile(), `"Mobile"`, `"Desktop"`)
 }
 
 // populateOSDetails fills platform, platform version, architecture, bitness, and model hints for the target OS.

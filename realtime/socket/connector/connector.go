@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/logkit"
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/realtime/socket"
 )
@@ -200,14 +201,8 @@ type Connector[Endpoint any] struct {
 func New[Endpoint any](cfg Config[Endpoint]) *Connector[Endpoint] {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
 
-	l := cfg.Logger
-	if l == nil {
-		l = logkit.Discard
-	}
-
-	if cfg.ConnectTimeout == 0 {
-		cfg.ConnectTimeout = 20 * time.Second
-	}
+	l := generic.Ternary[logkit.Logger](cfg.Logger != nil, cfg.Logger, logkit.Discard)
+	cfg.ConnectTimeout = generic.Coalesce(cfg.ConnectTimeout, 20*time.Second)
 
 	if cfg.ReconnectPolicy.InitialBackoff == 0 {
 		cfg.ReconnectPolicy = DefaultReconnectPolicy[Endpoint]()

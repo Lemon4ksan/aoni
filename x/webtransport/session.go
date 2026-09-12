@@ -413,6 +413,11 @@ func (s *Session) controlLoop() {
 			return
 		}
 
+		if payloadLen > 16*1024*1024 {
+			s.cancel()
+			return
+		}
+
 		payload := make([]byte, payloadLen)
 		if payloadLen > 0 {
 			if _, err := io.ReadFull(s.controlStream, payload); err != nil {

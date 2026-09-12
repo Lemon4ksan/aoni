@@ -129,20 +129,10 @@ type LengthPrefixedFramer struct {
 
 // NewLengthPrefixedFramer constructs a LengthPrefixedFramer.
 func NewLengthPrefixedFramer(cfg LengthPrefixedConfig) *LengthPrefixedFramer {
-	bo := cfg.ByteOrder
-	if bo == nil {
-		bo = binary.LittleEndian
-	}
-
-	maxLen := cfg.MaxLength
-	if maxLen == 0 {
-		maxLen = defaultMaxFrame
-	}
-
 	return &LengthPrefixedFramer{
-		ByteOrder: bo,
+		ByteOrder: generic.Ternary[binary.ByteOrder](cfg.ByteOrder != nil, cfg.ByteOrder, binary.LittleEndian),
 		Magic:     cfg.Magic,
-		MaxLength: maxLen,
+		MaxLength: generic.Coalesce(cfg.MaxLength, defaultMaxFrame),
 	}
 }
 

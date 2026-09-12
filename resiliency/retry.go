@@ -39,11 +39,7 @@ func NewRetry() *RetryBuilder {
 
 // MaxAttempts sets the maximum total attempts (initial request + retries).
 func (b *RetryBuilder) MaxAttempts(n uint32) *RetryBuilder {
-	if n < 1 {
-		n = 1
-	}
-
-	b.maxAttempts = n
+	b.maxAttempts = max(n, 1)
 
 	return b
 }
@@ -119,7 +115,8 @@ func (b *RetryBuilder) HonorRetryAfter(enabled bool, maxLimit ...time.Duration) 
 
 // OnStatus adds retry triggers for specific HTTP response status codes (e.g. 429, 502, 503, 504).
 func (b *RetryBuilder) OnStatus(statusCodes ...int) *RetryBuilder {
-	codes := append([]int(nil), statusCodes...)
+	codes := slices.Clone(statusCodes)
+
 	b.conditions = append(b.conditions, func(resp aoni.Response, err error) bool {
 		if resp == nil {
 			return false
@@ -166,7 +163,7 @@ func (b *RetryBuilder) OnCondition(cond core.RetryCondition) *RetryBuilder {
 
 // AllowedMethods restricts retries strictly to the provided HTTP methods (e.g., "GET", "HEAD", "PUT").
 func (b *RetryBuilder) AllowedMethods(methods ...string) *RetryBuilder {
-	b.allowedMethods = append([]string(nil), methods...)
+	b.allowedMethods = slices.Clone(methods)
 	return b
 }
 

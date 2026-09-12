@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
@@ -57,10 +58,7 @@ func configureH2(s *profiles.H2Settings) {
 }
 
 func buildHeaders(os profiles.OSKey) []profiles.HeaderEntry {
-	ua := userAgents[os]
-	if ua == "" {
-		ua = UserAgentMacOS
-	}
+	ua := generic.Coalesce(userAgents[os], UserAgentMacOS)
 
 	return []profiles.HeaderEntry{
 		{Name: ":method", Value: ""},

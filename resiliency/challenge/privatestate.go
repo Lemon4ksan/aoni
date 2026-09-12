@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/netutil/privacypass"
 )
 
@@ -51,13 +53,9 @@ type PrivateTokenSolver struct {
 
 // NewPrivateTokenSolver instantiates a [PrivateTokenSolver] configured with the specified [privacypass.TokenProvider].
 func NewPrivateTokenSolver(provider privacypass.TokenProvider, transport http.RoundTripper) *PrivateTokenSolver {
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
 	return &PrivateTokenSolver{
 		provider:  provider,
-		transport: transport,
+		transport: generic.Ternary(transport != nil, transport, http.DefaultTransport),
 	}
 }
 
@@ -72,10 +70,7 @@ func (s *PrivateTokenSolver) Solve(ctx context.Context, _ error, req *http.Reque
 	}
 
 	// Make an initial probe if needed or extract challenge from previous response if stored in context
-	origin := req.URL.Host
-	if origin == "" {
-		origin = req.Host
-	}
+	origin := generic.Coalesce(req.URL.Host, req.Host)
 
 	// First make an unauthenticated probe to receive the WWW-Authenticate header if not already available
 	probeReq := req.Clone(ctx)

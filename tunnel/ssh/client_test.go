@@ -5,8 +5,6 @@
 package ssh_test
 
 import (
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
-
 	"bufio"
 	"bytes"
 	"context"
@@ -28,6 +26,7 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
 
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	aonisftp "github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
 )
 

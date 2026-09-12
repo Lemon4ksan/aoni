@@ -17,7 +17,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/packet"
 	"github.com/lemon4ksan/foundation/net/packet/tcp"
-
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 

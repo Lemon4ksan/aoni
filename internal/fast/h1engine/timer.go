@@ -21,14 +21,7 @@ func initTimer(t *time.Timer, timeout time.Duration) *time.Timer {
 }
 
 func stopTimer(t *time.Timer) {
-	if !t.Stop() {
-		// Collect possibly added time from the channel
-		// if timer has been stopped and nobody collected its value.
-		select {
-		case <-t.C:
-		default:
-		}
-	}
+	t.Stop()
 }
 
 // AcquireTimer returns a time.Timer from the pool and updates it to

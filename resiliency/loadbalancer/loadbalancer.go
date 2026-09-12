@@ -209,10 +209,7 @@ func resolveSRVBackends(
 
 		parsed, parseErr := url.Parse(targetURL)
 
-		w := int(rec.Weight)
-		if w <= 0 {
-			w = 1
-		}
+		w := max(int(rec.Weight), 1)
 
 		var doer aoni.HTTPDoer
 		if clientFactory != nil {
@@ -620,8 +617,7 @@ func (b *Balancer) checkHealth(backend *Backend) {
 // Prewarm warms up TCP/TLS connection pools to all registered backends concurrently.
 func (b *Balancer) Prewarm(ctx context.Context) {
 	b.mu.RLock()
-	backends := make([]*Backend, len(b.backends))
-	copy(backends, b.backends)
+	backends := slices.Clone(b.backends)
 	b.mu.RUnlock()
 
 	var wg sync.WaitGroup

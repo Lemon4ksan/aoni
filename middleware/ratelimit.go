@@ -62,8 +62,11 @@ func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 						default:
 						}
 					}
+
 					pool.ReleaseTimer(timer)
+
 					return nil, ErrSlidingWindowCanceled
+
 				case <-timer.C:
 					pool.ReleaseTimer(timer)
 				}

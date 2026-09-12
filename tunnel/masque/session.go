@@ -200,6 +200,10 @@ func (s *Session) ReadCapsule() (uint64, []byte, error) {
 		return 0, nil, err
 	}
 
+	if payloadLen > 16*1024*1024 {
+		return 0, nil, fmt.Errorf("aoni/masque: capsule payload too large: %d", payloadLen)
+	}
+
 	payload := make([]byte, payloadLen)
 	if payloadLen > 0 {
 		if _, err := io.ReadFull(s.controlStream, payload); err != nil {

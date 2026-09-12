@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -90,14 +91,8 @@ func VerifySPKIPins(state *tls.ConnectionState, expectedPins []string) bool {
 
 	for _, cert := range state.PeerCertificates {
 		spki := ComputeSPKIFingerprint(cert)
-		if spki == "" {
-			continue
-		}
-
-		for _, expected := range normalized {
-			if spki == expected {
-				return true
-			}
+		if spki != "" && slices.Contains(normalized, spki) {
+			return true
 		}
 	}
 

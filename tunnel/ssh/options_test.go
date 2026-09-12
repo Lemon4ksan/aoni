@@ -5,8 +5,6 @@
 package ssh_test
 
 import (
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
-
 	"bytes"
 	"net"
 	"os"
@@ -18,6 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 	golangssh "golang.org/x/crypto/ssh"
 
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
 )
 

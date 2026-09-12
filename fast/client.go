@@ -356,19 +356,23 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 	} else {
 		fastReq = h1engine.AcquireRequest()
 		mustRelease = true
+
 		fastReq.Header.SetMethod(req.Method())
 		fastReq.SetRequestURI(req.URL())
+
 		if stream := req.BodyStream(); stream != nil {
 			fastReq.SetBodyStream(stream, -1)
 		} else if bb := req.BodyBytes(); len(bb) > 0 {
 			fastReq.SetBody(bb)
 		}
+
 		if headers := req.Headers(); headers != nil {
 			for k, v := range headers {
 				fastReq.Header.AddBytesKV(k, v)
 			}
 		}
 	}
+
 	if mustRelease {
 		defer h1engine.ReleaseRequest(fastReq)
 	}
@@ -952,13 +956,8 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 		pipe.RotateUA = true
 	}
 
-	if pipe.SizeLimit == 0 {
-		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
-	}
-
-	if pipe.MultiReadThreshold == 0 && c.cfg.Defaults.MultiReadThreshold != 0 {
-		pipe.MultiReadThreshold = c.cfg.Defaults.MultiReadThreshold
-	}
+	pipe.SizeLimit = generic.Coalesce(pipe.SizeLimit, c.cfg.Defaults.MaxResponseSize)
+	pipe.MultiReadThreshold = generic.Coalesce(pipe.MultiReadThreshold, c.cfg.Defaults.MultiReadThreshold)
 
 	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true

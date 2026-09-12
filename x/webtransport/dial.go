@@ -264,6 +264,10 @@ func readH3ResponseHeaders(r io.Reader) (map[string]string, error) {
 		return nil, fmt.Errorf("aoni/webtransport: expected HEADERS frame (0x01), got 0x%02x", frameType)
 	}
 
+	if payloadLen > 16*1024*1024 {
+		return nil, fmt.Errorf("aoni/webtransport: headers payload too large: %d", payloadLen)
+	}
+
 	payload := make([]byte, payloadLen)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return nil, err

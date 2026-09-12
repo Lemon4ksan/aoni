@@ -7,9 +7,8 @@ package masque_test
 import (
 	"testing"
 
-	"github.com/lemon4ksan/aoni/tunnel/masque/route"
-
 	"github.com/lemon4ksan/aoni/tunnel/masque"
+	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 )
 
 // FuzzMASQUEVarint tests RFC 9000 QUIC / MASQUE variable-length integer decoding and roundtripping.

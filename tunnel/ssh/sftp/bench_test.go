@@ -10,7 +10,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	"io"
 	"net"
 	"os"
@@ -22,6 +21,7 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
 
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	aonisftp "github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
 )
 

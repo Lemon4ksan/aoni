@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	golangssh "golang.org/x/crypto/ssh"
+
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 )
 
 func BenchmarkParseKey(b *testing.B) {

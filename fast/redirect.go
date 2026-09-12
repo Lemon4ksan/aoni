@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -20,10 +21,7 @@ func (c *Client) executeWithRedirects(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	redirectLimit := c.cfg.Engine.RedirectLimit
-	if redirectLimit < 0 {
-		redirectLimit = 10
-	}
+	redirectLimit := generic.Ternary(c.cfg.Engine.RedirectLimit < 0, 10, c.cfg.Engine.RedirectLimit)
 
 	if redirectLimit == 0 {
 		c.applyCookies(ctx, fastReq)

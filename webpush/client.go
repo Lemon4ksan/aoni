@@ -13,9 +13,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/foundation/generic"
 )
 
 // MessageOption defines functional modifiers for outbound push messages.

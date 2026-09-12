@@ -173,6 +173,7 @@ func (tc *trackedClient) PutDomainInCooldown(domain string, duration time.Durati
 	if tc.domainCooldowns == nil {
 		tc.domainCooldowns = generic.NewCache[string, struct{}]()
 	}
+
 	cache := tc.domainCooldowns
 	tc.mu.Unlock()
 
@@ -206,9 +207,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
 	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
-	if cfg.Logger == nil {
-		cfg.Logger = flog.Discard
-	}
+	cfg.Logger = generic.Ternary[core.Logger](cfg.Logger != nil, cfg.Logger, flog.Discard)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Rotator{
@@ -270,13 +269,12 @@ func (r *Rotator) WithStickySessions(f StickyKeyFunc) *Rotator {
 	c := &Rotator{
 		ctx:           r.ctx,
 		cancel:        r.cancel,
-		clients:       make([]*trackedClient, len(r.clients)),
+		clients:       slices.Clone(r.clients),
 		cfg:           r.cfg,
 		sessions:      generic.NewCache[string, int](),
 		sessionTTL:    r.sessionTTL,
 		stickyKeyFunc: f,
 	}
-	copy(c.clients, r.clients)
 	c.current.Store(r.current.Load())
 
 	return c

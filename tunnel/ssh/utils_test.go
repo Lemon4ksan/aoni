@@ -5,8 +5,6 @@
 package ssh_test
 
 import (
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
-
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -18,6 +16,8 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 	golangssh "golang.org/x/crypto/ssh"
+
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 )
 
 func generateTestKeyPair(t *testing.T) ([]byte, golangssh.Signer, golangssh.PublicKey) {

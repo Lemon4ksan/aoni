@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // HostConfig holds options parsed from an OpenSSH config file for a specific host alias.
@@ -148,10 +150,7 @@ func NewClientFromConfig(ctx context.Context, alias string, opts ...Option) (*Cl
 		hostCfg = sshCfg.GetHost(alias)
 	}
 
-	targetAddr := hostCfg.HostName
-	if targetAddr == "" {
-		targetAddr = alias
-	}
+	targetAddr := generic.Coalesce(hostCfg.HostName, alias)
 
 	var mergedOpts []Option
 

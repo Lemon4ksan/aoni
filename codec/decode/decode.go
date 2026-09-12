@@ -97,6 +97,7 @@ type limitDecoder struct {
 func (l limitDecoder) Decode(reader io.Reader, target any) error {
 	lr := limitReaderPool.Get().(*io.LimitedReader)
 	lr.R = reader
+
 	lr.N = l.maxBytes
 	defer func() {
 		lr.R = nil

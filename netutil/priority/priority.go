@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // HeaderPriority is the standard RFC 9218 header name for extensible HTTP priorities.
@@ -68,32 +70,18 @@ type Priority struct {
 
 // New constructs a validated [Priority]. Caps urgency to [0, 7].
 func New(urgency int, incremental bool) Priority {
-	if urgency < 0 {
-		urgency = 0
-	} else if urgency > 7 {
-		urgency = 7
-	}
-
 	return Priority{
-		Urgency:     urgency,
+		Urgency:     min(max(urgency, 0), 7),
 		Incremental: incremental,
 	}
 }
 
 // Format serializes the [Priority] into an RFC 9218 Structured Field dictionary string (e.g. "u=1, i").
 func (p Priority) Format() string {
-	urg := p.Urgency
-	if urg < 0 {
-		urg = 0
-	} else if urg > 7 {
-		urg = 7
-	}
+	urg := min(max(p.Urgency, 0), 7)
+	suffix := generic.Ternary(p.Incremental, ", i", "")
 
-	if p.Incremental {
-		return fmt.Sprintf("u=%d, i", urg)
-	}
-
-	return fmt.Sprintf("u=%d", urg)
+	return fmt.Sprintf("u=%d%s", urg, suffix)
 }
 
 func (p Priority) String() string {

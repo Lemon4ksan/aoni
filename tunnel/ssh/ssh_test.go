@@ -20,14 +20,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/tarpit"
-
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
+
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
+	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
+	"github.com/lemon4ksan/aoni/tunnel/ssh/tarpit"
 )
 
 type mockServer struct {

@@ -311,6 +311,7 @@ func (r *SSEReader[T]) NextEvent() (SSEEvent, error) {
 			}
 
 			lineBytes = append(lineBytes, chunk...)
+
 			if !isPrefix {
 				break
 			}
@@ -363,6 +364,7 @@ func SeqToChan[T any](ctx context.Context, seq iter.Seq2[T, error], closer io.Cl
 
 		if closer != nil {
 			done := make(chan struct{})
+
 			defer close(done)
 			go func() {
 				select {
@@ -371,6 +373,7 @@ func SeqToChan[T any](ctx context.Context, seq iter.Seq2[T, error], closer io.Cl
 				case <-done:
 				}
 			}()
+
 			defer closer.Close()
 		}
 
@@ -541,6 +544,18 @@ func consumeSSEResponse[T any](
 	retryDelay *time.Duration,
 ) error {
 	reader := StreamSSE[T](resp)
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = reader.Close()
+		case <-done:
+		}
+	}()
+
 	defer reader.Close()
 
 	for {
@@ -983,6 +998,7 @@ func (r *NDJSONReader[T]) Next() generic.Result[T] {
 				}
 
 				line = append(line, chunk...)
+
 				break
 			}
 

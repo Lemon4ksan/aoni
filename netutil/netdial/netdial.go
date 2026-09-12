@@ -146,11 +146,6 @@ func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Co
 		return NewL2FrameConn(opts.L2Device, nil, nil), nil
 	}
 
-	if opts.ProxyURL != nil && opts.ProxyURL.Host != "" {
-		host, port, _ := net.SplitHostPort(addr)
-		return DialProxy(ctx, opts.ProxyURL, host, port, opts)
-	}
-
 	if strings.HasPrefix(addr, "unix://") || network == NetworkUnix.String() {
 		return dialUnixSocket(ctx, addr, opts)
 	}
@@ -161,7 +156,23 @@ func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Co
 		port = "80"
 	}
 
-	if opts.ProxyDNS && opts.ProxyURL != nil && net.ParseIP(host) == nil {
+	if opts.ProxyURL != nil && opts.ProxyURL.Host != "" {
+		if !opts.ProxyDNS && net.ParseIP(host) == nil {
+			resolver := opts.DNSResolver
+			if resolver == nil {
+				resolver = &net.Resolver{}
+			}
+
+			addrs, lookupErr := resolver.LookupIPAddr(ctx, host)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+
+			if len(addrs) > 0 {
+				host = addrs[0].IP.String()
+			}
+		}
+
 		return DialProxy(ctx, opts.ProxyURL, host, port, opts)
 	}
 

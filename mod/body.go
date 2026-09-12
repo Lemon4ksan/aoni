@@ -52,11 +52,6 @@ func WithBody(r io.Reader) RequestModifier {
 		Kind:   core.ModBodyStream,
 		Stream: r,
 	}
-
-	return RequestModifier{
-		Kind:   core.ModBodyStream,
-		Stream: r,
-	}
 }
 
 // WithBodyBytes sets a raw byte slice directly as the request payload.

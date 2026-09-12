@@ -41,11 +41,7 @@ func (e staleEntry) isFresh(now time.Time) bool {
 }
 
 func (e staleEntry) isUsableStale(now time.Time, maxExpired time.Duration) bool {
-	if maxExpired <= 0 {
-		return true
-	}
-
-	return now.Sub(e.expiresAt) <= maxExpired
+	return maxExpired <= 0 || now.Sub(e.expiresAt) <= maxExpired
 }
 
 // StaleResolver wraps any [Resolver] to implement Chromium-grade Stale DNS Resolution (RFC 8767).

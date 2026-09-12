@@ -125,6 +125,7 @@ func (c *Client) raceProtocolHandshakes(
 			default:
 			}
 		}
+
 		pool.ReleaseTimer(staggerTimer)
 	}()
 
@@ -144,6 +145,7 @@ func (c *Client) raceProtocolHandshakes(
 		go func() {
 			tcpReq := h1engine.AcquireRequest()
 			defer h1engine.ReleaseRequest(tcpReq)
+
 			fastReq.CopyTo(tcpReq)
 
 			tcpResp := h1engine.AcquireResponse()
@@ -194,6 +196,7 @@ func drainLateRaceResponses(results chan raceResult) {
 			default:
 			}
 		}
+
 		pool.ReleaseTimer(timer)
 	}()
 
