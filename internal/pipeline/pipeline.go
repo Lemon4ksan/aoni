@@ -39,7 +39,7 @@ type Pipeline[Req, Resp any] struct {
 // StdPipeline is a type alias for a [Pipeline] operating on standard [*http.Request] and [*http.Response].
 type StdPipeline = Pipeline[*http.Request, *http.Response]
 
-// New instantiates a standard [StdPipeline] configured with the provided defaults and browser fingerprint settings.
+// New instantiates a standard [StdPipeline] configured with the provided defaults.
 func New(defaults ClientDefaults) *StdPipeline {
 	return &StdPipeline{
 		defaults: defaults,

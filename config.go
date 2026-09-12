@@ -219,7 +219,7 @@ type Config struct {
 	// Engine configures low-level HTTP doer engines, connection pools, and redirects.
 	Engine EngineConfig
 
-	// Ext provides hooks for external stealth and extension modules.
+	// Ext provides hooks for external extension modules.
 	Ext ExtensionConfig
 }
 
@@ -765,7 +765,7 @@ func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []
 // Section 7: Pipeline Configuration (5-Stage Execution Engine)
 // ============================================================================
 
-// PipelineConfig coordinates the behavior, resilience policies, and evasion capabilities
+// PipelineConfig coordinates the behavior and resilience policies
 // of the 5-stage transaction execution pipeline.
 //
 // # Architectural Pipeline Stages
@@ -774,7 +774,7 @@ func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []
 //  1. Stage 1 (Preparation & Modifiers): Encodes bodies, injects headers, binds context metadata.
 //  2. Stage 2 (Middleware & Telemetry): Enforces circuit breaking, retries, hedging, and HAR logging.
 //  3. Stage 3 (Protocol Engine & Janitors): Dispatches to standard or Fast engine, manages Alt-Svc cache.
-//  4. Stage 4 (L4/L7 Transport): uTLS evasion, Happy Eyeballs v3 racing, proxy failover, socket tuning.
+//  4. Stage 4 (L4/L7 Transport): Happy Eyeballs v3 racing, proxy failover, socket tuning.
 //  5. Stage 5 (Decoders & Resilience): Decompression, soft-error sniffing, structured unmarshaling.
 //
 // PipelineConfig governs which stages are active and configures their memory bounds and thresholds.

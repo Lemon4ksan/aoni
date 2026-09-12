@@ -286,5 +286,4 @@ func TestTraceInfo_OptionalHelpers(t *testing.T) {
 
 	tlsOpt := info.TLSDuration()
 	assert.False(t, tlsOpt.IsPresent())
-
 }

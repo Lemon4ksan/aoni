@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package ws implements a resilient, browser-grade WebSocket client built on
-// top of the uTLS/JA4 network evasion pipeline of the aoni engine.
+// top of the aoni engine.
 //
 // Unlike traditional WebSocket libraries built for stable internal infrastructures,
 // this package is optimized to navigate restrictive network boundaries, deep-packet
@@ -61,11 +61,10 @@
 //
 //		// Initialize a browser-grade client with Chrome TLS fingerpints and proxy routing
 //		client := aoni.NewClient(nil,
-//			option.WithTLSFingerprint(aoni.BrowserChrome),
 //			option.WithProxyString("socks5://127.0.0.1:1080"),
 //		)
 //
-//		// Dial the WebSocket target using uTLS Chrome hello specs
+//		// Dial the WebSocket target using TLS configuration
 //		conn, resp, err := ws.DialWebSocket(ctx, client, "wss://echo.websocket.org",
 //			mod.WithHeader("Origin", "https://echo.websocket.org"),
 //		)

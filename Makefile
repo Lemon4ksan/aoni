@@ -45,7 +45,7 @@ race: ## Run unit tests with race detector enabled
 
 bench: ## Run silicon hardware inspection and microsecond benchmark suite
 	@printf "$(CYAN)Running aoni silicon benchmark...$(RESET)\n"
-	go run ./cmd/vortex bench
+	vortex bench
 
 fuzz: ## Run continuous automated fuzz testing across all wire parsers
 	@printf "$(CYAN)Running security fuzzing suite across all wire parsers...$(RESET)\n"
@@ -55,13 +55,13 @@ cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
 	@mkdir -p $(TMP_DIR)
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
-	go run ./cmd/vortex cover -file=$(COVER_OUT)
+	vortex cover -file=$(COVER_OUT)
 
 cover-clean: ## Generate clean coverage report and run deduplicated coverage analysis tool
 	@printf "$(CYAN)Generating clean coverage report...$(RESET)\n"
 	@mkdir -p $(TMP_DIR)
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
-	go run ./cmd/vortex cover -file=$(COVER_OUT)
+	vortex cover -file=$(COVER_OUT)
 
 cover-html: cover ## Generate coverage report and open interactive HTML in browser
 	@printf "$(CYAN)Opening coverage report in browser...$(RESET)\n"
@@ -71,7 +71,7 @@ lint: ## Run golangci-lint check
 	@printf "$(CYAN)Running linter...$(RESET)\n"
 	golangci-lint run ./...
 	@printf "$(CYAN)Running AST borrow checker...$(RESET)\n"
-	go run ./cmd/vortex borrow ./...
+	vortex borrow ./...
 
 format: ## Format code and auto-fix linter suggestions
 	@printf "$(CYAN)Formatting Go code...$(RESET)\n"

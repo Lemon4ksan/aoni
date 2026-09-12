@@ -79,7 +79,7 @@ func NewClient(d *Dialer, opts ClientOpts) *Client {
 	}
 }
 
-// SetOrderedHeaders configures custom HPACK header ordering for anti-detect fingerprinting.
+// SetOrderedHeaders configures custom HPACK header ordering.
 func (cl *Client) SetOrderedHeaders(keys []string) {
 	cl.orderedKeys = keys
 }

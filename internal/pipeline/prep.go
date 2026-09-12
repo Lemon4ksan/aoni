@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/foundation/iokit"
@@ -130,10 +129,6 @@ func stageRefererHeader[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request
 		p.applyRefererHeader(req)
 	}
 
-	return req
-}
-
-func stageRotateUserAgent[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
 	return req
 }
 
@@ -364,22 +359,6 @@ func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *Red
 	ctx = context.WithValue(ctx, RedactConfigCtxKey{}, cfg.Redact)
 
 	return req.WithContext(ctx)
-}
-
-func (p *Pipeline[Req, Resp]) rotateUserAgentAndHints(req *http.Request) {
-	profiles := p.defaults.UARotationProfiles
-	if len(profiles) == 0 {
-		return
-	}
-
-	idx := atomic.AddUint32(&p.counter, 1) - 1
-	prof := profiles[idx%uint32(len(profiles))] //nolint:gosec
-
-	req.Header.Set(header.UserAgent, prof.UserAgent)
-
-	for k, v := range prof.ClientHints {
-		req.Header.Set(k, v)
-	}
 }
 
 func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {

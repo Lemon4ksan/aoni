@@ -11,7 +11,7 @@
 // # Architectural Encapsulation
 //
 // While the engine coordinates complex low-level mechanisms (Happy Eyeballs v3 protocol racing,
-// ring buffer recycling via [github.com/lemon4ksan/foundation/silicon/pool], and uTLS ClientHello
+// ring buffer recycling via [github.com/lemon4ksan/foundation/silicon/pool]
 // synthesis), the entire public API is completely clean and high-level:
 //
 //	client := fast.NewClient(

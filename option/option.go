@@ -5,7 +5,7 @@
 // Package option provides functional options for customizing an [aoni.Client] configuration.
 //
 // Options are consumed by [aoni.NewClient] or [aoni.Client.With] to configure global client defaults,
-// such as base URLs, timeouts, proxy rotators, TLS fingerprints, and execution pipeline behavior.
+// such as base URLs, timeouts, proxy rotators, and execution pipeline behavior.
 //
 // Thread Safety:
 // All options operate immutably on [aoni.Config] structures, preserving thread safety and concurrent client reuse.

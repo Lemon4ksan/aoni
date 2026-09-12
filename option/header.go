@@ -5,13 +5,13 @@
 package option
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"

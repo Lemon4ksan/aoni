@@ -19,7 +19,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
-// Dial executes an L4 TCP dial followed by an optional uTLS handshake to target addr ("host:port" or "host").
+// Dial executes an L4 TCP dial to target addr ("host:port" or "host").
 // Yields an active, tuned [net.Conn] socket configured for low latency.
 func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -33,7 +33,7 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	return c.DialContext(ctx, network, addr)
 }
 
-// DialContext establishes a raw L4 TCP connection or uTLS socket using the provided request context.
+// DialContext establishes a raw L4 TCP connection socket using the provided request context.
 // Yields an active, tuned [net.Conn] socket applying low-latency OS syscall flags (TCP_NODELAY).
 func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
@@ -62,8 +62,8 @@ func (c *Client) isTLSEnabled() bool {
 	return false
 }
 
-// DialTLS establishes an encrypted L7 TLS or uTLS connection over an L4 TCP transport.
-// Yields a negotiated TLS socket configured with active uTLS browser impersonation profiles.
+// DialTLS establishes an encrypted L7 TLS connection over an L4 TCP transport.
+// Yields a negotiated TLS socket.
 func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 
@@ -71,6 +71,7 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 	if dialCfg.BaseTLSConfig == nil {
 		dialCfg.BaseTLSConfig = &tls.Config{}
 	}
+
 	if len(dialCfg.BaseTLSConfig.NextProtos) == 0 {
 		dialCfg.BaseTLSConfig.NextProtos = []string{"http/1.1"}
 	}
@@ -86,10 +87,12 @@ func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.
 // DialH2 establishes a multiplexed HTTP/2 socket connection directly to the target host.
 func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
+
 	dialCfg := c.buildDialConfig(ctx)
 	if dialCfg.BaseTLSConfig == nil {
 		dialCfg.BaseTLSConfig = &tls.Config{}
 	}
+
 	dialCfg.BaseTLSConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	return dialer.DialH2(ctx, addr, dialCfg)
@@ -105,7 +108,7 @@ func (c *Client) IsHTTPSTarget(addr string) bool {
 	return c.activeTargets.IsTracked(addr)
 }
 
-// DialTLSForWS establishes an encrypted TLS socket connection for WebSockets using active uTLS profiles.
+// DialTLSForWS establishes an encrypted TLS socket connection for WebSockets.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
 	return c.DialTLSContext(ctx, aoni.NetworkTCP.String(), addr)
 }
@@ -127,6 +130,7 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	if cfg.BaseTLSConfig == nil {
 		cfg.BaseTLSConfig = &tls.Config{}
 	}
+
 	if len(cfg.BaseTLSConfig.NextProtos) == 0 {
 		cfg.BaseTLSConfig.NextProtos = []string{"http/1.1"}
 	}

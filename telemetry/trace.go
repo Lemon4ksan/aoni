@@ -247,11 +247,6 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 	}
 }
 
-// ComputeJA4HFromRequest evaluates a JA4H HTTP client fingerprint from an [*http.Request].
-func ComputeJA4HFromRequest(req *http.Request) string {
-	return ""
-}
-
 // TriggerGot1xxResponse notifies active httptrace ClientTrace hooks of intermediate 1xx responses (100, 102, 103).
 //
 // Postconditions:

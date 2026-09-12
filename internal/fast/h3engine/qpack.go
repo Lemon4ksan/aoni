@@ -116,7 +116,7 @@ func (q *QPACKCodec) EncodeRequestHeadersPooled(
 }
 
 // EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
-// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
+// strictly maintaining the specified orderedKeys sequence for RFC 9220 Extended CONNECT.
 func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *h1engine.Request, orderedKeys []string) error {
 	p := q.AcquireEncoder()
 	defer q.ReleaseEncoder(p)

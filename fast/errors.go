@@ -13,9 +13,6 @@ var (
 	// ErrTargetURLEmpty is returned when no target URL is provided for request execution.
 	ErrTargetURLEmpty = errors.New("aoni/fast: target URL is empty")
 
-	// ErrUTLSHandshakeFailed is returned when uTLS negotiation fails over a fasthttp socket.
-	ErrUTLSHandshakeFailed = errors.New("aoni/fast: uTLS handshake failed")
-
 	// ErrProxyConnectionFailed is returned when establishing an outbound proxy tunnel fails.
 	ErrProxyConnectionFailed = errors.New("aoni/fast: proxy connection failed")
 

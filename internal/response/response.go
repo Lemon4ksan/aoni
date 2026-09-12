@@ -9,7 +9,6 @@ package response
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"

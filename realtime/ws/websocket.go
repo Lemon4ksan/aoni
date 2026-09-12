@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -18,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"crypto/tls"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -229,7 +229,7 @@ func ConnectWellKnownResult(
 }
 
 // DialWebSocket establishes an encrypted (wss://) or unencrypted (ws://) WebSocket connection
-// using aoni's anti-detect uTLS stack, HTTP/2 Extended CONNECT (RFC 8441), and proxy pipeline.
+// using HTTP/2 Extended CONNECT (RFC 8441), and proxy pipeline.
 // Conforms to IETF RFC 6455 (The WebSocket Protocol) and RFC 8441 (Bootstrapping WebSockets with HTTP/2).
 // On success, returns an active, thread-safe [Conn] wrapping the upgraded socket along with the 101 Switching Protocols response.
 // On error, closes underlying net.Conn sockets to prevent connection leaks.
@@ -405,10 +405,10 @@ func getNegotiatedProtocol(conn net.Conn) string {
 		return cs.ConnectionState().NegotiatedProtocol
 	}
 
-	type utlsStateGetter interface {
+	type tlsStateGetter interface {
 		ConnectionState() tls.ConnectionState
 	}
-	if cs, ok := conn.(utlsStateGetter); ok {
+	if cs, ok := conn.(tlsStateGetter); ok {
 		return cs.ConnectionState().NegotiatedProtocol
 	}
 

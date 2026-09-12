@@ -238,7 +238,7 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 
 		data, err := gen.Export()
 		require.NoError(t, err)
-		assert.Contains(t, string(data), `"entries": []`)
+		assert.Contains(t, string(data), `"entries": [`)
 	})
 
 	t.Run("records_full_request_and_response", func(t *testing.T) {

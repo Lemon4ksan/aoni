@@ -71,10 +71,6 @@ func (r *twoSliceReader) Read(p []byte) (int, error) {
 
 // compressNoContextTakeover compresses payload bytes per RFC 7692 Section 7.2.1,
 // stripping trailing 0x00 0x00 0xFF 0xFF bytes after flushing.
-func compressNoContextTakeover(src []byte) ([]byte, error) {
-	return compressNoContextTakeoverTo(nil, src)
-}
-
 // compressNoContextTakeoverTo compresses payload bytes per RFC 7692 Section 7.2.1 directly into dst.
 func compressNoContextTakeoverTo(dst, src []byte) ([]byte, error) {
 	buf := compressBufferStorage.Get()

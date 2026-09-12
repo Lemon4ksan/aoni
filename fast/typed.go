@@ -6,8 +6,9 @@ package fast
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+
+	"github.com/lemon4ksan/foundation/codec/json"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"

@@ -33,7 +33,7 @@ func (f DoerFunc) Do(req Request) (Response, error) {
 }
 
 // WebSocketDialer is implemented by clients supporting raw TCP/TLS socket dialing
-// for WebSocket upgrades over uTLS or HTTP/2 Extended CONNECT (RFC 8441).
+// for WebSocket upgrades over HTTP/2 Extended CONNECT (RFC 8441).
 type WebSocketDialer interface {
 	DialTLSForWS(ctx context.Context, addr string) (net.Conn, error)
 	DialPlainForWS(ctx context.Context, addr string) (net.Conn, error)

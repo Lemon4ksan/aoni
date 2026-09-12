@@ -6,13 +6,13 @@ package body
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"reflect"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/core"

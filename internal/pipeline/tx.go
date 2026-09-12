@@ -30,7 +30,7 @@ type UnsafeHook func(tx *Tx, req *http.Request, resp *http.Response) error
 // Thread Safety & Concurrency:
 // Instances are acquired per-transaction from a pool and are NOT safe for concurrent modification.
 type Tx struct {
-	Flags                uint32          // Active transaction optimization and evasion flags bitmask
+	Flags                uint32          // Active transaction optimization flags bitmask
 	Ctx                  context.Context // Context bounding transaction lifecycle
 	TargetURL            string          // Resolved absolute destination URL
 	TargetHost           string          // Cleaned target hostname

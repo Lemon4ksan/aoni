@@ -5,11 +5,12 @@
 package resiliency
 
 import (
+	"github.com/lemon4ksan/foundation/net/http/etag"
+
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/resiliency/coalesce"
-	"github.com/lemon4ksan/foundation/net/http/etag"
 )
 
 type (

@@ -145,7 +145,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 	return nc
 }
 
-// SetOrderedHeaders configures custom HPACK header sequence for anti-detect fingerprinting.
+// SetOrderedHeaders configures custom HPACK header sequence.
 func (c *Conn) SetOrderedHeaders(keys []string) {
 	c.orderedKeys = keys
 }

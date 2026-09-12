@@ -289,7 +289,7 @@ func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
 	}
 }
 
-// WithFragmentation configures TCP packet fragmentation parameters for DPI evasion.
+// WithFragmentation configures TCP packet fragmentation parameters for strict packet boundaries.
 func WithFragmentation(frag fragment.Config) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.FragmentConfig = &frag

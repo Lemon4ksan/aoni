@@ -28,7 +28,7 @@ var (
 )
 
 // DialConfig is an independent, self-contained configuration DTO
-// required to establish L4 (TCP/UDP) and L7 (TLS/uTLS) network connections.
+// required to establish L4 (TCP/UDP) and L7 TLS network connections.
 // It contains ZERO references to high-level client or request structures.
 type DialConfig struct {
 	// L4 / Network Options
@@ -52,7 +52,7 @@ type DialConfig struct {
 	RegisteredIO         bool
 	BusyPollMicroseconds int
 
-	// TLS / uTLS Options
+	// TLS Options
 	BaseTLSConfig  *tls.Config
 	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
 	ServerName     string
@@ -116,8 +116,8 @@ func (d *UniversalDialer) DialContext(ctx context.Context, network, addr string,
 	return ExecutePipeline(ctx, rawConn, host, &cfg, filters)
 }
 
-// DialTLSContext establishes an encrypted TLS or uTLS connection over L4 TCP,
-// negotiating ALPN tokens and applying browser ClientHello fingerprints.
+// DialTLSContext establishes an encrypted TLS connection over L4 TCP,
+// negotiating ALPN tokens.
 func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr string, cfg DialConfig) (net.Conn, error) {
 	if cfg.DialTLSContext != nil {
 		return cfg.DialTLSContext(ctx, network, addr)
@@ -152,7 +152,7 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 	return ExecutePipeline(ctx, rawConn, host, &cfg, filters)
 }
 
-// DialH2 dials an L4 connection and forces uTLS handshake with ALPN "h2".
+// DialH2 dials an L4 connection.
 func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfig) (net.Conn, error) {
 	if cfg.BaseTLSConfig == nil {
 		cfg.BaseTLSConfig = &tls.Config{}

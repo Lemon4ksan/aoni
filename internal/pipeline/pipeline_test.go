@@ -168,21 +168,6 @@ func (m *mockCacheStore) Set(_ context.Context, key any, val []byte, _ time.Dura
 	return nil
 }
 
-type mockSolver struct {
-	solved bool
-}
-
-func (m *mockSolver) Solve(_ context.Context, _ error, req *http.Request) (*http.Response, error) {
-	m.solved = true
-
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader("solved")),
-		Request:    req,
-	}, nil
-}
-
 func TestTx_Pool_AcquireAndRelease(t *testing.T) {
 	t.Parallel()
 
@@ -208,12 +193,9 @@ func TestPipelineConfig_BuildFlags(t *testing.T) {
 	t.Parallel()
 
 	pipe := PipelineConfig{
-		RotateUA:      true,
-		DPIJitter:     &DPIJitterConfig{},
 		Redact:        &RedactConfig{},
 		Decompress:    true,
 		Validate:      true,
-		Challenge:     true,
 		Cache:         &CacheConfig{},
 		ProxyFailover: &ProxyFailoverConfig{},
 		Hedging:       &HedgingConfig{},
@@ -224,12 +206,9 @@ func TestPipelineConfig_BuildFlags(t *testing.T) {
 	flags := pipe.BuildFlags()
 	assert.Equal(t, flags, pipe.PrecomputedFlags)
 
-	assert.NotZero(t, flags&FlagRotateUA)
-	assert.NotZero(t, flags&FlagDPIJitter)
 	assert.NotZero(t, flags&FlagRedact)
 	assert.NotZero(t, flags&FlagDecompress)
 	assert.NotZero(t, flags&FlagValidate)
-	assert.NotZero(t, flags&FlagChallenge)
 	assert.NotZero(t, flags&FlagCache)
 	assert.NotZero(t, flags&FlagProxyFailover)
 	assert.NotZero(t, flags&FlagHedging)
@@ -327,14 +306,12 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 	pipeCfg := PipelineConfig{
 		Decompress: true,
 		Validate:   true,
-		Challenge:  true,
 	}
 
 	pipeEngine.initTx(tx, pipeCfg)
 
 	assert.Equal(t, uint32(0), tx.Flags&FlagDecompress)
 	assert.Equal(t, uint32(0), tx.Flags&FlagValidate)
-	assert.NotEqual(t, uint32(0), tx.Flags&FlagChallenge)
 
 	ReleaseTx(tx)
 }

@@ -7,12 +7,12 @@ package cert
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
-	"crypto/tls"
 	"github.com/lemon4ksan/foundation/generic"
 	fcert "github.com/lemon4ksan/foundation/net/tls/cert"
 )
@@ -42,18 +42,6 @@ const (
 // ParseCompressionAlgorithm parses a string identifier ("zlib", "brotli", "zstd") into [CompressionAlgorithm].
 func ParseCompressionAlgorithm(name string) (CompressionAlgorithm, error) {
 	return fcert.ParseCompressionAlgorithm(name)
-}
-
-// ToUTLS maps the compression algorithm to its corresponding uTLS representation.
-func ToUTLS(a CompressionAlgorithm) uint16 {
-	switch a {
-	case CertCompressionZlib:
-		return 0x0001
-	case CompressionZstd:
-		return 0x0003
-	default:
-		return 0x0002
-	}
 }
 
 // Watcher monitors disk modification timestamps for TLS keypairs, updating certificates dynamically.

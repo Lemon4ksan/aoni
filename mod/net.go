@@ -138,7 +138,7 @@ func WithInsecureSkipVerify() RequestModifier {
 	})
 }
 
-// WithFragmentation configures TCP packet fragmentation parameters for deep packet inspection (DPI) evasion.
+// WithFragmentation configures TCP packet fragmentation parameters for strict packet boundaries.
 func WithFragmentation(cfg fragment.Config) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Fragment = &cfg

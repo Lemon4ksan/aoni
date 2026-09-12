@@ -445,11 +445,15 @@ func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Respo
 		return errors.New("aoni/fast: length of reqs and resps must match")
 	}
 
-	var staticH1Reqs [16]*h1engine.Request
-	var staticH1Resps [16]*h1engine.Response
+	var (
+		staticH1Reqs  [16]*h1engine.Request
+		staticH1Resps [16]*h1engine.Response
+	)
 
-	var h1Reqs []*h1engine.Request
-	var h1Resps []*h1engine.Response
+	var (
+		h1Reqs  []*h1engine.Request
+		h1Resps []*h1engine.Response
+	)
 
 	if len(reqs) <= len(staticH1Reqs) {
 		h1Reqs = staticH1Reqs[:len(reqs)]
@@ -535,11 +539,15 @@ func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response
 	host := string(uri.Host())
 	isHTTPS := bytes.EqualFold(uri.Scheme(), []byte("https"))
 
-	var staticH1Reqs [16]*h1engine.Request
-	var staticH1Resps [16]*h1engine.Response
+	var (
+		staticH1Reqs  [16]*h1engine.Request
+		staticH1Resps [16]*h1engine.Response
+	)
 
-	var h1Reqs []*h1engine.Request
-	var h1Resps []*h1engine.Response
+	var (
+		h1Reqs  []*h1engine.Request
+		h1Resps []*h1engine.Response
+	)
 
 	if len(reqs) <= len(staticH1Reqs) {
 		h1Reqs = staticH1Reqs[:len(reqs)]
@@ -588,8 +596,10 @@ func (c *Client) DoBatchScoped(
 		return nil
 	}
 
-	var staticResps [16]*Response
-	var resps []*Response
+	var (
+		staticResps [16]*Response
+		resps       []*Response
+	)
 	if len(reqs) <= len(staticResps) {
 		resps = staticResps[:len(reqs)]
 	} else {

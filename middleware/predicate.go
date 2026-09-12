@@ -6,11 +6,11 @@ package middleware
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
