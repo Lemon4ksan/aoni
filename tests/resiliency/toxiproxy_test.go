@@ -18,6 +18,12 @@ import (
 func TestToxiproxyResilience(t *testing.T) {
 	// 1. Setup local target server
 	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/huge" {
+			w.WriteHeader(http.StatusOK)
+			// write 100KB of data
+			w.Write(make([]byte, 100*1024))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}))
@@ -140,6 +146,66 @@ func TestToxiproxyResilience(t *testing.T) {
 		
 		if string(body) != "OK" {
 			t.Fatalf("Expected body 'OK', got %q", string(body))
+		}
+	})
+
+	// 7. Test Unexpected EOF / Body Truncation
+	t.Run("UnexpectedEOF_DataLimit", func(t *testing.T) {
+		client := aoni.NewClient(fast.NewClient())
+
+		toxic, err := proxy.AddToxic("limit_data_toxic", "limit_data", "downstream", 1.0, toxiproxy.Attributes{
+			"bytes": 5, // Cut connection before even headers finish
+		})
+		if err != nil {
+			t.Fatalf("Failed to add toxic: %v", err)
+		}
+		defer proxy.RemoveToxic(toxic.Name)
+
+		resp, err := client.Get(context.Background(), proxyURL)
+		if err != nil {
+			return // Expected behavior, connection closed early
+		}
+
+		_, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err == nil {
+			t.Fatal("Expected error while reading truncated body, got none!")
+		}
+	})
+
+	// 8. Test Slow Read / Bandwidth Starvation (Thread Exhaustion protection)
+	t.Run("Bandwidth_Starvation", func(t *testing.T) {
+		client := aoni.NewClient(fast.NewClient())
+
+		// Limit bandwidth to 1 KB/s to trigger read timeouts
+		toxic, err := proxy.AddToxic("bandwidth_toxic", "bandwidth", "downstream", 1.0, toxiproxy.Attributes{
+			"rate": 1, // 1 KB/s
+		})
+		if err != nil {
+			t.Fatalf("Failed to add toxic: %v", err)
+		}
+		defer proxy.RemoveToxic(toxic.Name)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+
+		start := time.Now()
+		// Request the /huge endpoint to download 100KB at 1KB/s = 100s (should timeout in 1s)
+		resp, err := client.Get(ctx, proxyURL+"/huge")
+		
+		if err == nil {
+			_, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+		}
+
+		duration := time.Since(start)
+
+		if err == nil {
+			t.Fatal("Expected timeout error due to bandwidth starvation, got success")
+		}
+		
+		if duration > 2*time.Second {
+			t.Fatalf("Client hung for too long: %v", duration)
 		}
 	})
 }
