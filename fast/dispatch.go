@@ -95,12 +95,13 @@ func (c *Client) raceProtocolHandshakes(
 
 	results := make(chan raceResult, 2)
 	raceCtx, cancelRace := context.WithCancel(ctx)
+	remaining := 1 // H3 started
 
 	// Safe pool drainer preventing memory leak from late losing goroutine responses
 	defer func() {
 		cancelRace()
 
-		go drainLateRaceResponses(results)
+		go drainLateRaceResponses(results, remaining)
 	}()
 
 	go func() {
@@ -133,6 +134,8 @@ func (c *Client) raceProtocolHandshakes(
 
 	select {
 	case res := <-results:
+		remaining--
+
 		if res.isH3 && res.err == nil {
 			res.resp.CopyTo(fastResp)
 			h1engine.ReleaseResponse(res.resp)
@@ -141,6 +144,7 @@ func (c *Client) raceProtocolHandshakes(
 
 	case <-staggerTimer.C:
 		tcpStarted = true
+		remaining++
 
 		go func() {
 			tcpReq := h1engine.AcquireRequest()
@@ -167,11 +171,13 @@ func (c *Client) raceProtocolHandshakes(
 	}
 
 	var firstErr error
-	for range 2 {
+	for remaining > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err(), false
 		case res := <-results:
+			remaining--
+
 			if res.err == nil && res.resp != nil {
 				res.resp.CopyTo(fastResp)
 				h1engine.ReleaseResponse(res.resp)
@@ -187,7 +193,11 @@ func (c *Client) raceProtocolHandshakes(
 	return nil, firstErr, false
 }
 
-func drainLateRaceResponses(results chan raceResult) {
+func drainLateRaceResponses(results chan raceResult, remaining int) {
+	if remaining <= 0 {
+		return
+	}
+
 	timer := pool.AcquireTimer(500 * time.Millisecond)
 	defer func() {
 		if !timer.Stop() {
@@ -200,7 +210,7 @@ func drainLateRaceResponses(results chan raceResult) {
 		pool.ReleaseTimer(timer)
 	}()
 
-	for range 2 {
+	for range remaining {
 		select {
 		case res := <-results:
 			if res.resp != nil {

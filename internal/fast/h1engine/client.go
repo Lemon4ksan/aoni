@@ -1668,7 +1668,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		case c.RetryIfErr != nil:
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
 		default:
-			retry = isIdempotent(req)
+			retry = isIdempotent(req) || errors.Is(err, ErrStaleConnection)
 		}
 		if !retry {
 			break
@@ -1682,7 +1682,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	// Restore the original timeout.
 	req.timeout = timeout
 
-	if err == io.EOF {
+	if err == io.EOF || errors.Is(err, ErrStaleConnection) {
 		err = ErrConnectionClosed
 	}
 	return err
@@ -1894,6 +1894,10 @@ var (
 	// to broken server.
 	ErrConnectionClosed = errors.New("fasthttp: the server closed connection before returning the first response byte. " +
 		"make sure the server returns 'connection: close' response header before closing the connection")
+
+	// ErrStaleConnection is returned when a reused keep-alive connection was closed by the server
+	// before receiving any bytes of the response. This allows safe retries even for non-idempotent requests.
+	ErrStaleConnection = errors.New("fasthttp: stale connection")
 
 	// ErrConnPoolStrategyNotImpl is returned when HostClient.ConnPoolStrategy is not implement yet.
 	// If you see this error, then you need to check your HostClient configuration.
@@ -3544,6 +3548,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		hc.CloseConn(cc)
 		// Don't retry in case of ErrBodyTooLarge since we will just get the same again.
 		needRetry := err != ErrBodyTooLarge
+
+		var errNothing ErrNothingRead
+		if errors.As(err, &errNothing) && !cc.lastUseTime.IsZero() {
+			err = ErrStaleConnection
+		}
+
 		return needRetry, err
 	}
 

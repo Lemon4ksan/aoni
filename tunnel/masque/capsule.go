@@ -292,7 +292,7 @@ func EncodeAddressAssignCapsule(entries []AssignedAddress, b []byte) int {
 
 // DecodeAddressAssignPayload parses AssignedAddress entries from payload bytes into a new slice per RFC 9484 Section 4.7.1.
 func DecodeAddressAssignPayload(payload []byte) ([]AssignedAddress, error) {
-	entries := make([]AssignedAddress, 0, len(payload)/8)
+	entries := make([]AssignedAddress, 0)
 	return DecodeAddressAssignPayloadTo(payload, entries)
 }
 
@@ -412,7 +412,7 @@ func EncodeAddressRequestCapsule(entries []RequestedAddress, b []byte) (int, err
 
 // DecodeAddressRequestPayload parses RequestedAddress entries from payload bytes into a new slice per RFC 9484 Section 4.7.2.
 func DecodeAddressRequestPayload(payload []byte) ([]RequestedAddress, error) {
-	entries := make([]RequestedAddress, 0, len(payload)/8)
+	entries := make([]RequestedAddress, 0)
 	return DecodeAddressRequestPayloadTo(payload, entries)
 }
 
@@ -536,7 +536,7 @@ func EncodeRouteAdvertisementCapsule(ranges []IPAddressRange, b []byte) (int, er
 
 // DecodeRouteAdvertisementPayload parses IPAddressRange entries from payload bytes per RFC 9484 Section 4.7.3.
 func DecodeRouteAdvertisementPayload(payload []byte) ([]IPAddressRange, error) {
-	entries := make([]IPAddressRange, 0, len(payload)/10)
+	entries := make([]IPAddressRange, 0)
 	return DecodeRouteAdvertisementPayloadTo(payload, entries)
 }
 

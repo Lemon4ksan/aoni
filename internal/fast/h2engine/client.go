@@ -37,10 +37,10 @@ type ClientOpts struct {
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
 type Context struct {
-	Request       *h1engine.Request
-	Response      *h1engine.Response
-	Err           chan error
-	Trailers      map[string][]string
+	Request        *h1engine.Request
+	Response       *h1engine.Response
+	Err            chan error
+	Trailers       map[string][]string
 	StreamID       uint32
 	streamWindow   int32
 	streamRxWindow int32

@@ -736,16 +736,17 @@ func dialH3ExtendedConnect(
 }
 
 type wsH2Conn struct {
-	base        net.Conn
-	subprotocol string
-	framer      *http2.Framer
-	streamID    uint32
-	readBuf     bytes.Buffer
-	streamEnded bool
-	readMu      sync.Mutex
-	writeMu     sync.Mutex
-	closed      chan struct{}
-	once        sync.Once
+	base         net.Conn
+	subprotocol  string
+	framer       *http2.Framer
+	streamID     uint32
+	readBuf      bytes.Buffer
+	streamEnded  bool
+	unackedBytes uint32
+	readMu       sync.Mutex
+	writeMu      sync.Mutex
+	closed       chan struct{}
+	once         sync.Once
 }
 
 func (c *wsH2Conn) Subprotocol() string {
@@ -771,7 +772,19 @@ func (c *wsH2Conn) Read(b []byte) (int, error) {
 		}
 	}
 
-	return c.readBuf.Read(b)
+	n, err := c.readBuf.Read(b)
+	if n > 0 {
+		c.unackedBytes += uint32(n)
+		if c.unackedBytes >= 16384 {
+			c.writeMu.Lock()
+			_ = c.framer.WriteWindowUpdate(0, c.unackedBytes)
+			_ = c.framer.WriteWindowUpdate(c.streamID, c.unackedBytes)
+			c.writeMu.Unlock()
+			c.unackedBytes = 0
+		}
+	}
+
+	return n, err
 }
 
 func (c *wsH2Conn) handleH2Frame(frame http2.Frame) error {
@@ -800,18 +813,6 @@ func (c *wsH2Conn) handleH2DataFrame(f *http2.DataFrame) error {
 
 	if data := f.Data(); len(data) > 0 {
 		c.readBuf.Write(data)
-		c.writeMu.Lock()
-
-		err := c.framer.WriteWindowUpdate(0, uint32(len(data)))
-		if err == nil {
-			err = c.framer.WriteWindowUpdate(c.streamID, uint32(len(data)))
-		}
-
-		c.writeMu.Unlock()
-
-		if err != nil {
-			return err
-		}
 	}
 
 	if f.StreamEnded() {

@@ -1177,6 +1177,7 @@ func (c *Conn) updateServerWindow(inc int32) error {
 		if int64(old)+int64(inc) > int64(1<<31-1) {
 			return ErrWindowAboveLimits
 		}
+
 		if atomic.CompareAndSwapInt32(&c.serverWindow, old, old+inc) {
 			return nil
 		}
@@ -1195,6 +1196,7 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 		if int64(old)+int64(inc) > int64(1<<31-1) {
 			return ErrWindowAboveLimits
 		}
+
 		if atomic.CompareAndSwapInt32(&reqCtx.streamWindow, old, old+inc) {
 			return nil
 		}

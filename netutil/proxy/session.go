@@ -97,6 +97,7 @@ func (c *SessionCache) StdTLSSessionCache() tls.ClientSessionCache {
 func (c *SessionCache) SetProxyKey(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.currentKey = key
 }
 
@@ -111,6 +112,7 @@ func (c *SessionCache) CurrentProxyKey() string {
 func (c *SessionCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.utlsCaches = make(map[string]utls.ClientSessionCache)
 	c.stdCaches = make(map[string]tls.ClientSessionCache)
 }
@@ -158,6 +160,7 @@ func (a *stdTLSCacheAdapter) Get(serverName string) (*tls.ClientSessionState, bo
 	a.cache.mu.RLock()
 	key := a.cache.currentKey
 	a.cache.mu.RUnlock()
+
 	return a.cache.getStdCache(key).Get(serverName)
 }
 

@@ -257,7 +257,9 @@ func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Reques
 		proxyStr := cfg.ProxyAddr.String()
 
 		if cfg.SessionCache != nil {
-			if cloner, ok := cfg.SessionCache.(interface{ CloneWithProxy(string) fingerprint.SessionCache }); ok {
+			if cloner, ok := cfg.SessionCache.(interface {
+				CloneWithProxy(string) fingerprint.SessionCache
+			}); ok {
 				cfg.SessionCache = cloner.CloneWithProxy(proxyStr)
 			} else {
 				cfg.SessionCache.SetProxyKey(proxyStr)
