@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/codec/compress/gzip"
-	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
@@ -627,23 +626,6 @@ func TestDecodeTo_And_DecodeResult(t *testing.T) {
 		itemLegacy, err := To[Item](strings.NewReader(payload), JSONDecoder)
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", itemLegacy.Name)
-	})
-
-	t.Run("Result_Success", func(t *testing.T) {
-		res := ToResult[Item](strings.NewReader(payload), JSONDecoder)
-		assert.True(t, res.IsSuccess())
-		item, err := res.Unwrap()
-		require.NoError(t, err)
-		assert.Equal(t, "Coffee", item.Name)
-
-		resJSON := generic.ToResult(JSON[Item](strings.NewReader(payload)))
-		assert.True(t, resJSON.IsSuccess())
-		assert.Equal(t, "Coffee", resJSON.MustValue().Name)
-	})
-
-	t.Run("Result_Failure", func(t *testing.T) {
-		res := ToResult[Item](strings.NewReader(`{invalid_json`), JSONDecoder)
-		assert.False(t, res.IsSuccess())
 	})
 }
 

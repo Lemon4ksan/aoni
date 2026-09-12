@@ -5,14 +5,13 @@
 package values
 
 import (
-	"encoding"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	furl "github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -21,15 +20,36 @@ import (
 	"github.com/lemon4ksan/aoni/internal/mapper"
 )
 
+// valueSink models any destination that receives encoded URL query parameters or form fields.
+type valueSink interface {
+	Set(key, value string)
+	Add(key, value string)
+}
+
+// queryStringSink buffers query parameter key-value pairs directly into [strings.Builder]
+// with zero heap allocations.
+type queryStringSink struct {
+	sb    *strings.Builder
+	first bool
+}
+
+func (s *queryStringSink) Set(key, value string) {
+	writeQueryKeyValuePair(s.sb, key, value, &s.first)
+}
+
+func (s *queryStringSink) Add(key, value string) {
+	writeQueryKeyValuePair(s.sb, key, value, &s.first)
+}
+
 // getStructSchema resolves cached struct field metadata schema for type t.
 func getStructSchema(t reflect.Type) *mapper.StructSchema {
 	return mapper.DefaultSchemaCache.GetSchema(t)
 }
 
-// fillValues populates target url.Values with query key-value pairs derived from struct value v.
-func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) error {
+// encodeStruct populates sink with query key-value pairs derived from struct value v according to schema s.
+func encodeStruct[S valueSink](sink S, s *mapper.StructSchema, v reflect.Value) error {
 	for i := range s.Fields {
-		if err := fillField(&s.Fields[i], v.Field(s.Fields[i].Index), values); err != nil {
+		if err := encodeField(sink, &s.Fields[i], v.Field(s.Fields[i].Index)); err != nil {
 			return err
 		}
 	}
@@ -37,11 +57,11 @@ func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) erro
 	return nil
 }
 
-// fillField serializes an individual struct field into url.Values based on tag rules and default values.
-func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+// encodeField serializes an individual struct field into sink based on tag rules and default values.
+func encodeField[S valueSink](sink S, f *mapper.FieldSchema, fieldValue reflect.Value) error {
 	if refkit.IsNil(fieldValue) {
 		if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
-			values.Set(f.Key, f.DefaultVal)
+			sink.Set(f.Key, f.DefaultVal)
 		}
 
 		return nil
@@ -54,63 +74,63 @@ func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Value
 
 	if (f.IsAnonymous || f.IsInline) && fieldValue.Kind() == reflect.Struct {
 		if f.SubSchema != nil {
-			return fillValues(f.SubSchema, fieldValue, values)
+			return encodeStruct(sink, f.SubSchema, fieldValue)
 		}
 
-		return fillValues(getStructSchema(fieldValue.Type()), fieldValue, values)
+		return encodeStruct(sink, getStructSchema(fieldValue.Type()), fieldValue)
 	}
 
 	if f.IsIgnored || f.Key == "" || f.Key == "-" {
 		return nil
 	}
 
-	if shouldSkipZeroValue(f, fieldValue, values) {
+	if shouldSkipZeroValue(f, fieldValue, sink) {
 		return nil
 	}
 
-	return serializeValue(f, fieldValue, values)
+	return serializeValue(sink, f, fieldValue)
 }
 
 // shouldSkipZeroValue checks whether a zero-value field should be omitted or assigned its default value.
-func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) bool {
+func shouldSkipZeroValue[S valueSink](f *mapper.FieldSchema, fieldValue reflect.Value, sink S) bool {
 	if !refkit.IsZero(fieldValue) {
 		return false
 	}
 
 	if f.DefaultVal != "" {
-		values.Set(f.Key, f.DefaultVal)
+		sink.Set(f.Key, f.DefaultVal)
 		return true
 	}
 
 	return f.OmitEmpty
 }
 
-// serializeValue converts a concrete field value into its string representation and sets it in values.
-func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+// serializeValue converts a concrete field value into its string representation and registers it in sink.
+func serializeValue[S valueSink](sink S, f *mapper.FieldSchema, fieldValue reflect.Value) error {
 	switch fieldValue.Kind() {
 	case reflect.String:
 		if fieldValue.Type().PkgPath() == "" {
-			values.Set(f.Key, fieldValue.String())
+			sink.Set(f.Key, fieldValue.String())
 			return nil
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if fieldValue.Type().PkgPath() == "" {
-			values.Set(f.Key, strconv.FormatInt(fieldValue.Int(), 10))
+			sink.Set(f.Key, strconv.FormatInt(fieldValue.Int(), 10))
 			return nil
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		if fieldValue.Type().PkgPath() == "" {
-			values.Set(f.Key, strconv.FormatUint(fieldValue.Uint(), 10))
+			sink.Set(f.Key, strconv.FormatUint(fieldValue.Uint(), 10))
 			return nil
 		}
 	case reflect.Bool:
 		if fieldValue.Type().PkgPath() == "" {
-			values.Set(f.Key, strconv.FormatBool(fieldValue.Bool()))
+			sink.Set(f.Key, strconv.FormatBool(fieldValue.Bool()))
 			return nil
 		}
 	case reflect.Float32, reflect.Float64:
 		if fieldValue.Type().PkgPath() == "" {
-			values.Set(f.Key, strconv.FormatFloat(fieldValue.Float(), 'f', -1, 64))
+			sink.Set(f.Key, strconv.FormatFloat(fieldValue.Float(), 'f', -1, 64))
 			return nil
 		}
 	}
@@ -129,18 +149,18 @@ func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.Key, bytesconv.B2S(b))
+		sink.Set(f.Key, bytesconv.B2S(b))
 
 		return nil
 	}
 
-	if hasTextOrStringerRepresentation(fieldValue) {
-		str, err := toString(fieldValue)
+	if refkit.ValueHasTextRepresentation(fieldValue) {
+		str, err := refkit.ValueToString(fieldValue)
 		if err != nil {
 			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.Key, str)
+		sink.Set(f.Key, str)
 
 		return nil
 	}
@@ -151,50 +171,50 @@ func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.Key, bytesconv.B2S(b))
+		sink.Set(f.Key, bytesconv.B2S(b))
 
 		return nil
 	}
 
 	if fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Array {
-		return serializeSlice(f, fieldValue, values)
+		return encodeSlice(sink, f, fieldValue)
 	}
 
-	str, err := toString(fieldValue)
+	str, err := refkit.ValueToString(fieldValue)
 	if err != nil {
-		return &ValueError{Field: f.Name, Err: err}
+		return &ValueError{Field: f.Name, Err: ErrUnsupportedType}
 	}
 
-	values.Set(f.Key, str)
+	sink.Set(f.Key, str)
 
 	return nil
 }
 
-// serializeSlice serializes a slice or array field into multiple query parameter entries.
-func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+// encodeSlice serializes a slice or array field into sink.
+func encodeSlice[S valueSink](sink S, f *mapper.FieldSchema, fieldValue reflect.Value) error {
 	if f.HasComma || f.HasSpace || f.HasPipe {
-		return serializeDelimitedSlice(f, fieldValue, values)
+		return encodeDelimitedSlice(sink, f, fieldValue)
 	}
 
 	for j := range fieldValue.Len() {
-		val := derefPointer(fieldValue.Index(j))
+		val := refkit.DerefPointer(fieldValue.Index(j))
 		if !val.IsValid() {
 			continue
 		}
 
-		strValue, err := toString(val)
+		strValue, err := refkit.ValueToString(val)
 		if err != nil {
-			return &ValueError{Field: f.Name, Index: j, Err: err}
+			return &ValueError{Field: f.Name, Index: j, Err: ErrUnsupportedType}
 		}
 
-		values.Add(f.Key, strValue)
+		sink.Add(f.Key, strValue)
 	}
 
 	return nil
 }
 
-// serializeDelimitedSlice joins slice element values with a configured delimiter (comma, space, or pipe).
-func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+// encodeDelimitedSlice joins slice elements with configured delimiter (comma, space, or pipe) and records in sink.
+func encodeDelimitedSlice[S valueSink](sink S, f *mapper.FieldSchema, fieldValue reflect.Value) error {
 	sep := ","
 	switch {
 	case f.HasSpace:
@@ -205,14 +225,14 @@ func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, va
 
 	var sb strings.Builder
 	for j := range fieldValue.Len() {
-		val := derefPointer(fieldValue.Index(j))
+		val := refkit.DerefPointer(fieldValue.Index(j))
 		if !val.IsValid() {
 			continue
 		}
 
-		str, err := toString(val)
+		str, err := refkit.ValueToString(val)
 		if err != nil {
-			return &ValueError{Field: f.Name, Index: j, Err: err}
+			return &ValueError{Field: f.Name, Index: j, Err: ErrUnsupportedType}
 		}
 
 		if j > 0 {
@@ -222,7 +242,43 @@ func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, va
 		sb.WriteString(str)
 	}
 
-	values.Set(f.Key, sb.String())
+	sink.Set(f.Key, sb.String())
+
+	return nil
+}
+
+// encodeMap iterates over map key-value pairs and writes them to sink.
+func encodeMap[S valueSink](sink S, val reflect.Value) error {
+	iter := val.MapRange()
+	for iter.Next() {
+		keyStr, err := refkit.ValueToString(iter.Key())
+		if err != nil {
+			return &ValueError{Type: "map", Err: ErrUnsupportedType}
+		}
+
+		elemVal := refkit.DerefValue(iter.Value())
+		if !elemVal.IsValid() {
+			continue
+		}
+
+		if elemVal.Kind() == reflect.Slice || elemVal.Kind() == reflect.Array {
+			for j := range elemVal.Len() {
+				valStr, err := refkit.ValueToString(elemVal.Index(j))
+				if err != nil {
+					return &ValueError{Field: keyStr, Index: j, Err: ErrUnsupportedType}
+				}
+
+				sink.Add(keyStr, valStr)
+			}
+		} else {
+			valStr, err := refkit.ValueToString(elemVal)
+			if err != nil {
+				return &ValueError{Field: keyStr, Err: ErrUnsupportedType}
+			}
+
+			sink.Add(keyStr, valStr)
+		}
+	}
 
 	return nil
 }
@@ -236,9 +292,9 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 
 	var tmpBuf [64]byte
 
-	buf := furl.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf := urlkit.AppendQueryEscapeString(tmpBuf[:0], key)
 	buf = append(buf, '=')
-	buf = furl.AppendQueryEscapeString(buf, value)
+	buf = urlkit.AppendQueryEscapeString(buf, value)
 
 	sb.Write(buf)
 
@@ -271,73 +327,4 @@ func protoToValues(pm proto.Message) (url.Values, error) {
 	}
 
 	return res, nil
-}
-
-// derefPointer unwraps nested pointer values until reaching a concrete value or nil pointer.
-func derefPointer(v reflect.Value) reflect.Value {
-	for v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return reflect.Value{}
-		}
-
-		v = v.Elem()
-	}
-
-	return v
-}
-
-// hasTextOrStringerRepresentation reports whether value v implements encoding.TextMarshaler or fmt.Stringer.
-func hasTextOrStringerRepresentation(v reflect.Value) bool {
-	if !v.CanInterface() {
-		return false
-	}
-
-	val := v.Interface()
-	_, hasText := val.(encoding.TextMarshaler)
-	_, hasStringer := val.(interface{ String() string })
-
-	return hasText || hasStringer
-}
-
-// toString formats primitive values, TextMarshalers, and Stringers into a string.
-func toString(v reflect.Value) (string, error) {
-	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return "", nil
-		}
-
-		v = v.Elem()
-	}
-
-	switch v.Kind() {
-	case reflect.String:
-		return v.String(), nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(v.Int(), 10), nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(v.Uint(), 10), nil
-	case reflect.Bool:
-		return strconv.FormatBool(v.Bool()), nil
-	case reflect.Float32, reflect.Float64:
-		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
-	}
-
-	if v.CanInterface() {
-		val := v.Interface()
-
-		if tm, ok := val.(encoding.TextMarshaler); ok {
-			b, err := tm.MarshalText()
-			if err != nil {
-				return "", err
-			}
-
-			return bytesconv.B2S(b), nil
-		}
-
-		if s, ok := val.(interface{ String() string }); ok {
-			return s.String(), nil
-		}
-	}
-
-	return "", ErrUnsupportedType
 }

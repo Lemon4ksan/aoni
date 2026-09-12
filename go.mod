@@ -3,18 +3,19 @@ module github.com/lemon4ksan/aoni
 go 1.27.0
 
 require (
-	github.com/lemon4ksan/foundation v0.0.0-20260910154509-e8ac18a42e81
+	github.com/Shopify/toxiproxy/v2 v2.12.0
+	github.com/lemon4ksan/foundation v0.0.0-20260912143841-ae415cdfd72d
 	github.com/pkg/sftp v1.13.11
 	github.com/refraction-networking/utls v1.8.2
 	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
+	golang.org/x/tools v0.48.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/Shopify/toxiproxy/v2 v2.12.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/klauspost/compress v1.19.1 // indirect

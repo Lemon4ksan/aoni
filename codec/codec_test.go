@@ -63,17 +63,6 @@ func TestCodec_GenericHelpers(t *testing.T) {
 		assert.Equal(t, "raw byte payload", string(b))
 	})
 
-	t.Run("To and Result", func(t *testing.T) {
-		t.Parallel()
-
-		r := strings.NewReader(`{"name":"Dave","age":20}`)
-		res := codec.DecodeToResult[TestUser](r, codec.JSONDecoder)
-		require.True(t, res.IsSuccess())
-		val, err := res.Unwrap()
-		require.NoError(t, err)
-		assert.Equal(t, "Dave", val.Name)
-	})
-
 	t.Run("Result with generic.FromResult", func(t *testing.T) {
 		t.Parallel()
 

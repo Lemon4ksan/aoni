@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 
-	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -131,11 +130,6 @@ var (
 // DecodeTo unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
 func DecodeTo[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
-}
-
-// DecodeToResult unmarshals the response stream from reader into a [generic.Result].
-func DecodeToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
-	return decode.ToResult[T](reader, decoder)
 }
 
 // Payload decodes rawBody into target based on contentType using auto-matched or default decoders.

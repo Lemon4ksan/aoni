@@ -38,11 +38,15 @@ func Encode(v any) (url.Values, error) {
 	}
 
 	var res url.Values
-	if val.Kind() == reflect.Struct {
+
+	switch val.Kind() {
+	case reflect.Struct:
 		s := getStructSchema(val.Type())
 		res = make(url.Values, len(s.Fields))
-	} else {
+	case reflect.Map:
 		res = make(url.Values, val.Len())
+	default:
+		return nil, ErrUnsupportedType
 	}
 
 	if err := EncodeInto(res, v); err != nil {
@@ -74,38 +78,7 @@ func EncodeInto(values url.Values, v any) error {
 	}
 
 	if val.Kind() == reflect.Map {
-		iter := val.MapRange()
-		for iter.Next() {
-			keyStr, err := toString(iter.Key())
-			if err != nil {
-				return err
-			}
-
-			elemVal := refkit.DerefValue(iter.Value())
-			if !elemVal.IsValid() {
-				continue
-			}
-
-			if elemVal.Kind() == reflect.Slice || elemVal.Kind() == reflect.Array {
-				for j := range elemVal.Len() {
-					valStr, err := toString(elemVal.Index(j))
-					if err != nil {
-						return err
-					}
-
-					values.Add(keyStr, valStr)
-				}
-			} else {
-				valStr, err := toString(elemVal)
-				if err != nil {
-					return err
-				}
-
-				values.Add(keyStr, valStr)
-			}
-		}
-
-		return nil
+		return encodeMap(values, val)
 	}
 
 	if val.Kind() != reflect.Struct {
@@ -114,7 +87,7 @@ func EncodeInto(values url.Values, v any) error {
 
 	s := getStructSchema(val.Type())
 
-	return fillValues(s, val, values)
+	return encodeStruct(values, s, val)
 }
 
 // EncodeQueryString serializes structure or map fields into a URL query string without intermediate allocations (RFC 3986 §3.4).
@@ -135,13 +108,9 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 		return nil
 	}
 
-	val := reflect.ValueOf(v)
-	for val.Kind() == reflect.Pointer {
-		if val.IsNil() {
-			return nil
-		}
-
-		val = val.Elem()
+	val := refkit.DerefValue(reflect.ValueOf(v))
+	if !val.IsValid() {
+		return nil
 	}
 
 	if val.Kind() != reflect.Struct {
@@ -163,98 +132,9 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 	}
 
 	s := getStructSchema(val.Type())
-	first := sb.Len() == 0
+	sink := &queryStringSink{sb: sb, first: sb.Len() == 0}
 
-	for i := range s.Fields {
-		f := &s.Fields[i]
-		fieldVal := val.Field(f.Index)
-
-		if fieldVal.Kind() == reflect.Pointer {
-			if fieldVal.IsNil() {
-				if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
-					writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
-				}
-
-				continue
-			}
-
-			fieldVal = fieldVal.Elem()
-		}
-
-		if f.IsIgnored || f.Key == "" || f.Key == "-" {
-			continue
-		}
-
-		if fieldVal.IsZero() {
-			if f.DefaultVal != "" {
-				writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
-				continue
-			}
-
-			if f.OmitEmpty {
-				continue
-			}
-		}
-
-		if fieldVal.Kind() == reflect.Slice || fieldVal.Kind() == reflect.Array {
-			if f.HasComma || f.HasSpace || f.HasPipe {
-				sep := ","
-				switch {
-				case f.HasSpace:
-					sep = " "
-				case f.HasPipe:
-					sep = "|"
-				}
-
-				var sliceSb strings.Builder
-
-				for j := range fieldVal.Len() {
-					elem := derefPointer(fieldVal.Index(j))
-					if !elem.IsValid() {
-						continue
-					}
-
-					str, err := toString(elem)
-					if err != nil {
-						return &ValueError{Field: f.Name, Index: j, Err: err}
-					}
-
-					if j > 0 {
-						sliceSb.WriteString(sep)
-					}
-
-					sliceSb.WriteString(str)
-				}
-
-				writeQueryKeyValuePair(sb, f.Key, sliceSb.String(), &first)
-			} else {
-				for j := range fieldVal.Len() {
-					elem := derefPointer(fieldVal.Index(j))
-					if !elem.IsValid() {
-						continue
-					}
-
-					str, err := toString(elem)
-					if err != nil {
-						return &ValueError{Field: f.Name, Index: j, Err: err}
-					}
-
-					writeQueryKeyValuePair(sb, f.Key, str, &first)
-				}
-			}
-
-			continue
-		}
-
-		strVal, err := toString(fieldVal)
-		if err != nil {
-			return &ValueError{Field: f.Name, Err: err}
-		}
-
-		writeQueryKeyValuePair(sb, f.Key, strVal, &first)
-	}
-
-	return nil
+	return encodeStruct(sink, s, val)
 }
 
 // StructToQueryString serializes structure v into an RFC 3986 §3.4 URL query parameter string.

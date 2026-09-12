@@ -302,3 +302,94 @@ func TestEncode_SliceFormats_And_TextMarshaler(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a,b,c", targetVals["comma"][0])
 }
+
+func TestEncodeQueryString_AdvancedFeatures(t *testing.T) {
+	t.Parallel()
+
+	type Filter struct {
+		Min int `query:"min"`
+		Max int `query:"max"`
+	}
+
+	type NestedData struct {
+		Key string `json:"k"`
+	}
+
+	type SearchRequest struct {
+		Query  string         `query:"q"`
+		Filter Filter         `query:",inline"`
+		Data   NestedData     `query:"data"`
+		Meta   *typepb.Option `query:"meta"`
+	}
+
+	req := SearchRequest{
+		Query:  "aoni",
+		Filter: Filter{Min: 10, Max: 100},
+		Data:   NestedData{Key: "val"},
+		Meta:   &typepb.Option{Name: "opt"},
+	}
+
+	var sb strings.Builder
+
+	err := EncodeQueryString(req, &sb)
+	require.NoError(t, err)
+
+	qStr := sb.String()
+	assert.Contains(t, qStr, "q=aoni")
+	assert.Contains(t, qStr, "min=10")
+	assert.Contains(t, qStr, "max=100")
+	assert.Contains(t, qStr, "data=%7B%22k%22%3A%22val%22%7D")
+	assert.Contains(t, qStr, "meta=%7B%22name%22%3A%22opt%22%7D")
+}
+
+func BenchmarkEncode(b *testing.B) {
+	type BenchParams struct {
+		Term  string `query:"q"`
+		Page  int    `query:"page"`
+		Sort  string `query:"sort,omitempty"`
+		Limit int    `query:"limit"          default:"20"`
+	}
+
+	p := BenchParams{
+		Term: "test search",
+		Page: 2,
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for range b.N {
+		_, err := Encode(p)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEncodeQueryString(b *testing.B) {
+	type BenchParams struct {
+		Term  string `query:"q"`
+		Page  int    `query:"page"`
+		Sort  string `query:"sort,omitempty"`
+		Limit int    `query:"limit"          default:"20"`
+	}
+
+	p := BenchParams{
+		Term: "test search",
+		Page: 2,
+	}
+
+	var sb strings.Builder
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for range b.N {
+		sb.Reset()
+
+		err := EncodeQueryString(p, &sb)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

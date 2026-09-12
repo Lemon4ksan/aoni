@@ -69,16 +69,10 @@ type Decoder interface {
 func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	var target T
 	if err := decoder.Decode(reader, &target); err != nil {
-		var zero T
-		return zero, err
+		return generic.Zero[T](), err
 	}
 
 	return target, nil
-}
-
-// ToResult decodes the payload from reader using decoder into a [generic.Result].
-func ToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
-	return generic.ToResult(To[T](reader, decoder))
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.

@@ -5,9 +5,9 @@
 package values
 
 import (
-	"reflect"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	fvalues "github.com/lemon4ksan/foundation/types/values"
 )
@@ -48,7 +48,7 @@ func (cs CommaSlice[T]) MarshalText() ([]byte, error) {
 			sb.WriteByte(',')
 		}
 
-		str, err := toString(reflect.ValueOf(item))
+		str, err := refkit.ToString(item)
 		if err != nil {
 			return nil, &ValueError{Index: i, Err: err}
 		}
