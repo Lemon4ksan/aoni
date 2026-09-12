@@ -162,12 +162,10 @@ func TestFastClient_TelemetryParity(t *testing.T) {
 
 	client := fast.NewClient(
 		option.WithBaseURL("https://api.example.com"),
-		option.WithChrome(),
 	)
 	defer client.CloseIdleConnections()
 
 	logVal := client.LogValue()
 	assert.Equal(t, "fasthttp", logVal.Group()[0].Value.String())
 	assert.Equal(t, "https://api.example.com/", logVal.Group()[1].Value.String())
-	assert.Equal(t, aoni.BrowserChrome.String(), logVal.Group()[2].Value.String())
 }

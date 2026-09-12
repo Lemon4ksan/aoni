@@ -21,7 +21,7 @@ func TestPipeline_CompressionDictionaryLifecycle(t *testing.T) {
 	dictStore := dict.NewStore()
 	pipe := pipeline.New(pipeline.ClientDefaults{
 		DictionaryStore: dictStore,
-	}, pipeline.ClientFingerprint{})
+	})
 
 	schemaDict := []byte(`{"fields":["id","name","email","role"]}`)
 	schemaHash := sha256.Sum256(schemaDict)

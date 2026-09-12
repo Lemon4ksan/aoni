@@ -6,13 +6,12 @@ package fast
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
-
-	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
@@ -60,11 +59,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 }
 
 func (c *Client) isTLSEnabled() bool {
-	f := c.cfg.Fingerprint
-
-	return f.BrowserID != aoni.BrowserNone ||
-		f.TLSClientHelloID != nil ||
-		f.TLSClientHelloSpecProvider != nil
+	return false
 }
 
 // DialTLS establishes an encrypted L7 TLS or uTLS connection over an L4 TCP transport.
@@ -73,8 +68,11 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 	dialer := transport.NewUniversalDialer()
 
 	dialCfg := c.buildDialConfig(ctx)
-	if len(dialCfg.ALPNOverride) == 0 {
-		dialCfg.ALPNOverride = []string{"http/1.1"}
+	if dialCfg.BaseTLSConfig == nil {
+		dialCfg.BaseTLSConfig = &tls.Config{}
+	}
+	if len(dialCfg.BaseTLSConfig.NextProtos) == 0 {
+		dialCfg.BaseTLSConfig.NextProtos = []string{"http/1.1"}
 	}
 
 	return dialer.DialTLSContext(ctx, network, addr, dialCfg)
@@ -89,7 +87,10 @@ func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.
 func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
-	dialCfg.ALPNOverride = []string{"h2", "http/1.1"}
+	if dialCfg.BaseTLSConfig == nil {
+		dialCfg.BaseTLSConfig = &tls.Config{}
+	}
+	dialCfg.BaseTLSConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	return dialer.DialH2(ctx, addr, dialCfg)
 }
@@ -102,24 +103,6 @@ func (c *Client) TrackHTTPSTarget(addr string) {
 // IsHTTPSTarget reports whether addr has been tracked as an active HTTPS target.
 func (c *Client) IsHTTPSTarget(addr string) bool {
 	return c.activeTargets.IsTracked(addr)
-}
-
-func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.cfg.Fingerprint
-	if f.TLSClientHelloID != nil {
-		return f.TLSClientHelloID
-	}
-
-	switch f.BrowserID {
-	case aoni.BrowserChrome:
-		return &utls.HelloChrome_Auto
-	case aoni.BrowserFirefox:
-		return &utls.HelloFirefox_Auto
-	case aoni.BrowserSafari:
-		return &utls.HelloSafari_Auto
-	default:
-		return nil
-	}
 }
 
 // DialTLSForWS establishes an encrypted TLS socket connection for WebSockets using active uTLS profiles.
@@ -136,14 +119,16 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	reqCfg := aoni.GetRequestConfig(ctx)
 
 	cfg := c.cfg.BuildDialConfig(ctx)
-	cfg.HelloID = c.resolveHelloID()
 	cfg.InterfaceName = c.cfg.Network.InterfaceName
 	cfg.SocketMark = c.cfg.Network.SocketMark
 
 	cfg.ApplyRequestOverrides(reqCfg)
 
-	if len(cfg.ALPNOverride) == 0 {
-		cfg.ALPNOverride = []string{"http/1.1"}
+	if cfg.BaseTLSConfig == nil {
+		cfg.BaseTLSConfig = &tls.Config{}
+	}
+	if len(cfg.BaseTLSConfig.NextProtos) == 0 {
+		cfg.BaseTLSConfig.NextProtos = []string{"http/1.1"}
 	}
 
 	return cfg

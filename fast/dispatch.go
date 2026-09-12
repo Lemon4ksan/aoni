@@ -250,7 +250,7 @@ func (c *Client) tryDispatchH3(
 ) (map[string][]string, error, bool) {
 	h3 := c.getH3Client()
 
-	tr, err := h3.Do(ctx, fastReq, fastResp, c.cfg.Fingerprint.HeaderOrder)
+	tr, err := h3.Do(ctx, fastReq, fastResp, nil)
 	if err != nil {
 		if c.protocolState.altSvc != nil {
 			c.protocolState.altSvc.MarkH3Failed(host)
@@ -282,7 +282,7 @@ func (c *Client) tryDispatchH2(
 	h2Cl := c.getH2Client(host)
 
 	tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
-	if err != nil && c.cfg.Fingerprint.BrowserID != aoni.BrowserNone {
+	if err != nil && false {
 		c.removeH2Client(host)
 		fastResp.Reset()
 
@@ -385,7 +385,7 @@ func (c *Client) recoverSpecialStatus(
 	fastReq *h1engine.Request,
 	fastResp *h1engine.Response,
 ) (map[string][]string, error, bool) {
-	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
+	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	if reqCfg.SpecialRecoveryDone {
 		return nil, nil, false
 	}

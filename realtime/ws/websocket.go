@@ -9,7 +9,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -19,9 +18,9 @@ import (
 	"strings"
 	"time"
 
+	"crypto/tls"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
@@ -407,7 +406,7 @@ func getNegotiatedProtocol(conn net.Conn) string {
 	}
 
 	type utlsStateGetter interface {
-		ConnectionState() utls.ConnectionState
+		ConnectionState() tls.ConnectionState
 	}
 	if cs, ok := conn.(utlsStateGetter); ok {
 		return cs.ConnectionState().NegotiatedProtocol

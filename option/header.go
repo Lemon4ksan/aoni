@@ -5,7 +5,6 @@
 package option
 
 import (
-	"crypto"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -18,8 +17,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/netutil/dpop"
-	"github.com/lemon4ksan/aoni/netutil/httpsig"
 	"github.com/lemon4ksan/aoni/netutil/priority"
 	"github.com/lemon4ksan/aoni/netutil/secret"
 )
@@ -173,13 +170,6 @@ func WithUserAgent(ua string) aoni.ClientOption {
 	}
 }
 
-// WithUARotationProfiles registers a slice of browser profiles for automated per-request User-Agent rotation.
-func WithUARotationProfiles(profiles []aoni.BrowserProfile) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.UARotationProfiles = profiles
-	}
-}
-
 // WithOrigin sets a static default Origin header field.
 func WithOrigin(origin string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -251,32 +241,6 @@ func WithDigestAuth(username, password string) aoni.ClientOption {
 			Username: username,
 			Password: password,
 		}
-	}
-}
-
-// WithHTTPSignature applies an RFC 9421 HTTP Message Signature to every outbound request.
-//
-// Cryptographically signs specified headers, method, path, and body digest using asymmetric or symmetric keys.
-//
-// # RFC Compliance
-//
-// Conforms to RFC 9421 (HTTP Message Signatures).
-func WithHTTPSignature(sigCfg httpsig.SignConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithHTTPSignature(sigCfg))
-	}
-}
-
-// WithDPoPToken sets a default OAuth 2.0 DPoP-bound access token (RFC 9449 §7.1).
-//
-// Generates and attaches a fresh DPoP Proof JWT signed with privKey for every request.
-//
-// # RFC Compliance
-//
-// Conforms to RFC 9449 (OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer).
-func WithDPoPToken(accessToken string, privKey crypto.PrivateKey, opts ...dpop.ProofOptions) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithDPoPToken(accessToken, privKey, opts...))
 	}
 }
 

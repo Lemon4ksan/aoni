@@ -290,8 +290,6 @@ func shouldInjectChaosError(rate float64) bool {
 // isFatalError determines if err is non-recoverable and should terminate retries immediately.
 func isFatalError(err error) bool {
 	if errors.Is(err, netdial.ErrSSRFBlocked) ||
-		errors.Is(err, netdial.ErrCertificatePinning) ||
-		errors.Is(err, netdial.ErrUTLSHandshakeFailed) ||
 		errors.Is(err, context.Canceled) {
 		return true
 	}

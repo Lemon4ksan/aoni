@@ -13,7 +13,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -108,20 +107,6 @@ func WithBaseResponse(provider func() aoni.BaseResponse) aoni.ClientOption {
 func WithInspector(inspector telemetry.TrafficInspector) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Inspector = inspector
-	}
-}
-
-// WithChallengeDetector registers a custom detector to identify bot challenge and WAF interception responses.
-func WithChallengeDetector(detector resiliency.ChallengeDetector) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.ChallengeDetector = detector
-	}
-}
-
-// WithChallengeSolver registers an automated solver for completing WAF challenges (e.g. Cloudflare Turnstile, Privacy Pass).
-func WithChallengeSolver(solver resiliency.ChallengeSolver) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.ChallengeSolver = solver
 	}
 }
 
@@ -245,17 +230,6 @@ func WithExperimental(flags ...ExperimentalFlag) aoni.ClientOption {
 		for _, f := range flags {
 			cfg.Network.ExperimentalFlags |= f
 		}
-	}
-}
-
-// WithCPUAffinity locks client worker OS threads to designated CPU core indices.
-//
-// Deprecated: This option has no effect. Use [sys.LockGoroutineToCore] directly from
-// the goroutine you intend to pin.
-func WithCPUAffinity(cores ...int) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		//nolint:staticcheck // deprecated field assignment kept for backward compatibility
-		cfg.Network.CPUAffinityCores = append(cfg.Network.CPUAffinityCores, cores...)
 	}
 }
 

@@ -7,14 +7,12 @@ package allocs_test
 import (
 	"bytes"
 	"io"
-	"net/http"
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
 func TestZeroAlloc_WithBody(t *testing.T) {
@@ -24,20 +22,6 @@ func TestZeroAlloc_WithBody(t *testing.T) {
 		_ = mod.WithBody(reader)
 	})
 	assert.Equal(t, 0.0, allocs)
-}
-
-func TestZeroAlloc_Challenge(t *testing.T) {
-	b := []byte("<html><body>cloudflare challenge</body></html>")
-	resp := &http.Response{Body: io.NopCloser(bytes.NewReader(b))}
-
-	allocs := testing.AllocsPerRun(100, func() {
-		_, _ = challenge.DetectCloudflareChallenge(resp)
-	})
-
-	// DetectCloudflareChallenge replaces Body. But it shouldn't cause arbitrary heap escapes.
-	// Since we aren't completely isolating it, we just enforce an upper bound representing
-	// the intended struct allocation (multiReadCloser) which might allocate 1 if not pooled.
-	assert.True(t, allocs <= 20.0)
 }
 
 type dummy struct {

@@ -8,11 +8,9 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/digest"
 )
@@ -104,49 +102,7 @@ func newDefaultTransport() *http.Transport {
 	}
 }
 
-func (c *Client) reapplyH2Settings(tr *http.Transport) {
-	if tr == nil {
-		return
-	}
-
-	if len(c.cfg.Fingerprint.ALPN) > 0 &&
-		!slices.Contains(c.cfg.Fingerprint.ALPN, AlpnH2) &&
-		!slices.Contains(c.cfg.Fingerprint.ALPN, AlpnH3) {
-		tr.ForceAttemptHTTP2 = false
-		tr.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
-		return
-	}
-
-	needsH2 := c.cfg.Fingerprint.H2Configurer != nil ||
-		c.cfg.Fingerprint.H2Settings != nil ||
-		c.cfg.Fingerprint.BrowserID != BrowserNone ||
-		c.cfg.Fingerprint.TLSClientHelloID != nil ||
-		c.cfg.Fingerprint.TLSClientHelloSpecProvider != nil
-
-	if !needsH2 {
-		return
-	}
-
-	settings := h2.ChromeSettings
-	if c.cfg.Fingerprint.H2Settings != nil {
-		settings = *c.cfg.Fingerprint.H2Settings
-	} else if c.cfg.Fingerprint.BrowserID == BrowserFirefox {
-		settings = h2.FirefoxSettings
-	}
-
-	framed := h2.NewFramedTransport(tr, settings, c.cfg.Fingerprint.HeaderOrder...)
-	if c.cfg.Fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
-		_ = c.cfg.Fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
-	}
-
-	if httpClient, ok := c.engine.(*http.Client); ok {
-		if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
-			cjTrans.Next = framed
-		} else {
-			httpClient.Transport = framed
-		}
-	}
-}
+func (c *Client) reapplyH2Settings(tr *http.Transport) {}
 
 func applyEngineConfig(c *Client, eng EngineConfig) {
 	if eng.CustomEngine != nil {

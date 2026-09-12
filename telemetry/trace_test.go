@@ -24,7 +24,6 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -122,30 +121,6 @@ func TestTraceInfo_CertSummary(t *testing.T) {
 
 	slogVal := summary.LogValue()
 	assert.Equal(t, slog.KindGroup, slogVal.Kind())
-}
-
-func TestTraceJA4(t *testing.T) {
-	t.Parallel()
-
-	t.Run("generate_ja4h_fingerprint", func(t *testing.T) {
-		t.Parallel()
-
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/api", nil)
-		require.NoError(t, err)
-
-		req.Header.Set("User-Agent", "Mozilla/5.0")
-		req.Header.Set("Accept-Language", "en-US")
-		req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})
-
-		var traceInfo telemetry.TraceInfo
-
-		m := mod.WithTraceJA4(&traceInfo)
-		m.ApplyStd(req)
-
-		require.NotNil(t, traceInfo.JA4)
-		assert.NotEmpty(t, traceInfo.JA4.JA4H)
-		assert.Contains(t, traceInfo.JA4.JA4H, "po11")
-	})
 }
 
 func TestTriggerGot1xxResponse(t *testing.T) {
@@ -312,6 +287,4 @@ func TestTraceInfo_OptionalHelpers(t *testing.T) {
 	tlsOpt := info.TLSDuration()
 	assert.False(t, tlsOpt.IsPresent())
 
-	ja4Opt := info.JA4Report()
-	assert.False(t, ja4Opt.IsPresent())
 }

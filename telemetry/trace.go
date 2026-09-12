@@ -16,7 +16,6 @@ import (
 	"net/textproto"
 	"slices"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +23,6 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
@@ -76,7 +74,6 @@ type TraceInfo struct {
 
 	RemoteAddr string
 	IsReused   bool
-	JA4        *ja4.Report
 
 	TLSState         *tls.ConnectionState
 	CertChain        *probe.CertChainInfo
@@ -114,10 +111,6 @@ func (t *TraceInfo) LogValue() slog.Value {
 
 	if t.Label != "" {
 		attrs = append(attrs, slog.String("label", t.Label))
-	}
-
-	if t.JA4 != nil {
-		attrs = append(attrs, slog.String("ja4", t.JA4.JA4))
 	}
 
 	if cert := t.CertSummary(); cert != nil {
@@ -256,65 +249,7 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 
 // ComputeJA4HFromRequest evaluates a JA4H HTTP client fingerprint from an [*http.Request].
 func ComputeJA4HFromRequest(req *http.Request) string {
-	if req == nil {
-		return ""
-	}
-
-	headers := make([]string, 0, len(req.Header))
-	hasCookie := false
-	hasReferer := false
-	acceptLanguage := ""
-
-	for name := range req.Header {
-		switch {
-		case bytesconv.EqualFoldASCII(name, "cookie"):
-			hasCookie = true
-		case bytesconv.EqualFoldASCII(name, "referer"):
-			hasReferer = true
-		case bytesconv.EqualFoldASCII(name, "accept-language"):
-			acceptLanguage = req.Header.Get(name)
-		default:
-			headers = append(headers, name)
-		}
-	}
-
-	var cookieNames, cookieValues []string
-	if hasCookie {
-		cookies := req.Cookies()
-
-		type kv struct {
-			name  string
-			value string
-		}
-
-		kvs := make([]kv, len(cookies))
-		for i, c := range cookies {
-			kvs[i] = kv{name: c.Name, value: c.Value}
-		}
-
-		slices.SortFunc(kvs, func(a, b kv) int {
-			return strings.Compare(a.name, b.name)
-		})
-
-		cookieNames = make([]string, len(kvs))
-		cookieValues = make([]string, len(kvs))
-
-		for i, item := range kvs {
-			cookieNames[i] = item.name
-			cookieValues[i] = item.value
-		}
-	}
-
-	return ja4.ComputeJA4H(
-		req.Method,
-		req.Proto,
-		headers,
-		hasCookie,
-		hasReferer,
-		acceptLanguage,
-		cookieNames,
-		cookieValues,
-	)
+	return ""
 }
 
 // TriggerGot1xxResponse notifies active httptrace ClientTrace hooks of intermediate 1xx responses (100, 102, 103).
@@ -361,13 +296,4 @@ func (t *TraceInfo) TLSDuration() generic.Optional[time.Duration] {
 	}
 
 	return generic.Some(t.TLSHandshake)
-}
-
-// JA4Report returns the JA4 report as an Optional.
-func (t *TraceInfo) JA4Report() generic.Optional[*ja4.Report] {
-	if t == nil || t.JA4 == nil {
-		return generic.None[*ja4.Report]()
-	}
-
-	return generic.Some(t.JA4)
 }

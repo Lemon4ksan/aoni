@@ -29,8 +29,7 @@ import (
 //  5. Telemetry & Inspection: Captures network traces, HAR records, and sends data to Inspector.
 //  6. Cleanup: Releases [Tx] memory back to the pool with zero allocations.
 type Pipeline[Req, Resp any] struct {
-	defaults    ClientDefaults
-	fingerprint ClientFingerprint
+	defaults ClientDefaults
 
 	_       cpu.CacheLinePad
 	counter uint32
@@ -41,21 +40,18 @@ type Pipeline[Req, Resp any] struct {
 type StdPipeline = Pipeline[*http.Request, *http.Response]
 
 // New instantiates a standard [StdPipeline] configured with the provided defaults and browser fingerprint settings.
-func New(defaults ClientDefaults, fingerprint ClientFingerprint) *StdPipeline {
+func New(defaults ClientDefaults) *StdPipeline {
 	return &StdPipeline{
-		defaults:    defaults,
-		fingerprint: fingerprint,
+		defaults: defaults,
 	}
 }
 
 // NewGeneric instantiates a generic [Pipeline] capable of operating on custom request/response models.
 func NewGeneric[Req, Resp any](
 	defaults ClientDefaults,
-	fingerprint ClientFingerprint,
 ) *Pipeline[Req, Resp] {
 	return &Pipeline[Req, Resp]{
-		defaults:    defaults,
-		fingerprint: fingerprint,
+		defaults: defaults,
 	}
 }
 
@@ -100,10 +96,6 @@ func (p *Pipeline[Req, Resp]) Execute(
 
 	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
 		p.captureInspector(req, resp)
-	}
-
-	if tx.JA4ReportStore != nil {
-		p.finalizeJA4Report(tx)
 	}
 
 	return resp, nil
@@ -210,8 +202,6 @@ func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 		return nil, p.enrichError(stdReq, err, traceInfo, time.Since(startTime))
 	}
 
-	p.finalizeJA4Report(tx)
-
 	return resp, nil
 }
 
@@ -251,29 +241,6 @@ func (p *Pipeline[Req, Resp]) executeCustomPhaseOrder(
 	}
 
 	return resp, nil
-}
-
-func (p *Pipeline[Req, Resp]) finalizeJA4Report(tx *Tx) {
-	if tx == nil || tx.JA4ReportStore == nil || tx.JA4ReportStore.Report == nil || tx.JA4ReportStore.Target == nil {
-		return
-	}
-
-	store := tx.JA4ReportStore
-	if store.Target.JA4 == nil {
-		store.Target.JA4 = store.Report
-	} else {
-		store.Target.JA4.JA4 = store.Report.JA4
-		store.Target.JA4.Protocol = store.Report.Protocol
-		store.Target.JA4.Version = store.Report.Version
-		store.Target.JA4.SNI = store.Report.SNI
-		store.Target.JA4.CipherCount = store.Report.CipherCount
-		store.Target.JA4.ExtCount = store.Report.ExtCount
-
-		store.Target.JA4.ALPN = store.Report.ALPN
-		if store.Report.JA4H != "" {
-			store.Target.JA4.JA4H = store.Report.JA4H
-		}
-	}
 }
 
 func (p *Pipeline[Req, Resp]) enrichError(

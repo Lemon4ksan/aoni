@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
@@ -149,7 +148,6 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	cfg.InterfaceName = c.cfg.Network.InterfaceName
 	cfg.SocketMark = c.cfg.Network.SocketMark
 	cfg.BaseTLSConfig = c.resolveBaseTLSConfig(ctx)
-	cfg.HelloID = c.resolveHelloID()
 	cfg.ApplyRequestOverrides(GetRequestConfig(ctx))
 
 	return cfg
@@ -164,24 +162,4 @@ func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
 	}
 
 	return TLSConfigWithOverride(ctx, base)
-}
-
-// resolveHelloID maps the active BrowserID preset (Chrome, Firefox, Safari) to its
-// corresponding uTLS HelloID auto-preset, or returns the explicitly set TLSClientHelloID.
-func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.cfg.Fingerprint
-	if f.TLSClientHelloID != nil {
-		return f.TLSClientHelloID
-	}
-
-	switch f.BrowserID {
-	case BrowserChrome:
-		return &utls.HelloChrome_Auto
-	case BrowserFirefox:
-		return &utls.HelloFirefox_Auto
-	case BrowserSafari:
-		return &utls.HelloSafari_Auto
-	default:
-		return nil
-	}
 }

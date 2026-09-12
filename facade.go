@@ -356,19 +356,6 @@ func WithBasicAuth(username, password string) RequestModifier {
 	return mod.WithBasicAuth(username, password)
 }
 
-// WithPKCE constructs a [RequestModifier] adding PKCE code_challenge and code_challenge_method
-// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
-// If method is omitted or empty, S256 is used by default.
-func WithPKCE(verifier string, method ...string) RequestModifier {
-	return mod.WithPKCE(verifier, method...)
-}
-
-// WithPKCEVerifier constructs a [RequestModifier] adding the code_verifier parameter
-// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
-func WithPKCEVerifier(verifier string) RequestModifier {
-	return mod.WithPKCEVerifier(verifier)
-}
-
 // WithTimeout constructs a [RequestModifier] attaching a deadline timeout to the request context.
 func WithTimeout(d time.Duration) RequestModifier {
 	return mod.WithTimeout(d)
@@ -501,27 +488,6 @@ func WithClientUserAgent(ua string) ClientOption {
 		}
 
 		cfg.Defaults.Headers.Set(header.UserAgent, ua)
-	}
-}
-
-// WithChrome returns a [ClientOption] setting the browser profile to Google Chrome.
-func WithChrome() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserChrome
-	}
-}
-
-// WithFirefox returns a [ClientOption] setting the browser profile to Mozilla Firefox.
-func WithFirefox() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserFirefox
-	}
-}
-
-// WithSafari returns a [ClientOption] setting the browser profile to Apple Safari.
-func WithSafari() ClientOption {
-	return func(cfg *Config) {
-		cfg.Fingerprint.BrowserID = BrowserSafari
 	}
 }
 

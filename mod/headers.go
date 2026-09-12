@@ -17,9 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/aoni/netutil/pkce"
 	"github.com/lemon4ksan/aoni/netutil/priority"
-	"github.com/lemon4ksan/aoni/netutil/privacypass"
 	"github.com/lemon4ksan/aoni/netutil/secret"
 )
 
@@ -212,43 +210,6 @@ func WithBasicAuth(username, password string) RequestModifier {
 // WithSecretBasicAuth injects Basic Authentication credentials with password protected by [secret.Secret].
 func WithSecretBasicAuth(username string, password secret.Secret[string]) RequestModifier {
 	return WithBasicAuth(username, password.Value())
-}
-
-// WithPKCE adds OAuth 2.0 PKCE code_challenge and code_challenge_method query parameters (RFC 7636).
-//
-// If method is omitted or empty, SHA-256 ("S256") is used by default.
-//
-// # RFC Compliance
-//
-// Conforms to RFC 7636 (Proof Key for Code Exchange by OAuth Public Clients).
-func WithPKCE(verifier string, method ...string) RequestModifier {
-	m := pkce.MethodS256
-	if len(method) > 0 && method[0] != "" {
-		m = method[0]
-	}
-
-	challenge, err := pkce.ComputeChallenge(verifier, m)
-	if err != nil {
-		challenge = verifier
-	}
-
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			req.AddQueryParam("code_challenge", challenge)
-			req.AddQueryParam("code_challenge_method", m)
-		},
-	}
-}
-
-// WithPKCEVerifier adds the OAuth 2.0 code_verifier parameter for token endpoint requests (RFC 7636 §4.5).
-func WithPKCEVerifier(verifier string) RequestModifier {
-	return RequestModifier{
-		Kind: core.ModCustom,
-		Fn: func(req Request) {
-			req.AddQueryParam("code_verifier", verifier)
-		},
-	}
 }
 
 // WithUserAgent overrides the standard User-Agent header field (RFC 9110 §10.1.5).
@@ -453,24 +414,6 @@ func WithHeadersIf(condition bool, headers map[string]string) RequestModifier {
 	}
 
 	return WithHeaders(headers)
-}
-
-// WithPrivateToken injects an RFC 9577 Privacy Pass authentication redemption header ("Authorization: PrivateToken token=...").
-//
-// # RFC Compliance
-//
-// Conforms to RFC 9577 (Privacy Pass HTTP Authentication Scheme).
-func WithPrivateToken(token string) RequestModifier {
-	if !strings.HasPrefix(token, privacypass.SchemePrivateToken) {
-		token = privacypass.SchemePrivateToken + " token=\"" + token + "\""
-	}
-
-	return WithHeader(privacypass.HeaderAuthorization, token)
-}
-
-// WithPrivateStateToken injects a W3C Private State Token header ("Sec-Private-State-Token").
-func WithPrivateStateToken(token string) RequestModifier {
-	return WithHeader(privacypass.HeaderSecPrivateStateToken, token)
 }
 
 // WithWebPushTTL sets the RFC 8030 WebPush message time-to-live retention duration header.

@@ -26,7 +26,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -176,10 +175,6 @@ func (h *Handler) checkHTML(buf *bufio.Reader) error {
 	lowerPeek := bytes.ToLower(peekBytes)
 	if !bytes.Contains(lowerPeek, []byte("<html")) && !bytes.Contains(lowerPeek, []byte("<!doctype html")) {
 		return nil
-	}
-
-	if requestutil.IsCloudflareChallengeBytes(lowerPeek) {
-		return challenge.ErrCloudflareDetected
 	}
 
 	return fmt.Errorf("%w: expected structured data but got HTML", core.ErrUnexpectedContentType)

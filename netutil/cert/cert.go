@@ -7,15 +7,14 @@ package cert
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
+	"crypto/tls"
 	"github.com/lemon4ksan/foundation/generic"
 	fcert "github.com/lemon4ksan/foundation/net/tls/cert"
-	utls "github.com/refraction-networking/utls"
 )
 
 // ErrUnknownCompressionAlgo indicates an unrecognized TLS certificate compression algorithm name.
@@ -46,14 +45,14 @@ func ParseCompressionAlgorithm(name string) (CompressionAlgorithm, error) {
 }
 
 // ToUTLS maps the compression algorithm to its corresponding uTLS representation.
-func ToUTLS(a CompressionAlgorithm) utls.CertCompressionAlgo {
+func ToUTLS(a CompressionAlgorithm) uint16 {
 	switch a {
 	case CertCompressionZlib:
-		return utls.CertCompressionZlib
+		return 0x0001
 	case CompressionZstd:
-		return utls.CertCompressionZstd
+		return 0x0003
 	default:
-		return utls.CertCompressionBrotli
+		return 0x0002
 	}
 }
 

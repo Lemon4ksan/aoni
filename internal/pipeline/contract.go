@@ -12,10 +12,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil/dict"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -49,9 +46,9 @@ const (
 )
 
 const (
-	PrepMask = FlagRotateUA | FlagDPIJitter | FlagRedact
+	PrepMask = FlagRedact
 
-	PostProcessMask = FlagDecompress | FlagValidate | FlagChallenge | FlagCache | FlagMultiRead
+	PostProcessMask = FlagDecompress | FlagValidate | FlagCache | FlagMultiRead
 )
 
 type Doer interface {
@@ -83,13 +80,6 @@ type PipelineConfig struct {
 
 func (p *PipelineConfig) BuildFlags() uint32 {
 	var flags uint32
-	if p.RotateUA {
-		flags |= FlagRotateUA
-	}
-
-	if p.DPIJitter != nil {
-		flags |= FlagDPIJitter
-	}
 
 	if p.Redact != nil {
 		flags |= FlagRedact
@@ -101,10 +91,6 @@ func (p *PipelineConfig) BuildFlags() uint32 {
 
 	if p.Validate {
 		flags |= FlagValidate
-	}
-
-	if p.Challenge {
-		flags |= FlagChallenge
 	}
 
 	if p.Cache != nil {
@@ -175,11 +161,6 @@ type CacheConfig struct {
 	CookieIndices []string
 }
 
-type JA4ReportStore struct {
-	Report *ja4.Report
-	Target *telemetry.TraceInfo
-}
-
 type CacheKey struct {
 	Method     string
 	URL        string
@@ -216,8 +197,6 @@ type ClientDefaults struct {
 	Inspector                    telemetry.TrafficInspector
 	ResponseValidator            func(*http.Response) error
 	SoftErrorDetectors           []func(*http.Response, []byte) error
-	ChallengeDetector            func(*http.Response) (bool, error)
-	ChallengeSolver              challenge.Solver
 	UARotationProfiles           []BrowserProfile
 	RefererState                 *RefererState
 	MaxResponseSize              int64
@@ -235,8 +214,4 @@ type BrowserProfile struct {
 
 type RefererState struct {
 	LastURL generic.Safe[string]
-}
-
-type ClientFingerprint struct {
-	PacketPadding *fingerprint.PaddingConfig
 }

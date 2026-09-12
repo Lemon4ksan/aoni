@@ -516,6 +516,18 @@ func TestGenericHelpersAndModifiers(t *testing.T) {
 		assert.Equal(t, "generic_proto", val.GetValue())
 	})
 
+	t.Run("decode_proto_direct", func(t *testing.T) {
+		t.Parallel()
+
+		data, _ := proto.Marshal(wrapperspb.String("direct_proto"))
+
+		var target wrapperspb.StringValue
+
+		err := DecodeProto(bytes.NewReader(data), &target)
+		require.NoError(t, err)
+		assert.Equal(t, "direct_proto", target.GetValue())
+	})
+
 	t.Run("grpcweb_generic_helper", func(t *testing.T) {
 		t.Parallel()
 

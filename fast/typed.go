@@ -5,91 +5,14 @@
 package fast
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
-
-	"github.com/lemon4ksan/foundation/net/http/header"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/grpc"
 	"github.com/lemon4ksan/aoni/mod"
 )
-
-// FastGRPCClient provides native, high-performance gRPC operations directly on [Client].
-type FastGRPCClient struct {
-	client *Client
-}
-
-// GRPC yields the gRPC sub-client bound to this fast client instance.
-func (c *Client) GRPC() *FastGRPCClient {
-	return &FastGRPCClient{client: c}
-}
-
-// R returns a pooled [aoni.RequestBuilder] bound to the fast engine adapter.
-func (c *Client) R() *aoni.RequestBuilder {
-	return aoni.NewClient(c).R()
-}
-
-// NewRequest returns a pooled [aoni.RequestBuilder] bound to the fast engine adapter.
-func (c *Client) NewRequest() *aoni.RequestBuilder {
-	return c.R()
-}
-
-// Invoke executes a high-performance gRPC unary call using the fast client engine without allocating *http.Response.
-func (g *FastGRPCClient) Invoke[Resp any](
-	ctx context.Context,
-	fullMethod string,
-	reqMsg proto.Message,
-	mods ...aoni.RequestModifier,
-) (*Resp, error) {
-	frameBytes, err := grpc.MarshalFrame(reqMsg, false)
-	if err != nil {
-		return nil, err
-	}
-
-	path := fullMethod
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-
-	req := NewRequest(nil)
-	defer req.Release()
-
-	req.SetContext(ctx)
-
-	result := new(Resp)
-
-	msg, ok := any(result).(proto.Message)
-	if !ok {
-		return nil, fmt.Errorf("aoni/fast: response type %T does not implement proto.Message", result)
-	}
-
-	req.SetMethod(http.MethodPost)
-	req.SetURL(path)
-	req.SetHeader(header.ContentType, header.MIMEApplicationGRPC)
-	req.SetHeader(header.TE, header.ValueTrailers)
-	req.SetBodyBytes(frameBytes)
-
-	mod.Apply(req, mods...)
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Close()
-
-	if _, err := grpc.UnmarshalFrame(bytes.NewReader(resp.BodyBytes()), msg); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
 
 // --- Raw Non-Generic HTTP Methods on *Client ---
 

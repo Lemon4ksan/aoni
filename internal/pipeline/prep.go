@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -25,8 +24,6 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil/dict"
@@ -52,20 +49,8 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 		stdReq = stageBeforeRequestHooks(p, stdReq, tx)
 	}
 
-	if p.fingerprint.PacketPadding != nil {
-		stdReq = stagePacketPadding(p, stdReq, tx)
-	}
-
 	if p.defaults.RefererAutomaton {
 		stdReq = stageRefererHeader(p, stdReq, tx)
-	}
-
-	if tx.Flags&FlagRotateUA != 0 {
-		stdReq = stageRotateUserAgent(p, stdReq, tx)
-	}
-
-	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
-		stdReq = stageDPIJitter(p, stdReq, tx)
 	}
 
 	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
@@ -73,7 +58,6 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 	}
 
 	stdReq = stageUploadProgress(p, stdReq, tx)
-	stdReq = stageJA4Report(p, stdReq, tx)
 	stdReq = stageAvailableDictionary(p, stdReq, tx)
 
 	return stdReq
@@ -141,14 +125,6 @@ func stageBeforeRequestHooks[Req, Resp any](p *Pipeline[Req, Resp], req *http.Re
 	return req
 }
 
-func stagePacketPadding[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
-	if p.fingerprint.PacketPadding != nil {
-		p.applyPacketPadding(req)
-	}
-
-	return req
-}
-
 func stageRefererHeader[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	if p.defaults.RefererAutomaton {
 		p.applyRefererHeader(req)
@@ -158,18 +134,6 @@ func stageRefererHeader[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request
 }
 
 func stageRotateUserAgent[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
-	if tx.Flags&FlagRotateUA != 0 {
-		p.rotateUserAgentAndHints(req)
-	}
-
-	return req
-}
-
-func stageDPIJitter[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
-	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
-		p.applyDPIJitter(req, tx.DPIJitter)
-	}
-
 	return req
 }
 
@@ -211,19 +175,6 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 	return req
 }
 
-func stageJA4Report[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
-	cfg := GetRequestConfig(req.Context())
-	if cfg != nil && cfg.JA4ReportStore != nil && cfg.JA4ReportStore.Target != nil {
-		if cfg.JA4ReportStore.Target.JA4 == nil {
-			cfg.JA4ReportStore.Target.JA4 = &ja4.Report{}
-		}
-
-		cfg.JA4ReportStore.Target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(req)
-	}
-
-	return req
-}
-
 func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Request) *http.Request {
 	ctx := stdReq.Context()
 
@@ -256,16 +207,6 @@ func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Reques
 	if cfg.ProxyAddr != nil {
 		proxyStr := cfg.ProxyAddr.String()
 
-		if cfg.SessionCache != nil {
-			if cloner, ok := cfg.SessionCache.(interface {
-				CloneWithProxy(string) fingerprint.SessionCache
-			}); ok {
-				cfg.SessionCache = cloner.CloneWithProxy(proxyStr)
-			} else {
-				cfg.SessionCache.SetProxyKey(proxyStr)
-			}
-		}
-
 		ctx = cookie.WithProxyAddress(ctx, proxyStr)
 	}
 
@@ -288,14 +229,6 @@ func (p *Pipeline[Req, Resp]) traceRequest(
 
 	case tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil:
 		traceInfo = &telemetry.TraceInfo{}
-
-		if tx.JA4ReportStore == nil {
-			tx.JA4ReportStore = &JA4ReportStore{Target: traceInfo}
-		} else {
-			tx.JA4ReportStore.Target = traceInfo
-		}
-
-		traceInfo.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(stdReq)}
 	}
 
 	if traceInfo == nil {
@@ -373,11 +306,10 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 	}
 
 	if u.Scheme == "https" {
-		utlsOpts := netdial.RTLSOptions{
-			ALPNOverride: []string{"h2", "http/1.1"},
-		}
+		tlsCfg := &tls.Config{ServerName: host, NextProtos: []string{"h2", "http/1.1"}}
+		uConn := tls.Client(conn, tlsCfg)
 
-		uConn, _, handshakeErr := netdial.HandshakeUTLS(dialCtx, conn, host, utlsOpts)
+		handshakeErr := uConn.HandshakeContext(dialCtx)
 		if handshakeErr != nil {
 			_ = conn.Close()
 			return
@@ -402,9 +334,15 @@ var defaultRedactHeaders = map[string]struct{}{
 func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
 	var headers map[string]struct{}
 	if len(redact.HeadersToRedact) > 0 {
-		headers = make(map[string]struct{}, len(redact.HeadersToRedact))
-		for _, h := range redact.HeadersToRedact {
-			headers[strings.ToLower(h)] = struct{}{}
+		if redact.Headers != nil && len(redact.Headers) == len(redact.HeadersToRedact) {
+			headers = redact.Headers
+		} else {
+			headers = make(map[string]struct{}, len(redact.HeadersToRedact))
+			for _, h := range redact.HeadersToRedact {
+				headers[strings.ToLower(h)] = struct{}{}
+			}
+
+			redact.Headers = headers
 		}
 	} else {
 		headers = defaultRedactHeaders
@@ -441,37 +379,6 @@ func (p *Pipeline[Req, Resp]) rotateUserAgentAndHints(req *http.Request) {
 
 	for k, v := range prof.ClientHints {
 		req.Header.Set(k, v)
-	}
-}
-
-func (p *Pipeline[Req, Resp]) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
-	delay := cfg.MinDelay
-	if cfg.MinDelay > 0 && cfg.MaxDelay >= cfg.MinDelay {
-		if delta := cfg.MaxDelay - cfg.MinDelay; delta > 0 {
-			delay = cfg.MinDelay + time.Duration(time.Now().UnixNano()%int64(delta))
-		}
-	}
-
-	if delay <= 0 {
-		return
-	}
-
-	if req.Body != nil && req.Body != http.NoBody {
-		req.Body = &iokit.JitterReader{
-			ReadCloser: req.Body,
-			Delay:      delay,
-		}
-
-		return
-	}
-
-	time.Sleep(delay)
-}
-
-func (p *Pipeline[Req, Resp]) applyPacketPadding(req *http.Request) {
-	if padding := fingerprint.GeneratePadding(*p.fingerprint.PacketPadding); len(padding) > 0 {
-		headerName := fingerprint.PaddingHeaderName(*p.fingerprint.PacketPadding)
-		req.Header.Set(headerName, hex.EncodeToString(padding))
 	}
 }
 

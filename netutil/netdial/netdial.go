@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 
-	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
@@ -117,7 +116,6 @@ type DialOptions struct {
 	StackDriver          RawStackDriver
 	L2Device             L2Device
 	SourceRotator        *ip.SourceIPRotator
-	P0fSignature         *p0f.Signature
 	SocketController     SocketController
 	FragmentConfig       *fragment.Config
 	InterfaceName        string
@@ -133,7 +131,7 @@ type DialOptions struct {
 }
 
 // DialL4 establishes a low-latency L4 socket connection applying DNS resolution, SSRF guards,
-// IPv6 subnet rotation, p0f TCP/IP stack spoofing, and optional TCP packet fragmentation.
+// IPv6 subnet rotation, and optional TCP packet fragmentation.
 //
 // Target addr must be formatted as "host:port", "host", or "unix:///path/to/socket".
 // Yields an active, tuned [net.Conn] socket configured with TCP_NODELAY and socket buffer tuning.
@@ -463,7 +461,7 @@ func dialUnixSocket(ctx context.Context, addr string, opts DialOptions) (net.Con
 	socketPath := strings.TrimPrefix(addr, "unix://")
 	dialer := &net.Dialer{Timeout: 30 * time.Second}
 
-	if opts.SocketController != nil || opts.P0fSignature != nil {
+	if opts.SocketController != nil {
 		dialer.Control = buildSocketControl(opts)
 	}
 
@@ -552,11 +550,6 @@ func handshakeHTTPProxy(conn net.Conn, host, port string) (net.Conn, error) {
 }
 
 func buildSocketControl(opts DialOptions) func(network, address string, rc syscall.RawConn) error {
-	var spoofer *p0f.Spoofer
-	if opts.P0fSignature != nil {
-		spoofer = p0f.NewSpoofer(opts.P0fSignature)
-	}
-
 	controller := opts.SocketController
 
 	return func(network, address string, rc syscall.RawConn) error {
@@ -578,10 +571,6 @@ func buildSocketControl(opts DialOptions) func(network, address string, rc sysca
 
 		if controlErr != nil {
 			return controlErr
-		}
-
-		if spoofer != nil {
-			return spoofer.ApplyToRawConn(rc)
 		}
 
 		return nil

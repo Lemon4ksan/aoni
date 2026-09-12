@@ -15,9 +15,6 @@ import (
 	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/dict"
@@ -61,45 +58,38 @@ type RedactConfigCtxKey struct{}
 
 // RequestConfig aggregates request-scoped options and transport overrides.
 type RequestConfig struct {
-	Network                 string
-	Decoder                 core.ResponseDecoder
-	ErrorModel              any
-	TargetHost              string
-	ForceContentType        string
-	Label                   string
-	UploadProgress          fio.ProgressFunc
-	DownloadProgress        fio.ProgressFunc
-	Capturer                any
-	BodyError               error
-	QueryError              error
-	MultipartBoundary       string
-	OrderedHeaders          []string
-	ALPNOverride            []string
-	JA4ReportStore          *JA4ReportStore
-	Fallback                core.FallbackFunc
-	RequestTimeoutCancel    context.CancelFunc
-	HedgingDelayOverride    *time.Duration
-	ProxyAddr               *url.URL
-	DNSResolver             netdial.DNSResolver
-	ResponseValidator       func(resp *http.Response) error
-	SoftErrorDetectors      []func(*http.Response, []byte) error
-	RetryPolicy             *core.RetryOverride
-	P0fSignature            *p0f.Signature
-	SessionCache            fingerprint.SessionCache
-	PacketPadding           *fingerprint.PaddingConfig
-	SocketController        netutil.SocketController
-	ClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
-	JA4Callback             func(ja4.Report)
-	Metadata                map[string]any
-	TraceInfo               *telemetry.TraceInfo
-	HostRewrite             *netutil.HostRewriteConfig
-	Pipeline                *PipelineConfig
-	Fragment                *fragment.Config
-	Redact                  *RedactConfig
-	CertificatePins         map[string][]string
-	Modifiers               []core.RequestModifier
-	QueryEncoder            core.QueryEncoder
-	Decoders                map[string]core.ResponseDecoder
+	Network              string
+	Decoder              core.ResponseDecoder
+	ErrorModel           any
+	TargetHost           string
+	ForceContentType     string
+	Label                string
+	UploadProgress       fio.ProgressFunc
+	DownloadProgress     fio.ProgressFunc
+	Capturer             any
+	BodyError            error
+	QueryError           error
+	MultipartBoundary    string
+	OrderedHeaders       []string
+	ALPNOverride         []string
+	Fallback             core.FallbackFunc
+	RequestTimeoutCancel context.CancelFunc
+	HedgingDelayOverride *time.Duration
+	ProxyAddr            *url.URL
+	DNSResolver          netdial.DNSResolver
+	ResponseValidator    func(resp *http.Response) error
+	SoftErrorDetectors   []func(*http.Response, []byte) error
+	RetryPolicy          *core.RetryOverride
+	SocketController     netutil.SocketController
+	Metadata             map[string]any
+	TraceInfo            *telemetry.TraceInfo
+	HostRewrite          *netutil.HostRewriteConfig
+	Pipeline             *PipelineConfig
+	Fragment             *fragment.Config
+	Redact               *RedactConfig
+	Modifiers            []core.RequestModifier
+	QueryEncoder         core.QueryEncoder
+	Decoders             map[string]core.ResponseDecoder
 
 	DisabledFlags    uint32
 	UnsafePhaseOrder []PhaseID

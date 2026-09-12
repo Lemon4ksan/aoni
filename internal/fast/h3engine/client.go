@@ -15,7 +15,6 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
 
-	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/quic"
 )
@@ -55,19 +54,9 @@ func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 
 // NewClientFromSettings creates an HTTP/3 Client configured from TLS configuration
 // and browser-grade flow control settings, fully encapsulating underlying QUIC parameterization.
-func NewClientFromSettings(tlsCfg *tls.Config, flowSettings *h3.Settings) *Client {
+func NewClientFromSettings(tlsCfg *tls.Config) *Client {
 	quicCfg := &quic.Config{
 		EnableDatagrams: true,
-	}
-
-	if flowSettings != nil {
-		quicCfg.InitialStreamReceiveWindow = flowSettings.InitialStreamReceiveWindow
-		quicCfg.MaxStreamReceiveWindow = flowSettings.MaxStreamReceiveWindow
-		quicCfg.InitialConnectionReceiveWindow = flowSettings.InitialConnectionReceiveWindow
-		quicCfg.MaxConnectionReceiveWindow = flowSettings.MaxConnectionReceiveWindow
-		quicCfg.MaxIncomingStreams = flowSettings.MaxIncomingStreams
-		quicCfg.MaxIncomingUniStreams = flowSettings.MaxIncomingUniStreams
-		quicCfg.EnableDatagrams = flowSettings.EnableDatagrams
 	}
 
 	return NewClient(tlsCfg, quicCfg)

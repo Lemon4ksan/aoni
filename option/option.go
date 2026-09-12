@@ -25,7 +25,6 @@ type Option = aoni.ClientOption
 func WithConfig(cfg aoni.Config) aoni.ClientOption {
 	return func(c *aoni.Config) {
 		c.Network = cfg.Network.Clone()
-		c.Fingerprint = cfg.Fingerprint.Clone()
 		c.Defaults = cfg.Defaults.Clone()
 		c.Engine = cfg.Engine
 	}
@@ -45,13 +44,6 @@ func WithNetworkBlock(network aoni.NetworkConfig) aoni.ClientOption {
 	}
 }
 
-// WithFingerprintBlock replaces only the [aoni.FingerprintConfig] configuration layer.
-func WithFingerprintBlock(fingerprint aoni.FingerprintConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint = fingerprint.Clone()
-	}
-}
-
 // WithBaremetal switches the client into zero-allocation fast-path mode.
 //
 // Disables middleware pipelines, automatic decompression wrappers, and validation overhead
@@ -66,7 +58,6 @@ func WithBaremetal() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Pipeline.Decompress = false
 		cfg.Defaults.Pipeline.Validate = false
-		cfg.Defaults.Pipeline.Challenge = false
 		cfg.Defaults.MaxResponseSize = -1
 		cfg.Defaults.MultiReadThreshold = -1
 		cfg.Defaults.RefererAutomaton = false

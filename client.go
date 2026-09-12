@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"slices"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/logkit"
@@ -97,7 +96,6 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 			Pipeline: PipelineConfig{
 				Decompress: true,
 				Validate:   true,
-				Challenge:  true,
 			},
 		},
 		Network: NetworkConfig{
@@ -498,11 +496,6 @@ func (c *Client) Network() NetworkConfig {
 	return c.cfg.Network.Clone()
 }
 
-// Fingerprint retrieves a clone DTO of TLS and HTTP/2 emulation settings.
-func (c *Client) Fingerprint() FingerprintConfig {
-	return c.cfg.Fingerprint.Clone()
-}
-
 // Jar returns the active [http.CookieJar] configured on the client, or nil if none is set.
 func (c *Client) Jar() http.CookieJar {
 	return c.cfg.Engine.CookieJar
@@ -575,11 +568,6 @@ func (c *Client) TLSConfig() *tls.Config {
 	return nil
 }
 
-// BrowserID inspects active TLS dialers to deduce the active [BrowserID] profile.
-func (c *Client) BrowserID() BrowserID {
-	return c.cfg.Fingerprint.BrowserID
-}
-
 // Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
 func (c *Client) Logger() core.Logger {
 	if c.cfg.Defaults.Logger == nil {
@@ -598,10 +586,6 @@ func (c *Client) LogValue() slog.Value {
 	attrs := make([]slog.Attr, 0, 4)
 	if c.prepared.BaseURL != nil {
 		attrs = append(attrs, slog.String("base_url", c.prepared.BaseURL.String()))
-	}
-
-	if c.cfg.Fingerprint.BrowserID != BrowserNone {
-		attrs = append(attrs, slog.String("browser", c.cfg.Fingerprint.BrowserID.String()))
 	}
 
 	if c.cfg.Engine.Timeout > 0 {
@@ -735,21 +719,12 @@ func (c *Client) applyConfig(cfg Config) {
 
 	applyEngineConfig(c, cfg.Engine)
 
-	if tr := c.Transport(); tr != nil && len(cfg.Fingerprint.ALPN) > 0 {
-		if tr.TLSClientConfig == nil {
-			tr.TLSClientConfig = &tls.Config{}
-		}
-
-		tr.TLSClientConfig.NextProtos = slices.Clone(cfg.Fingerprint.ALPN)
-	}
-
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
 
 	c.pipeline = pipeline.New(
 		c.toPipelineDefaults(),
-		c.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 }
 

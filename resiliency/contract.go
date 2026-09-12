@@ -8,9 +8,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/resiliency/coalesce"
-	"github.com/lemon4ksan/aoni/resiliency/etag"
+	"github.com/lemon4ksan/foundation/net/http/etag"
 )
 
 type (
@@ -25,13 +24,6 @@ type (
 
 	// CacheStore defines the persistence contract for HTTP response caching backends (e.g. Memory, Redis).
 	CacheStore[K comparable, V any] = cache.Store[K, V]
-
-	// ChallengeSolver delegates WAF/DDoS challenge page resolution (e.g. Cloudflare JS/Captcha)
-	// to automated headless or external solver drivers.
-	ChallengeSolver = challenge.Solver
-
-	// ChallengeDetector determines whether an incoming HTTP response represents a WAF/DDoS challenge page.
-	ChallengeDetector = challenge.Detector
 
 	// CircuitBreaker manages host-isolated circuit breakers using thread-safe key locks.
 	CircuitBreaker = middleware.CircuitBreaker

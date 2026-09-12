@@ -22,7 +22,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/ws"
@@ -181,7 +180,6 @@ func DoTask(client *fast.Client, t *Task) int32 {
 	req := fast.NewRequest(nil)
 	defer req.Release()
 
-	// 1. Method
 	if t.Method != nil && t.MethodLen > 0 {
 		mBytes := unsafe.Slice(t.Method, int(t.MethodLen))
 		req.SetMethodBytes(mBytes)
@@ -189,25 +187,21 @@ func DoTask(client *fast.Client, t *Task) int32 {
 		req.SetMethod("GET")
 	}
 
-	// 2. URL
 	if t.URL != nil && t.URLLen > 0 {
 		uBytes := unsafe.Slice(t.URL, int(t.URLLen))
 		req.SetURIBytes(uBytes)
 	}
 
-	// 3. Raw Headers
 	if t.HeadersRaw != nil && t.HeadersLen > 0 {
 		hBytes := unsafe.Slice(t.HeadersRaw, int(t.HeadersLen))
 		parseRawHeaders(hBytes, req)
 	}
 
-	// 4. Body
 	if t.BodyPtr != nil && t.BodyLen > 0 {
 		bBytes := unsafe.Slice(t.BodyPtr, int(t.BodyLen))
 		req.SetBodyBytes(bBytes)
 	}
 
-	// 5. Execute
 	startNano := clock.CoarseNowNano()
 	resp, err := client.Do(req)
 	endNano := clock.CoarseNowNano()
@@ -221,7 +215,6 @@ func DoTask(client *fast.Client, t *Task) int32 {
 	}
 	defer resp.Close()
 
-	// 6. Response Headers
 	if t.RespHeadersPtr != nil && t.RespHeadersCap > 0 {
 		var rawHeaders []byte
 		if fastResp, ok := resp.(*fast.Response); ok && fastResp != nil {
@@ -241,7 +234,6 @@ func DoTask(client *fast.Client, t *Task) int32 {
 		}
 	}
 
-	// 7. Response Body & Memory Dispatch
 	t.StatusCode = int32(resp.StatusCode())
 	body := resp.UnsafeBodyBytes()
 	bodyLen := len(body)

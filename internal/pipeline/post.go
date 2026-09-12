@@ -66,11 +66,6 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 		return nil, err
 	}
 
-	resp, err = stageWAFChallenge(p, stdReq, resp, tx)
-	if err != nil {
-		return nil, err
-	}
-
 	resp, err = stageValidateResponse(p, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
@@ -161,19 +156,6 @@ func stageSizeLimit[Req, Resp any](
 	}
 
 	return resp, nil
-}
-
-func stageWAFChallenge[Req, Resp any](
-	p *Pipeline[Req, Resp],
-	stdReq *http.Request,
-	resp *http.Response,
-	tx *Tx,
-) (*http.Response, error) {
-	if tx.Flags&FlagChallenge == 0 {
-		return resp, nil
-	}
-
-	return p.handleWAFChallenge(stdReq, resp)
 }
 
 func stageValidateResponse[Req, Resp any](
@@ -681,40 +663,4 @@ func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadClo
 		Reader: transform.NewReader(body, enc.NewDecoder()),
 		Closer: body,
 	}
-}
-
-func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
-	if p.defaults.ChallengeDetector == nil || p.defaults.ChallengeSolver == nil || resp == nil || resp.Body == nil {
-		return resp, nil
-	}
-
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
-	if err != nil {
-		return resp, nil //nolint:nilerr
-	}
-
-	buffered := &iokit.ExplicitBufferedBody{
-		Prefix: bodyBytes,
-		Stream: resp.Body,
-	}
-	resp.Body = buffered
-
-	isChallenge, challengeErr := p.defaults.ChallengeDetector(resp)
-	if !isChallenge {
-		buffered.Rewind()
-		return resp, nil
-	}
-
-	_ = resp.Body.Close()
-
-	solvedResp, solveErr := p.defaults.ChallengeSolver.Solve(req.Context(), challengeErr, req)
-	if solveErr != nil {
-		return nil, solveErr
-	}
-
-	if solvedResp != nil {
-		return solvedResp, nil
-	}
-
-	return resp, nil
 }

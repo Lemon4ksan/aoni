@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
@@ -272,22 +271,6 @@ func TestFastClient_TypedGenerics(t *testing.T) {
 	})
 }
 
-func TestFastClient_RequestBuilders(t *testing.T) {
-	t.Parallel()
-
-	ts := newEchoServer(t)
-	client := fast.NewClient(option.WithBaseURL(ts.URL))
-	t.Cleanup(client.CloseIdleConnections)
-
-	t.Run("r_and_new_request_builder", func(t *testing.T) {
-		rb := client.R()
-		require.NotNil(t, rb)
-
-		rb2 := client.NewRequest()
-		require.NotNil(t, rb2)
-	})
-}
-
 func TestFastResponse_EdgeMethods(t *testing.T) {
 	t.Parallel()
 
@@ -349,23 +332,4 @@ func TestFastResponse_EdgeMethods(t *testing.T) {
 		assert.Equal(t, int64(0), n)
 		nilResp.Release()
 	})
-}
-
-func TestFastGRPCClient_InvalidType(t *testing.T) {
-	t.Parallel()
-
-	client := fast.NewClient()
-	t.Cleanup(client.CloseIdleConnections)
-
-	grpcClient := client.GRPC()
-	require.NotNil(t, grpcClient)
-
-	// Invoke expecting a non-proto response type should fail immediately with type error
-	type nonProto struct {
-		Val string
-	}
-
-	_, err := grpcClient.Invoke[nonProto](t.Context(), "/test.Service/Method", nil)
-	assert.Error(t, err)
-	assert.Contains(t, strings.ToLower(err.Error()), "proto")
 }

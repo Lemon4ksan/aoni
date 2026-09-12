@@ -5,9 +5,6 @@
 package netutil_test
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -488,40 +485,6 @@ func TestNetutil_AuthAndProtocols(t *testing.T) {
 
 		provider := &mockSessionCacheProvider{cache: lru}
 		assert.Equal(t, lru, netutil.ResolveStdSessionCache(provider))
-	})
-
-	t.Run("dpop_helpers", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Equal(t, "DPoP token123", netutil.FormatDPoPAuth("token123"))
-
-		ath := netutil.ComputeAccessTokenHash("access_token_secret")
-		assert.NotEmpty(t, ath)
-
-		privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		require.NoError(t, err)
-
-		proof, err := netutil.CreateDPoPProof(privKey, "POST", "https://api.example.com/orders")
-		require.NoError(t, err)
-		assert.NotEmpty(t, proof)
-
-		req, err := http.NewRequestWithContext(t.Context(), "POST", "https://api.example.com/orders", nil)
-		require.NoError(t, err)
-
-		reqProof, err := netutil.CreateDPoPProofForRequest(req, privKey)
-		require.NoError(t, err)
-		assert.NotEmpty(t, reqProof)
-	})
-
-	t.Run("httpsig_content_digest", func(t *testing.T) {
-		t.Parallel()
-
-		body := []byte("hello digest verification")
-		digest := netutil.ComputeContentDigest(body)
-		assert.NotEmpty(t, digest)
-
-		assert.NoError(t, netutil.VerifyContentDigest(body, digest))
-		assert.Error(t, netutil.VerifyContentDigest([]byte("tampered"), digest))
 	})
 
 	t.Run("weblinks_parsing", func(t *testing.T) {

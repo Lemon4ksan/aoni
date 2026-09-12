@@ -16,11 +16,9 @@ import (
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/grpc"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -206,43 +204,6 @@ func TestClientRaw(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
-	}
-}
-
-func TestClientGRPC(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/grpc" {
-			t.Fatalf("expected application/grpc, got %s", r.Header.Get("Content-Type"))
-		}
-
-		resMsg := wrapperspb.String("Hello from native gRPC over aoni!")
-
-		frameBytes, err := grpc.MarshalFrame(resMsg, false)
-		if err != nil {
-			t.Fatalf("failed to marshal gRPC frame: %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/grpc")
-		w.Header().Set("grpc-status", "0")
-		_, _ = w.Write(frameBytes)
-	}))
-	defer ts.Close()
-
-	client := aoni.NewClient(nil, option.WithBaseURL(ts.URL))
-
-	reqMsg := wrapperspb.String("Ping")
-
-	res, err := client.GRPC().Invoke[wrapperspb.StringValue](
-		context.Background(),
-		"/test.TestService/Ping",
-		reqMsg,
-	)
-	if err != nil {
-		t.Fatalf("gRPC invoke failed: %v", err)
-	}
-
-	if res.GetValue() != "Hello from native gRPC over aoni!" {
-		t.Fatalf("unexpected gRPC response: %s", res.GetValue())
 	}
 }
 

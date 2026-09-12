@@ -1,3 +1,4 @@
+
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -77,6 +78,62 @@ func (s *SlogAdapter) Log(ctx context.Context, level LogLevel, msg string, keysA
 	s.logger.Log(ctx, slogLevel, msg, keysAndValues...)
 }
 
+func (s *SlogAdapter) Debug(msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.Debug(msg, args...)
+}
+
+func (s *SlogAdapter) DebugContext(ctx context.Context, msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.DebugContext(ctx, msg, args...)
+}
+
+func (s *SlogAdapter) Info(msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.Info(msg, args...)
+}
+
+func (s *SlogAdapter) InfoContext(ctx context.Context, msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.InfoContext(ctx, msg, args...)
+}
+
+func (s *SlogAdapter) Warn(msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.Warn(msg, args...)
+}
+
+func (s *SlogAdapter) WarnContext(ctx context.Context, msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.WarnContext(ctx, msg, args...)
+}
+
+func (s *SlogAdapter) Error(msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.Error(msg, args...)
+}
+
+func (s *SlogAdapter) ErrorContext(ctx context.Context, msg string, args ...any) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.ErrorContext(ctx, msg, args...)
+}
+
 // StructuredAdapter provides zero-dependency compatibility for Zap (zap.SugaredLogger / zap.Logger)
 // and Zerolog (zerolog.Logger) without adding external go.mod module dependencies.
 type StructuredAdapter struct {
@@ -84,28 +141,46 @@ type StructuredAdapter struct {
 }
 
 // NewStructuredAdapter creates a zero-dependency [Logger] using a custom dispatch function.
-//
-// Usage Examples:
-//
-// Zap SugaredLogger:
-//
-//	logger := telemetry.NewStructuredAdapter(func(level telemetry.LogLevel, msg string, kv ...any) {
-//	    zapSugared.Infow(msg, kv...)
-//	})
-//
-// Zerolog Logger:
-//
-//	logger := telemetry.NewStructuredAdapter(func(level telemetry.LogLevel, msg string, kv ...any) {
-//	    zerologLogger.Info().Fields(kv).Msg(msg)
-//	})
 func NewStructuredAdapter(logFunc func(level LogLevel, msg string, keysAndValues ...any)) *StructuredAdapter {
 	return &StructuredAdapter{logFunc: logFunc}
 }
 
-func (a *StructuredAdapter) Log(_ context.Context, level LogLevel, msg string, keysAndValues ...any) {
+func (a *StructuredAdapter) Log(ctx context.Context, level LogLevel, msg string, keysAndValues ...any) {
 	if a == nil || a.logFunc == nil {
 		return
 	}
-
 	a.logFunc(level, msg, keysAndValues...)
 }
+
+func (a *StructuredAdapter) Debug(msg string, args ...any) {
+	a.Log(context.Background(), LevelDebug, msg, args...)
+}
+
+func (a *StructuredAdapter) DebugContext(ctx context.Context, msg string, args ...any) {
+	a.Log(ctx, LevelDebug, msg, args...)
+}
+
+func (a *StructuredAdapter) Info(msg string, args ...any) {
+	a.Log(context.Background(), LevelInfo, msg, args...)
+}
+
+func (a *StructuredAdapter) InfoContext(ctx context.Context, msg string, args ...any) {
+	a.Log(ctx, LevelInfo, msg, args...)
+}
+
+func (a *StructuredAdapter) Warn(msg string, args ...any) {
+	a.Log(context.Background(), LevelWarn, msg, args...)
+}
+
+func (a *StructuredAdapter) WarnContext(ctx context.Context, msg string, args ...any) {
+	a.Log(ctx, LevelWarn, msg, args...)
+}
+
+func (a *StructuredAdapter) Error(msg string, args ...any) {
+	a.Log(context.Background(), LevelError, msg, args...)
+}
+
+func (a *StructuredAdapter) ErrorContext(ctx context.Context, msg string, args ...any) {
+	a.Log(ctx, LevelError, msg, args...)
+}
+

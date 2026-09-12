@@ -37,13 +37,6 @@ var (
 	ErrNoHealthyProxies = errors.New("aoni: no healthy proxies available")
 )
 
-// WithAwareSessionCache enables the proxy-isolated TLS session ticket cache.
-func WithAwareSessionCache() aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.SessionCache = NewProxyAwareSessionCache()
-	}
-}
-
 // Parse parses a raw proxy string into a structured [*url.URL] (RFC 3986 §3).
 // Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func Parse(proxyStr string) (*url.URL, error) {

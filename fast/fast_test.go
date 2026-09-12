@@ -46,20 +46,6 @@ func TestResolveTargetURL(t *testing.T) {
 	}
 }
 
-func TestH2_ALPNResolutionAndHeaderOrdering(t *testing.T) {
-	cfg := &aoni.Config{
-		Fingerprint: aoni.FingerprintConfig{
-			HeaderOrder: []string{":method", ":path", ":authority", ":scheme", "user-agent"},
-		},
-	}
-
-	fastReq := h1engine.AcquireRequest()
-	defer ReleaseRequestSafe(fastReq)
-
-	mode := resolveALPNMode(context.Background(), cfg, fastReq, nil)
-	assert.Equal(t, aoni.AlpnH2, mode)
-}
-
 func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 	ctx := context.Background()
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
@@ -70,30 +56,6 @@ func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 	cfg := &aoni.Config{}
 	mode := resolveALPNMode(ctxH3, cfg, fastReq, nil)
 	assert.Equal(t, aoni.AlpnH3, mode)
-}
-
-func TestResolveALPNMode(t *testing.T) {
-	ctx := context.Background()
-	cfg := &aoni.Config{}
-
-	if mode := resolveALPNMode(ctx, cfg, &h1engine.Request{}, nil); mode != aoni.AlpnHTTP {
-		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnHTTP)
-	}
-
-	cfgH2 := &aoni.Config{
-		Fingerprint: aoni.FingerprintConfig{
-			HeaderOrder: []string{":method", ":path", "user-agent"},
-		},
-	}
-
-	if mode := resolveALPNMode(ctx, cfgH2, &h1engine.Request{}, nil); mode != aoni.AlpnH2 {
-		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnH2)
-	}
-
-	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-	if mode := resolveALPNMode(ctxH3, cfg, &h1engine.Request{}, nil); mode != aoni.AlpnH3 {
-		t.Errorf("got context ALPN mode %q, want %q", mode, aoni.AlpnH3)
-	}
 }
 
 func TestResponse_JSON_And_String(t *testing.T) {

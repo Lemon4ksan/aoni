@@ -97,7 +97,6 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(c.cfg.Defaults, c.referer),
-		c.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
 	c.nativeDoer.client = c
@@ -148,7 +147,6 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(cloned.cfg.Defaults, cloned.referer),
-		cloned.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
 	return cloned
@@ -447,8 +445,19 @@ func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Respo
 		return errors.New("aoni/fast: length of reqs and resps must match")
 	}
 
-	h1Reqs := make([]*h1engine.Request, len(reqs))
-	h1Resps := make([]*h1engine.Response, len(resps))
+	var staticH1Reqs [16]*h1engine.Request
+	var staticH1Resps [16]*h1engine.Response
+
+	var h1Reqs []*h1engine.Request
+	var h1Resps []*h1engine.Response
+
+	if len(reqs) <= len(staticH1Reqs) {
+		h1Reqs = staticH1Reqs[:len(reqs)]
+		h1Resps = staticH1Resps[:len(resps)]
+	} else {
+		h1Reqs = make([]*h1engine.Request, len(reqs))
+		h1Resps = make([]*h1engine.Response, len(resps))
+	}
 
 	for i := range reqs {
 		if reqs[i] == nil {
@@ -526,8 +535,19 @@ func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response
 	host := string(uri.Host())
 	isHTTPS := bytes.EqualFold(uri.Scheme(), []byte("https"))
 
-	h1Reqs := make([]*h1engine.Request, len(reqs))
-	h1Resps := make([]*h1engine.Response, len(resps))
+	var staticH1Reqs [16]*h1engine.Request
+	var staticH1Resps [16]*h1engine.Response
+
+	var h1Reqs []*h1engine.Request
+	var h1Resps []*h1engine.Response
+
+	if len(reqs) <= len(staticH1Reqs) {
+		h1Reqs = staticH1Reqs[:len(reqs)]
+		h1Resps = staticH1Resps[:len(resps)]
+	} else {
+		h1Reqs = make([]*h1engine.Request, len(reqs))
+		h1Resps = make([]*h1engine.Response, len(resps))
+	}
 
 	for i := range reqs {
 		h1Reqs[i] = reqs[i].req
@@ -537,7 +557,7 @@ func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response
 	if isHTTPS && c.protocolState.altSvc != nil && c.protocolState.altSvc.IsH3Supported(host) {
 		h3Cl := c.getH3Client()
 		if h3Cl != nil {
-			err := h3Cl.DoBatch(ctx, h1Reqs, h1Resps, c.cfg.Fingerprint.HeaderOrder)
+			err := h3Cl.DoBatch(ctx, h1Reqs, h1Resps, nil)
 			if err == nil {
 				return nil
 			}
@@ -545,7 +565,7 @@ func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response
 	}
 
 	alpnMode := resolveALPNMode(ctx, &c.cfg, firstReq, c.protocolState.altSvc)
-	if alpnMode == aoni.AlpnH2 || (isHTTPS && c.cfg.Fingerprint.H2Settings != nil) {
+	if alpnMode == aoni.AlpnH2 {
 		h2Cl := c.getH2Client(host)
 		if h2Cl != nil {
 			err := h2Cl.DoBatch(ctx, h1Reqs, h1Resps)
@@ -568,7 +588,13 @@ func (c *Client) DoBatchScoped(
 		return nil
 	}
 
-	resps := make([]*Response, len(reqs))
+	var staticResps [16]*Response
+	var resps []*Response
+	if len(reqs) <= len(staticResps) {
+		resps = staticResps[:len(reqs)]
+	} else {
+		resps = make([]*Response, len(reqs))
+	}
 
 	for i := range reqs {
 		resps[i] = NewResponse(nil)
@@ -767,11 +793,6 @@ func (c *Client) Network() aoni.NetworkConfig {
 	return c.cfg.Network.Clone()
 }
 
-// Fingerprint returns a copy of the TLS/HTTP fingerprint configuration block.
-func (c *Client) Fingerprint() aoni.FingerprintConfig {
-	return c.cfg.Fingerprint.Clone()
-}
-
 // EngineConfig returns the underlying transport engine configuration parameters.
 func (c *Client) EngineConfig() aoni.EngineConfig {
 	return c.cfg.Engine
@@ -780,11 +801,6 @@ func (c *Client) EngineConfig() aoni.EngineConfig {
 // BaseURL returns the configured base target URL, or nil if unset.
 func (c *Client) BaseURL() *url.URL {
 	return c.cfg.Defaults.BaseURL
-}
-
-// BrowserID returns the active browser impersonation identity profile.
-func (c *Client) BrowserID() aoni.BrowserID {
-	return c.cfg.Fingerprint.BrowserID
 }
 
 // Inspector returns the configured network traffic inspector, or nil if unset.
@@ -869,7 +885,6 @@ func (c *Client) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("engine", "fasthttp"),
 		slog.String("base_url", baseURLStr),
-		slog.String("browser", c.cfg.Fingerprint.BrowserID.String()),
 		slog.Duration("timeout", c.cfg.Engine.Timeout),
 	)
 }
@@ -968,10 +983,6 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 	}
 
 	pipe := c.cfg.Defaults.Pipeline
-	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
-		pipe.RotateUA = true
-	}
-
 	pipe.SizeLimit = generic.Coalesce(pipe.SizeLimit, c.cfg.Defaults.MaxResponseSize)
 	pipe.MultiReadThreshold = generic.Coalesce(pipe.MultiReadThreshold, c.cfg.Defaults.MultiReadThreshold)
 
@@ -990,26 +1001,13 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 }
 
 func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) pipeline.ClientDefaults {
-	var profiles []pipeline.BrowserProfile
-	if len(d.UARotationProfiles) > 0 {
-		profiles = make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
-		for i, p := range d.UARotationProfiles {
-			profiles[i] = pipeline.BrowserProfile{
-				UserAgent:   p.UserAgent,
-				ClientHints: p.ClientHints,
-			}
-		}
-	}
-
 	return pipeline.ClientDefaults{
-		Headers:              d.Headers,
-		BeforeRequest:        d.BeforeRequest,
-		AfterResponse:        d.AfterResponse,
-		Inspector:            d.Inspector,
-		ResponseValidator:    d.ResponseValidator,
-		ChallengeDetector:    d.ChallengeDetector,
-		ChallengeSolver:      d.ChallengeSolver,
-		UARotationProfiles:   profiles,
+		Headers:           d.Headers,
+		BeforeRequest:     d.BeforeRequest,
+		AfterResponse:     d.AfterResponse,
+		Inspector:         d.Inspector,
+		ResponseValidator: d.ResponseValidator,
+
 		RefererState:         referer,
 		MaxResponseSize:      d.MaxResponseSize,
 		MultiReadThreshold:   d.MultiReadThreshold,

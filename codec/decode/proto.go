@@ -17,6 +17,30 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
+// DecodeProto unmarshals binary Protocol Buffer response streams directly into a concrete [proto.Message] target.
+// It bypasses reflection and dynamic type assertions for maximum zero-allocation performance.
+func DecodeProto[T proto.Message](r io.Reader, target T) error {
+	if data, _, ok := InspectBytes(r); ok {
+		if err := proto.Unmarshal(data, target); err != nil {
+			return &Error{Format: "proto", Target: refkit.FullTypeName(target), Err: err}
+		}
+
+		return nil
+	}
+
+	buf, err := copyToBuffer(r)
+	if err != nil {
+		return err
+	}
+	defer pipeline.GlobalBufferPool.Put(buf)
+
+	if err := proto.Unmarshal(buf.Bytes(), target); err != nil {
+		return &Error{Format: "proto", Target: refkit.FullTypeName(target), Err: err}
+	}
+
+	return nil
+}
+
 // protoDecoder unmarshals binary Protocol Buffer response streams into [proto.Message] targets.
 type protoDecoder struct{}
 

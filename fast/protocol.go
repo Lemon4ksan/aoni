@@ -26,7 +26,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/netutil"
 )
 
 const (
@@ -239,14 +238,6 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1engine.Re
 		return aoni.AlpnH2
 	}
 
-	if cfg != nil {
-		if len(cfg.Fingerprint.HeaderOrder) > 0 ||
-			cfg.Fingerprint.H2Settings != nil ||
-			cfg.Fingerprint.BrowserID != aoni.BrowserNone {
-			return aoni.AlpnH2
-		}
-	}
-
 	return aoni.AlpnHTTP
 }
 
@@ -254,14 +245,10 @@ func (c *Client) getH3Client() *h3engine.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: c.cfg.Engine.InsecureSkipVerify, //nolint:gosec
-			ClientSessionCache: netutil.ResolveStdSessionCache(c.cfg.Fingerprint.SessionCache),
+
 		}
 
-		if spec := c.cfg.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
-			tlsCfg.CipherSuites = spec.CipherSuites
-		}
-
-		c.protocolState.h3Client = h3engine.NewClientFromSettings(tlsCfg, c.cfg.Fingerprint.H3Settings)
+		c.protocolState.h3Client = h3engine.NewClientFromSettings(tlsCfg)
 	})
 
 	return c.protocolState.h3Client
@@ -286,18 +273,6 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		},
 	}
 
-	var h2s *h2engine.Settings
-	if c.cfg.Fingerprint.H2Settings != nil {
-		s := c.cfg.Fingerprint.H2Settings
-		h2s = &h2engine.Settings{}
-		h2s.SetHeaderTableSize(s.HeaderTableSize)
-		h2s.SetPush(s.EnablePush == 1)
-		h2s.SetMaxConcurrentStreams(s.MaxConcurrentStreams)
-		h2s.SetMaxWindowSize(s.InitialWindowSize)
-		h2s.SetMaxFrameSize(s.MaxFrameSize)
-		h2s.SetMaxHeaderListSize(s.MaxHeaderListSize)
-	}
-
 	var onRTTCallback func(time.Duration)
 	if c.cfg.Network.DynamicHedging != nil && c.cfg.Network.DynamicHedging.Tracker != nil {
 		tracker := c.cfg.Network.DynamicHedging.Tracker
@@ -317,12 +292,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		PingInterval:  15 * time.Second,
 		OnRTT:         onRTTCallback,
 		OnPushPromise: pushHandler,
-		Settings:      h2s,
+		Settings:      nil,
 	})
-
-	if len(c.cfg.Fingerprint.HeaderOrder) > 0 {
-		cl.SetOrderedHeaders(c.cfg.Fingerprint.HeaderOrder)
-	}
 
 	c.protocolState.h2Clients[host] = cl
 

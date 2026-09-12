@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
@@ -827,41 +826,6 @@ func TestNewStdClient_CancelledContext(t *testing.T) {
 
 	_, err = stdClient.Do(req)
 	assert.Error(t, err)
-}
-
-func TestTransport_RoundTrip_TraceContext(t *testing.T) {
-	t.Parallel()
-
-	mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
-		cfg := aoni.GetRequestConfig(req.Context())
-		if cfg != nil && cfg.JA4ReportStore != nil {
-			cfg.JA4ReportStore.Report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
-		}
-
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("trace_ok")),
-			Request:    req,
-		}, nil
-	})
-
-	c := aoni.NewClient(mockDoer)
-	tr := aoni.NewTransport(c)
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
-	require.NoError(t, err)
-
-	mod.WithTraceContext().ApplyStd(req)
-
-	resp, err := tr.RoundTrip(req)
-	require.NoError(t, err)
-
-	defer resp.Body.Close()
-
-	info := aoni.ResponseTrace(resp)
-	require.NotNil(t, info)
-	require.NotNil(t, info.JA4)
-	assert.Equal(t, "t13d1516h2_mock_fingerprint", info.JA4.JA4)
 }
 
 func FuzzContextModifiers(f *testing.F) {

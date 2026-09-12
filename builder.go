@@ -365,18 +365,6 @@ func (r *RequestBuilder) SetBasicAuth(username, password string) *RequestBuilder
 	return r.SetAuth(mod.WithBasicAuth(username, password))
 }
 
-// SetPKCE adds PKCE code_challenge and code_challenge_method parameters for OAuth 2.0 requests (RFC 7636 / RFC 9700).
-func (r *RequestBuilder) SetPKCE(verifier string, method ...string) *RequestBuilder {
-	r.appliedMods = append(r.appliedMods, mod.WithPKCE(verifier, method...))
-	return r
-}
-
-// SetPKCEVerifier adds the PKCE code_verifier parameter for OAuth 2.0 token requests (RFC 7636 / RFC 9700).
-func (r *RequestBuilder) SetPKCEVerifier(verifier string) *RequestBuilder {
-	r.appliedMods = append(r.appliedMods, mod.WithPKCEVerifier(verifier))
-	return r
-}
-
 // SetOutputFromHeader instructs the request to stream the downloaded file to targetDir using Content-Disposition filenames.
 func (r *RequestBuilder) SetOutputFromHeader(targetDir string) *RequestBuilder {
 	r.outputDirectory = targetDir

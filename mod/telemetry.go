@@ -14,8 +14,6 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/http/header"
 
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -101,34 +99,10 @@ func WithTrace(target *telemetry.TraceInfo) RequestModifier {
 	})
 }
 
-// WithTraceJA4 constructs an [RequestModifier] enabling JA4/JA4H client fingerprint telemetry.
-func WithTraceJA4(target *telemetry.TraceInfo) RequestModifier {
-	return Custom(func(req Request) {
-		if target.JA4 == nil {
-			target.JA4 = &ja4.Report{}
-		}
-
-		store := &pipeline.JA4ReportStore{Report: target.JA4, Target: target}
-		getOrInitRequestConfig(req).JA4ReportStore = store
-
-		if stdReq := req.HTTPRequest(); stdReq != nil {
-			target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(stdReq)
-		}
-	})
-}
-
 // WithTraceContext constructs an [RequestModifier] attaching a new [telemetry.TraceInfo] container to the request context.
 func WithTraceContext() RequestModifier {
 	return Custom(func(req Request) {
 		info := &telemetry.TraceInfo{}
 		getOrInitRequestConfig(req).TraceInfo = info
-		WithTraceJA4(info).Apply(req)
-	})
-}
-
-// WithJA4Callback constructs an [RequestModifier] setting a callback executed with the computed [ja4.Report] after TLS handshakes.
-func WithJA4Callback(fn func(ja4.Report)) RequestModifier {
-	return Custom(func(req Request) {
-		getOrInitRequestConfig(req).JA4Callback = fn
 	})
 }

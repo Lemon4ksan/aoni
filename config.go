@@ -17,23 +17,15 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
-	utls "github.com/refraction-networking/utls"
 
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/fingerprint/h3"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -54,7 +46,7 @@ const (
 
 	// DefaultUserAgent defines the fallback Chrome/Windows User-Agent header used
 	// when no browser persona or custom User-Agent is declared.
-	DefaultUserAgent = fingerprint.DefaultUserAgent
+	DefaultUserAgent = "aoni/1.0"
 
 	// RedirectLimitDefault is the default redirect limit, which is 10.
 	RedirectLimitDefault = -1
@@ -221,38 +213,36 @@ type Config struct {
 	// Network configures L3/L4 socket dialing, proxies, DNS, and IP routing.
 	Network NetworkConfig
 
-	// Fingerprint controls TLS ClientHello, HTTP/2/3 framing, and TCP/IP evasion.
-	Fingerprint FingerprintConfig
-
 	// Defaults configures default request headers, hooks, limits, and pipeline rules.
 	Defaults ClientDefaults
 
 	// Engine configures low-level HTTP doer engines, connection pools, and redirects.
 	Engine EngineConfig
+
+	// Ext provides hooks for external stealth and extension modules.
+	Ext ExtensionConfig
 }
 
 // Clone creates a deep copy of Config, allocating fresh memory for all nested
 // maps, slices, and pointer fields to guarantee strict memory isolation.
 func (c Config) Clone() Config {
 	return Config{
-		Network:     c.Network.Clone(),
-		Fingerprint: c.Fingerprint.Clone(),
-		Defaults:    c.Defaults.Clone(),
-		Engine:      c.Engine.Clone(),
+		Network:  c.Network.Clone(),
+		Defaults: c.Defaults.Clone(),
+		Engine:   c.Engine.Clone(),
+		Ext:      c.Ext.Clone(),
 	}
 }
 
 // RequiresRequestContext reports whether any subsystem configuration requires attaching RequestConfig to request contexts.
 func (c Config) RequiresRequestContext() bool {
 	return c.Network.RequiresRequestContext() ||
-		c.Fingerprint.RequiresRequestContext() ||
 		c.Defaults.RequiresRequestContext()
 }
 
 // IsBaremetalEligible reports whether the entire client configuration permits fast 0-alloc baremetal execution.
 func (c Config) IsBaremetalEligible() bool {
 	return !c.RequiresRequestContext() &&
-		c.Fingerprint.IsBaremetalEligible() &&
 		c.Defaults.IsBaremetalEligible()
 }
 
@@ -266,6 +256,7 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 
 	return transport.DialConfig{
 		Network:            netProto,
+		DialTLSContext:     c.Ext.DialTLSContext,
 		DNSResolver:        c.Network.DNSResolver,
 		StackDriver:        c.Network.StackDriver,
 		L2Device:           c.Network.L2Device,
@@ -273,22 +264,11 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		HappyEyeballs:      c.Network.HappyEyeballsDelay,
 		SSRFGuard:          c.Network.SSRFGuard,
 		ProxyDNS:           c.Network.ProxyDNS,
-		P0fSignature:       c.Fingerprint.P0fSignature,
 		SocketController:   c.Network.SocketController,
 		FragmentConfig:     c.Network.FragmentConfig,
 		ProxyURL:           c.Network.ProxyAddr,
 		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
-		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.Fingerprint.SessionCache,
-		CertificatePins:    c.Fingerprint.CertificatePins,
-		CertCompression:    c.Fingerprint.CertCompression,
-		HeaderOrder:        c.Fingerprint.HeaderOrder,
-		JA4Callback:        c.Fingerprint.JA4Callback,
-		AutoECH:            c.Fingerprint.AutoECH,
-		Enable0RTT:         c.Fingerprint.Enable0RTT,
-		ECHConfigList:      c.Fingerprint.ECHConfigList,
 		ConnFilters:        c.Network.ConnFilters,
-		ALPNOverride:       slices.Clone(c.Fingerprint.ALPN),
 		TCPQuickACK:        c.Network.TCPQuickACK,
 		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
 	}
@@ -592,14 +572,6 @@ type NetworkConfig struct {
 
 	// ExperimentalFlags consolidates opt-in hardware and OS experimental accelerations (io_uring, SIMD, RIO, TCP Fast Open).
 	ExperimentalFlags ExperimentalFlag
-
-	// CPUAffinityCores used to lock the client initialization goroutine's OS thread
-	// to designated CPU core indices. This had no effect on the actual I/O goroutines
-	// managed by the Go runtime and incorrectly pinned the caller of NewClient instead.
-	//
-	// Deprecated: Use [sys.LockGoroutineToCore] directly from the goroutine you intend
-	// to pin to specific CPU cores.
-	CPUAffinityCores []int
 }
 
 // HasExperimental returns true if the specified experimental flag is enabled.
@@ -612,7 +584,6 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	cloned := n
 	cloned.DynamicHedging = clonePtr(n.DynamicHedging)
 	cloned.FragmentConfig = clonePtr(n.FragmentConfig)
-	cloned.CPUAffinityCores = slices.Clone(n.CPUAffinityCores)
 
 	if n.HostRewrite != nil && n.HostRewrite.Rules != nil {
 		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
@@ -634,85 +605,6 @@ type HostRewriteConfig struct {
 	Rules map[string]string
 }
 
-// BrowserID identifies predefined browser TLS handshake emulation targets.
-type BrowserID int
-
-const (
-	// BrowserNone disables TLS fingerprint emulation, falling back to standard Go TLS.
-	BrowserNone BrowserID = iota
-	// BrowserChrome emulates Google Chrome TLS 1.3 ClientHello fingerprints.
-	BrowserChrome
-	// BrowserFirefox emulates Mozilla Firefox TLS 1.3 ClientHello fingerprints.
-	BrowserFirefox
-	// BrowserSafari emulates Apple Safari / WebKit TLS 1.3 ClientHello fingerprints.
-	BrowserSafari
-)
-
-// String returns the human-readable identifier of BrowserID.
-func (b BrowserID) String() string {
-	switch b {
-	case BrowserChrome:
-		return "Chrome"
-	case BrowserFirefox:
-		return "Firefox"
-	case BrowserSafari:
-		return "Safari"
-	default:
-		return "None"
-	}
-}
-
-// ClientHintsMap maps W3C Client Hints header keys (e.g. "Sec-CH-UA-Platform") to string values.
-type ClientHintsMap map[string]string
-
-// Clone creates a memory-isolated copy of the client hints map.
-func (c ClientHintsMap) Clone() ClientHintsMap {
-	if c == nil {
-		return nil
-	}
-
-	cloned := make(ClientHintsMap, len(c))
-	maps.Copy(cloned, c)
-
-	return cloned
-}
-
-// BrowserProfile holds user-agent strings and synchronized Client Hints headers
-// for realistic browser persona emulation and profile rotation.
-type BrowserProfile struct {
-	// UserAgent is the exact browser User-Agent header string.
-	UserAgent string
-
-	// ClientHints maps W3C Client Hints header keys (e.g. "Sec-CH-UA", "Sec-CH-UA-Platform", "Sec-CH-UA-Mobile")
-	// to their corresponding browser version strings to match the declared User-Agent.
-	ClientHints ClientHintsMap
-}
-
-// Clone creates a deep copy of BrowserProfile and its ClientHints map.
-func (b BrowserProfile) Clone() BrowserProfile {
-	return BrowserProfile{
-		UserAgent:   b.UserAgent,
-		ClientHints: b.ClientHints.Clone(),
-	}
-}
-
-// CertificatePinMap maps domain patterns (e.g. "*.example.com") to expected SHA-256 SPKI fingerprint hashes.
-type CertificatePinMap map[string][]string
-
-// Clone creates a memory-isolated deep copy of the certificate pin map.
-func (c CertificatePinMap) Clone() CertificatePinMap {
-	if c == nil {
-		return nil
-	}
-
-	cloned := make(CertificatePinMap, len(c))
-	for k, v := range c {
-		cloned[k] = slices.Clone(v)
-	}
-
-	return cloned
-}
-
 // DecoderMap maps MIME content types (e.g. "application/json", "application/xml") to response body decoders.
 type DecoderMap map[string]ResponseDecoder
 
@@ -726,140 +618,6 @@ func (d DecoderMap) Clone() DecoderMap {
 	maps.Copy(cloned, d)
 
 	return cloned
-}
-
-// ============================================================================
-// Section 5: Fingerprint & Evasion Layer Configuration (TLS / H2 / H3 / p0f)
-// ============================================================================
-
-// FingerprintConfig controls TLS ClientHello emulation, HTTP/2 SETTINGS frames,
-// header order serialization, p0f OS stack spoofing, and ECH/0-RTT features.
-//
-// # TLS Emulation Precedence
-//
-// When multiple TLS fingerprint options are configured, the transport layer evaluates them
-// in the following strict hierarchical order:
-//  1. TLSClientHelloSpecProvider (explicit dynamic uTLS ClientHelloSpec builder)
-//  2. TLSClientHelloID (specific uTLS ClientHelloID preset, e.g. HelloChrome_120)
-//  3. BrowserID (predefined high-level browser profile)
-type FingerprintConfig struct {
-	// BrowserID specifies a predefined browser fingerprint profile (Chrome, Firefox, Safari).
-	BrowserID BrowserID
-
-	// TLSClientHelloID overrides BrowserID with a specific uTLS ClientHelloID preset.
-	TLSClientHelloID *utls.ClientHelloID
-
-	// ALPN explicitly configures Application-Layer Protocol Negotiation tokens (e.g. "h2", "http/1.1").
-	// Overrides ALPN tokens announced in uTLS ClientHello without altering cipher suites or TLS extensions.
-	ALPN []string
-
-	// TLSClientHelloSpecProvider dynamically generates a uTLS ClientHelloSpec for each connection,
-	// allowing fine-grained control over TLS extensions, cipher suites, supported curves, and ALPN tokens.
-	TLSClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
-
-	// TLSQUICClientHelloSpec configures TLS cipher suites and transport parameters for HTTP/3 QUIC handshakes.
-	TLSQUICClientHelloSpec *utls.ClientHelloSpec
-
-	// HeaderOrder specifies the exact HTTP/1.1 or HTTP/2 header key serialization sequence.
-	//
-	// L7 Fingerprint Evasion:
-	// Modern WAFs calculate JA4H and header hashes based on header ordering (e.g. :method, :authority, :scheme, :path).
-	// HeaderOrder ensures outgoing headers strictly match genuine browser serialization order.
-	// Evaluated in [fingerprint/h2.FramedTransport] and [internal/pipeline] during header frame serialization.
-	HeaderOrder []string
-
-	// H2Settings overrides default HTTP/2 SETTINGS and PRIORITY frame parameters
-	// (HEADER_TABLE_SIZE, INITIAL_WINDOW_SIZE, MAX_FRAME_SIZE, MAX_CONCURRENT_STREAMS) to mirror target browsers.
-	// Evaluated in [Client.reapplyH2Settings] and applied to [fingerprint/h2.FramedTransport].
-	H2Settings *h2.Settings
-
-	// H3Settings overrides default QUIC/HTTP/3 flow control receive window limits and QPACK settings.
-	H3Settings *h3.Settings
-
-	// P0fSignature spoofs L3/L4 TCP/IP stack parameters (TTL, Window Size, MSS, SYN packet options)
-	// to defeat passive OS fingerprinting systems (p0f / SYN packet analyzers).
-	// Evaluated in [transport.UniversalDialer] during TCP SYN packet construction.
-	P0fSignature *p0f.Signature
-
-	// PacketPadding injects randomized HTTP header padding to disguise exact payload byte lengths against DPI analysis.
-	PacketPadding *fingerprint.PaddingConfig
-
-	// CertificatePins maps domain patterns to expected SHA-256 Subject Public Key Info (SPKI) hashes (RFC 7469).
-	// Connections to pinned domains are terminated immediately if the server's certificate SPKI does not match.
-	CertificatePins CertificatePinMap
-
-	// CertCompression specifies RFC 8879 certificate compression algorithms (Brotli, Zstd, Zlib) for TLS handshakes.
-	CertCompression []cert.CompressionAlgorithm
-
-	// ECHConfigList contains raw RFC 9484 Encrypted Client Hello configuration bytes.
-	ECHConfigList []byte
-
-	// SessionCache manages proxy-isolated TLS session ticket resumption across reconnects.
-	SessionCache fingerprint.SessionCache
-
-	// JA4Callback is a post-handshake hook invoked with calculated JA4/JA4H fingerprint reports.
-	JA4Callback func(ja4.Report)
-
-	// H2Configurer allows direct customization of low-level x/net/http2 transport configurations.
-	H2Configurer fingerprint.HTTP2Configurer
-
-	// AutoECH automatically resolves Encrypted Client Hello (ECH) keys via DNS HTTPS (Type 65 / RFC 9460) records.
-	// Evaluated in [transport.UniversalDialer] during TLS handshake preparation.
-	AutoECH bool
-
-	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001 / RFC 9846).
-	//
-	// CAUTION: Replay Attack Vulnerability:
-	// 0-RTT data is susceptible to network replay attacks. Use primarily for idempotent GET/HEAD requests.
-	Enable0RTT bool
-}
-
-// Clone creates a deep copy of FingerprintConfig and its nested maps, slices, and pointers.
-func (f FingerprintConfig) Clone() FingerprintConfig {
-	cloned := f
-	cloned.TLSClientHelloID = clonePtr(f.TLSClientHelloID)
-	cloned.H2Settings = clonePtr(f.H2Settings)
-	cloned.H3Settings = clonePtr(f.H3Settings)
-	cloned.PacketPadding = clonePtr(f.PacketPadding)
-	cloned.CertificatePins = f.CertificatePins.Clone()
-
-	if len(f.HeaderOrder) > 0 {
-		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
-	}
-
-	if len(f.CertCompression) > 0 {
-		cloned.CertCompression = slices.Clone(f.CertCompression)
-	}
-
-	if len(f.ECHConfigList) > 0 {
-		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
-	}
-
-	if len(f.ALPN) > 0 {
-		cloned.ALPN = slices.Clone(f.ALPN)
-	}
-
-	return cloned
-}
-
-// ToPipelineFingerprint extracts pipeline-specific fingerprint parameters.
-func (f FingerprintConfig) ToPipelineFingerprint() pipeline.ClientFingerprint {
-	return pipeline.ClientFingerprint{
-		PacketPadding: f.PacketPadding,
-	}
-}
-
-// RequiresRequestContext reports whether fingerprint settings require attaching RequestConfig to request contexts.
-func (f FingerprintConfig) RequiresRequestContext() bool {
-	return f.TLSClientHelloSpecProvider != nil ||
-		len(f.CertificatePins) > 0 ||
-		f.P0fSignature != nil ||
-		f.JA4Callback != nil
-}
-
-// IsBaremetalEligible reports whether fingerprint settings permit bypassing the pipeline.
-func (f FingerprintConfig) IsBaremetalEligible() bool {
-	return !f.RequiresRequestContext() && f.PacketPadding == nil
 }
 
 // ============================================================================
@@ -917,12 +675,6 @@ type ClientDefaults struct {
 	// BaseResponse provides an envelope factory function used for structured API response unwrapping.
 	BaseResponse func() BaseResponse
 
-	// ChallengeSolver delegates Anti-DDoS and WAF challenge solving (e.g. Cloudflare Turnstile) to external drivers.
-	ChallengeSolver challenge.Solver
-
-	// ChallengeDetector determines whether an HTTP response represents a WAF/DDoS challenge page.
-	ChallengeDetector challenge.Detector
-
 	// Inspector captures and records request traces for real-time diagnostic telemetry inspection.
 	Inspector telemetry.TrafficInspector
 
@@ -940,9 +692,6 @@ type ClientDefaults struct {
 
 	// DefaultMods holds default functional request modifiers applied to every outgoing request.
 	DefaultMods []RequestModifier
-
-	// UARotationProfiles holds user agents and Client Hints for automatic browser persona rotation.
-	UARotationProfiles []BrowserProfile
 
 	// DictionaryStore caches HTTP compression dictionaries conforming to RFC 9842.
 	DictionaryStore *dict.Store
@@ -977,13 +726,6 @@ func (d ClientDefaults) Clone() ClientDefaults {
 
 	cloned.Decoders = d.Decoders.Clone()
 
-	if len(d.UARotationProfiles) > 0 {
-		cloned.UARotationProfiles = make([]BrowserProfile, len(d.UARotationProfiles))
-		for i, p := range d.UARotationProfiles {
-			cloned.UARotationProfiles[i] = p.Clone()
-		}
-	}
-
 	cloned.Pipeline = d.Pipeline.Clone()
 
 	return cloned
@@ -1001,7 +743,6 @@ func (d ClientDefaults) IsBaremetalEligible() bool {
 		d.Inspector == nil &&
 		len(d.BeforeRequest) == 0 &&
 		len(d.AfterResponse) == 0 &&
-		len(d.UARotationProfiles) == 0 &&
 		!d.RefererAutomaton &&
 		!d.Pipeline.IsActive()
 }
@@ -1015,23 +756,6 @@ func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []
 	res := make([]func(*http.Response, []byte) error, len(d.SoftErrorDetectors))
 	for i, det := range d.SoftErrorDetectors {
 		res[i] = det
-	}
-
-	return res
-}
-
-// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
-func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
-	if len(d.UARotationProfiles) == 0 {
-		return nil
-	}
-
-	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
-	for i, p := range d.UARotationProfiles {
-		res[i] = pipeline.BrowserProfile{
-			UserAgent:   p.UserAgent,
-			ClientHints: p.ClientHints,
-		}
 	}
 
 	return res
@@ -1055,15 +779,6 @@ func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 //
 // PipelineConfig governs which stages are active and configures their memory bounds and thresholds.
 type PipelineConfig struct {
-	// DPIJitter configures randomized microsecond-scale write delay jitter between TCP segments.
-	//
-	// Deep Packet Inspection (DPI) evasion:
-	// Stateful firewalls and ISP middleboxes classify automated traffic not only by TLS ClientHello
-	// signatures, but also by inter-packet arrival times (IAT) and TCP packet sizing.
-	// DPIJitter disrupts ML-based timing analysis by injecting controlled entropy into socket writes.
-	// If nil, socket writes proceed without delay.
-	DPIJitter *DPIJitterConfig
-
 	// ProxyFailover coordinates automatic proxy endpoint rotation and retry failover.
 	//
 	// Distributed Resiliency:
@@ -1132,13 +847,6 @@ type PipelineConfig struct {
 	// If set to 0 (unset), automatically inherits [ClientDefaults.MultiReadThreshold].
 	MultiReadThreshold int64
 
-	// RotateUA enables automatic User-Agent and Client Hints rotation across sequential transactions.
-	//
-	// Anti-Clustering Evasion:
-	// Prevents edge WAFs from clustering requests from the same client session by rotating browser
-	// personas while maintaining synchronized TLS ClientHello profiles.
-	RotateUA bool
-
 	// Inspect enables real-time transaction broadcasting to the embedded Web Inspector telemetry dashboard.
 	// When true, all request/response pairs are mirrored over WebSockets to the diagnostic inspector UI.
 	Inspect bool
@@ -1153,21 +861,11 @@ type PipelineConfig struct {
 	// Validate enforces application-level status code and header integrity checks before body unmarshaling.
 	// When true, responses with unexpected non-2xx status codes or invalid content types are rejected early.
 	Validate bool
-
-	// Challenge enables autonomous Anti-DDoS and WAF challenge detection and solving.
-	//
-	// Autonomous Bypass:
-	// Detects HTTP 403/503 challenge pages (Cloudflare Turnstile, AWS WAF, Akamai), pauses the execution
-	// pipeline, invokes the registered [challenge.Solver], and automatically retries the original request
-	// with acquired clearance cookies and authorization headers.
-	Challenge bool
 }
 
 // Clone creates a deep copy of PipelineConfig and its sub-configurations.
 func (p PipelineConfig) Clone() PipelineConfig {
 	cloned := p
-	cloned.DPIJitter = clonePtr(p.DPIJitter)
-
 	if p.ProxyFailover != nil {
 		pf := *p.ProxyFailover
 		pf.Proxies = slices.Clone(pf.Proxies)
@@ -1211,8 +909,8 @@ func (p PipelineConfig) Clone() PipelineConfig {
 
 // IsActive reports whether any pipeline stage or middleware interception is enabled.
 func (p PipelineConfig) IsActive() bool {
-	return p.Decompress || p.Validate || p.Challenge || p.HAR != nil || p.Cache != nil ||
-		p.Hedging != nil || p.DPIJitter != nil || p.ProxyFailover != nil || p.Inspect || p.RotateUA
+	return p.Decompress || p.Validate || p.HAR != nil || p.Cache != nil ||
+		p.Hedging != nil || p.ProxyFailover != nil || p.Inspect
 }
 
 // DPIJitterConfig configures randomized delay bounds applied between socket write operations
@@ -1398,28 +1096,8 @@ func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 		cfg.Fragment = c.cfg.Network.FragmentConfig
 	}
 
-	if cfg.P0fSignature == nil {
-		cfg.P0fSignature = c.cfg.Fingerprint.P0fSignature
-	}
-
-	if cfg.SessionCache == nil {
-		cfg.SessionCache = c.cfg.Fingerprint.SessionCache
-	}
-
-	if cfg.PacketPadding == nil {
-		cfg.PacketPadding = c.cfg.Fingerprint.PacketPadding
-	}
-
 	if cfg.SocketController == nil {
 		cfg.SocketController = c.cfg.Network.SocketController
-	}
-
-	if cfg.ClientHelloSpecProvider == nil {
-		cfg.ClientHelloSpecProvider = c.cfg.Fingerprint.TLSClientHelloSpecProvider
-	}
-
-	if cfg.JA4Callback == nil {
-		cfg.JA4Callback = c.cfg.Fingerprint.JA4Callback
 	}
 
 	if cfg.QueryEncoder == nil && c.cfg.Defaults.QueryEncoder != nil {
@@ -1437,37 +1115,6 @@ func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 			}
 		}
 	}
-
-	if len(c.cfg.Fingerprint.CertificatePins) > 0 {
-		c.mergeCertificatePins(cfg)
-	}
-}
-
-// mergeCertificatePins merges client-level SHA-256 certificate pins into a per-request config.
-func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
-	for domain, hashes := range c.cfg.Fingerprint.CertificatePins {
-		if len(hashes) == 0 {
-			continue
-		}
-
-		if cfg.CertificatePins == nil {
-			cfg.CertificatePins = make(map[string][]string, len(c.cfg.Fingerprint.CertificatePins))
-		}
-
-		existing := cfg.CertificatePins[domain]
-		if len(existing) == 0 {
-			cfg.CertificatePins[domain] = slices.Clone(hashes)
-			continue
-		}
-
-		for _, h := range hashes {
-			if !slices.Contains(existing, h) {
-				existing = append(existing, h)
-			}
-		}
-
-		cfg.CertificatePins[domain] = existing
-	}
 }
 
 // resolvePipeline computes the active PipelineConfig for an outgoing HTTP request context.
@@ -1477,10 +1124,6 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	}
 
 	pipe := c.cfg.Defaults.Pipeline
-	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
-		pipe.RotateUA = true
-	}
-
 	if pipe.SizeLimit == 0 {
 		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
@@ -1514,9 +1157,6 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 		Inspector:                    c.cfg.Defaults.Inspector,
 		ResponseValidator:            c.cfg.Defaults.ResponseValidator,
 		SoftErrorDetectors:           c.cfg.Defaults.toInternalSoftErrorDetectors(),
-		ChallengeDetector:            c.cfg.Defaults.ChallengeDetector,
-		ChallengeSolver:              c.cfg.Defaults.ChallengeSolver,
-		UARotationProfiles:           c.cfg.Defaults.toInternalProfiles(),
 		RefererState:                 c.referer,
 		MaxResponseSize:              c.cfg.Defaults.MaxResponseSize,
 		MultiReadThreshold:           c.cfg.Defaults.MultiReadThreshold,
@@ -1537,19 +1177,10 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 	res := pipeline.PipelineConfig{
 		SizeLimit:          p.SizeLimit,
 		MultiReadThreshold: p.MultiReadThreshold,
-		RotateUA:           p.RotateUA,
 		Inspect:            p.Inspect,
 		Decompress:         p.Decompress,
 		Validate:           p.Validate,
-		Challenge:          p.Challenge,
 	}
-	if p.DPIJitter != nil {
-		res.DPIJitter = &pipeline.DPIJitterConfig{
-			MinDelay: p.DPIJitter.MinDelay,
-			MaxDelay: p.DPIJitter.MaxDelay,
-		}
-	}
-
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
 			Proxies:    p.ProxyFailover.Proxies,
@@ -1608,19 +1239,10 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 	res := PipelineConfig{
 		SizeLimit:          p.SizeLimit,
 		MultiReadThreshold: p.MultiReadThreshold,
-		RotateUA:           p.RotateUA,
 		Inspect:            p.Inspect,
 		Decompress:         p.Decompress,
 		Validate:           p.Validate,
-		Challenge:          p.Challenge,
 	}
-	if p.DPIJitter != nil {
-		res.DPIJitter = &DPIJitterConfig{
-			MinDelay: p.DPIJitter.MinDelay,
-			MaxDelay: p.DPIJitter.MaxDelay,
-		}
-	}
-
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &ProxyFailoverConfig{
 			Proxies:    slices.Clone(p.ProxyFailover.Proxies),
@@ -1780,4 +1402,44 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return transport.ApplyMSSLimit(conn, mss)
+}
+
+// ExtensionConfig provides standard hooks for third-party plugins (like aoni-browser)
+// to modify low-level transport and serialization behaviors without altering the core engine.
+type ExtensionConfig struct {
+	// DialTLSContext allows fully overriding the TLS handshake process (e.g., injecting uTLS).
+	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// HeaderOrder defines strict HTTP/1 and HTTP/2 header serialization order.
+	HeaderOrder []string
+
+	// PseudoHeaderOrder defines strict HTTP/2 pseudo-header serialization order (e.g., :method, :authority, :path).
+	PseudoHeaderOrder []string
+
+	// OverrideH2Settings allows injecting custom HTTP/2 SETTINGS frames (e.g., MAX_CONCURRENT_STREAMS).
+	OverrideH2Settings map[uint16]uint32
+}
+
+// Clone creates a memory-isolated deep copy of the extension config.
+func (e ExtensionConfig) Clone() ExtensionConfig {
+	cloned := e
+
+	if e.HeaderOrder != nil {
+		cloned.HeaderOrder = make([]string, len(e.HeaderOrder))
+		copy(cloned.HeaderOrder, e.HeaderOrder)
+	}
+
+	if e.PseudoHeaderOrder != nil {
+		cloned.PseudoHeaderOrder = make([]string, len(e.PseudoHeaderOrder))
+		copy(cloned.PseudoHeaderOrder, e.PseudoHeaderOrder)
+	}
+
+	if e.OverrideH2Settings != nil {
+		cloned.OverrideH2Settings = make(map[uint16]uint32, len(e.OverrideH2Settings))
+		for k, v := range e.OverrideH2Settings {
+			cloned.OverrideH2Settings[k] = v
+		}
+	}
+
+	return cloned
 }

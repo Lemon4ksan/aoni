@@ -206,25 +206,6 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 		assert.Equal(t, "Basic YWRtaW46c2VjcmV0MTIz", req2.Header("Authorization"))
 	})
 
-	t.Run("pkce_modifiers", func(t *testing.T) {
-		t.Parallel()
-
-		// Test Vector from RFC 7636 Appendix B
-		const (
-			verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-			challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-		)
-
-		reqAuth := newDummyRequest()
-		mod.WithPKCE(verifier).Apply(reqAuth)
-		assert.Equal(t, challenge, reqAuth.QueryParam("code_challenge"))
-		assert.Equal(t, "S256", reqAuth.QueryParam("code_challenge_method"))
-
-		reqToken := newDummyRequest()
-		mod.WithPKCEVerifier(verifier).Apply(reqToken)
-		assert.Equal(t, verifier, reqToken.QueryParam("code_verifier"))
-	})
-
 	t.Run("dynamic_header", func(t *testing.T) {
 		t.Parallel()
 
@@ -530,32 +511,6 @@ func TestMod_WebSocketModifiers(t *testing.T) {
 		"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
 		req5.Header("Sec-WebSocket-Extensions"),
 	)
-}
-
-func TestMod_SPKIPin(t *testing.T) {
-	t.Parallel()
-
-	req := newDummyRequest()
-	mod.WithSPKIPin("example.com", `pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`).Apply(req)
-	reqCfg := aoni.GetRequestConfig(req.Context())
-	require.NotNil(t, reqCfg)
-	assert.Contains(t, reqCfg.CertificatePins["example.com"], "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
-}
-
-func TestMod_PrivateToken(t *testing.T) {
-	t.Parallel()
-
-	req1 := newDummyRequest()
-	mod.WithPrivateToken("sample-b64-token").Apply(req1)
-	assert.Equal(t, `PrivateToken token="sample-b64-token"`, req1.Header("Authorization"))
-
-	req2 := newDummyRequest()
-	mod.WithPrivateToken(`PrivateToken token="sample-b64-token"`).Apply(req2)
-	assert.Equal(t, `PrivateToken token="sample-b64-token"`, req2.Header("Authorization"))
-
-	req3 := newDummyRequest()
-	mod.WithPrivateStateToken("pst-sample-payload").Apply(req3)
-	assert.Equal(t, "pst-sample-payload", req3.Header("Sec-Private-State-Token"))
 }
 
 func TestMod_WebPush(t *testing.T) {

@@ -12,9 +12,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
@@ -43,39 +40,32 @@ type Tx struct {
 	SizeLimit            int64           // Maximum allowed response body bytes
 	MultiReadDisableDisk bool            // True to disable temporary file disk buffering
 
-	DPIJitter     *DPIJitterConfig     // TCP handshake packet jitter configuration
 	ProxyFailover *ProxyFailoverConfig // Secondary proxy failover policy
 	Hedging       *HedgingConfig       // Request hedging racing configuration
 	Cache         *CacheConfig         // Response caching parameters
 	HAR           *HARConfig           // HAR capture configuration
 	Redact        *RedactConfig        // Header redaction rules
 
-	Decoder                 core.ResponseDecoder                 // Primary response decoder
-	ErrorModel              any                                  // Structured error target model
-	ForceContentType        string                               // Forced MIME content-type override
-	Label                   string                               // Metric tracking label
-	MultipartBoundary       string                               // Custom multipart boundary
-	OrderedHeaders          []string                             // Emulated browser header order
-	ALPNOverride            []string                             // Custom TLS ALPN protocol list
-	JA4ReportStore          *JA4ReportStore                      // Store for computed JA4 fingerprints
-	Fallback                core.FallbackFunc                    // Failure fallback handler
-	ResponseValidator       func(resp *http.Response) error      // Custom response validation predicate
-	SoftErrorDetectors      []func(*http.Response, []byte) error // Custom response soft error detectors
-	RetryPolicy             *core.RetryOverride                  // Per-request retry policy
-	P0fSignature            *p0f.Signature                       // OS TCP/IP stack signature
-	SessionCache            fingerprint.SessionCache             // Proxy-isolated TLS session cache
-	PacketPadding           *fingerprint.PaddingConfig           // DPI packet padding settings
-	SocketController        netutil.SocketController             // Low-level socket dialer hook
-	ClientHelloSpecProvider fingerprint.ClientHelloSpecProvider  // Custom uTLS ClientHello provider
-	JA4Callback             func(ja4.Report)                     // JA4 computation callback
-	Metadata                map[string]any                       // Request metadata store
-	TraceInfo               *telemetry.TraceInfo                 // Fine-grained request tracer
-	HostRewrite             *netutil.HostRewriteConfig           // DNS hostname rewrite rules
-	Fragment                *fragment.Config                     // TCP packet fragmentation configuration
-	CertificatePins         map[string][]string                  // Domain public key hash pins
-	Modifiers               []core.RequestModifier               // Pipeline modifiers
-	QueryEncoder            core.QueryEncoder                    // Custom query encoder
-	Decoders                map[string]core.ResponseDecoder      // Map of MIME content-type decoders
+	Decoder            core.ResponseDecoder                 // Primary response decoder
+	ErrorModel         any                                  // Structured error target model
+	ForceContentType   string                               // Forced MIME content-type override
+	Label              string                               // Metric tracking label
+	MultipartBoundary  string                               // Custom multipart boundary
+	OrderedHeaders     []string                             // Emulated browser header order
+	ALPNOverride       []string                             // Custom TLS ALPN protocol list
+	Fallback           core.FallbackFunc                    // Failure fallback handler
+	ResponseValidator  func(resp *http.Response) error      // Custom response validation predicate
+	SoftErrorDetectors []func(*http.Response, []byte) error // Custom response soft error detectors
+	RetryPolicy        *core.RetryOverride                  // Per-request retry policy
+	SocketController   netutil.SocketController             // Low-level socket dialer hook
+	Metadata           map[string]any                       // Request metadata store
+	TraceInfo          *telemetry.TraceInfo                 // Fine-grained request tracer
+	HostRewrite        *netutil.HostRewriteConfig           // DNS hostname rewrite rules
+	Fragment           *fragment.Config                     // TCP packet fragmentation configuration
+	CertificatePins    map[string][]string                  // Domain public key hash pins
+	Modifiers          []core.RequestModifier               // Pipeline modifiers
+	QueryEncoder       core.QueryEncoder                    // Custom query encoder
+	Decoders           map[string]core.ResponseDecoder      // Map of MIME content-type decoders
 
 	// Unsafe mode custom phase sequence
 	UnsafePhaseOrder []PhaseID                // Custom phase execution order
@@ -102,7 +92,6 @@ func ReleaseTx(tx *Tx) {
 }
 
 func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {
-	tx.DPIJitter = pipe.DPIJitter
 	tx.ProxyFailover = pipe.ProxyFailover
 	tx.Hedging = pipe.Hedging
 	tx.Cache = pipe.Cache
@@ -128,7 +117,6 @@ func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {
 		tx.MultiReadThreshold = reqCfg.MultiReadThreshold
 		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk
 		tx.ProxyURL = reqCfg.ProxyAddr
-		tx.JA4ReportStore = reqCfg.JA4ReportStore
 		tx.TraceInfo = reqCfg.TraceInfo
 		tx.ResponseValidator = reqCfg.ResponseValidator
 		tx.SoftErrorDetectors = reqCfg.SoftErrorDetectors

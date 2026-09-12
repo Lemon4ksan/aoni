@@ -16,12 +16,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/ip"
-	utls "github.com/refraction-networking/utls"
 
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
@@ -42,7 +38,6 @@ type DialConfig struct {
 	StackDriver          netdial.RawStackDriver
 	L2Device             netdial.L2Device
 	SourceRotator        *ip.SourceIPRotator
-	P0fSignature         *p0f.Signature
 	SocketController     netdial.SocketController
 	FragmentConfig       *fragment.Config
 	HostRewriteRules     map[string]string
@@ -58,21 +53,10 @@ type DialConfig struct {
 	BusyPollMicroseconds int
 
 	// TLS / uTLS Options
-	HelloID         *utls.ClientHelloID
-	SpecProvider    netdial.ClientHelloSpecProvider
-	SessionCache    utls.ClientSessionCache
-	CertificatePins map[string][]string
-	CertCompression []cert.CompressionAlgorithm
-	ALPNOverride    []string
-	ECHConfigList   []byte
-	BaseTLSConfig   *tls.Config
-	ServerName      string
-	HeaderOrder     []string
-	JA4Callback     func(ja4.Report)
-	JA4ReportStore  *ja4.Report
-	ConnFilters     []ConnFilter
-	AutoECH         bool
-	Enable0RTT      bool
+	BaseTLSConfig  *tls.Config
+	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	ServerName     string
+	ConnFilters    []ConnFilter
 }
 
 // UniversalDialer is a thread-safe, stateless L4/L7 execution engine.
@@ -135,6 +119,10 @@ func (d *UniversalDialer) DialContext(ctx context.Context, network, addr string,
 // DialTLSContext establishes an encrypted TLS or uTLS connection over L4 TCP,
 // negotiating ALPN tokens and applying browser ClientHello fingerprints.
 func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr string, cfg DialConfig) (net.Conn, error) {
+	if cfg.DialTLSContext != nil {
+		return cfg.DialTLSContext(ctx, network, addr)
+	}
+
 	if cfg.TCPDelay > 0 {
 		if err := applyDelay(ctx, cfg.TCPDelay); err != nil {
 			return nil, err
@@ -166,7 +154,11 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 
 // DialH2 dials an L4 connection and forces uTLS handshake with ALPN "h2".
 func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfig) (net.Conn, error) {
-	cfg.ALPNOverride = []string{"h2", "http/1.1"}
+	if cfg.BaseTLSConfig == nil {
+		cfg.BaseTLSConfig = &tls.Config{}
+	}
+
+	cfg.BaseTLSConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	network := generic.Coalesce(cfg.Network, "tcp")
 
@@ -194,7 +186,6 @@ func buildNetdialOptions(cfg DialConfig) netdial.DialOptions {
 		StackDriver:          cfg.StackDriver,
 		L2Device:             cfg.L2Device,
 		SourceRotator:        cfg.SourceRotator,
-		P0fSignature:         cfg.P0fSignature,
 		SocketController:     cfg.SocketController,
 		FragmentConfig:       cfg.FragmentConfig,
 		HappyEyeballs:        cfg.HappyEyeballs,

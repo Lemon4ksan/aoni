@@ -21,14 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/fingerprint"
-	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -247,7 +244,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 	t.Parallel()
 
 	defaults := ClientDefaults{}
-	pipe := New(defaults, ClientFingerprint{})
+	pipe := New(defaults)
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -273,7 +270,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 func TestPipeline_UnsafePhaseOrder_And_Hooks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 	doer := &mockDoer{}
 
 	mReq := newMockRequest(t.Context(), "GET", "http://unsafe.com")
@@ -321,7 +318,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 	ctx, reqCfg := AllocRequestConfig(t.Context())
 	reqCfg.DisabledFlags = FlagDecompress | FlagValidate
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/flags")
 	mReq.SetContext(ctx)
@@ -345,7 +342,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 func TestPipeline_ResponseSizeLimit(t *testing.T) {
 	t.Parallel()
 
-	pipe := New(ClientDefaults{}, ClientFingerprint{})
+	pipe := New(ClientDefaults{})
 
 	t.Run("exceeds_content_length_fails_early", func(t *testing.T) {
 		t.Parallel()
@@ -396,7 +393,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	var gzBuf bytes.Buffer
 
@@ -439,7 +436,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	respConflict := &http.Response{
 		Header: http.Header{"Content-Length": []string{"100", "200"}},
 	}
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 	txConflict := AcquireTx(t.Context())
 	txConflict.Flags = FlagValidate
 	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, txConflict)
@@ -455,29 +452,8 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	_, errSize := pipeEngine.postProcessResponse(&http.Request{}, respTooLarge, txSize)
 	assert.Error(t, errSize)
 
-	solver := &mockSolver{}
-	defaultsWAF := ClientDefaults{
-		ChallengeDetector: func(r *http.Response) (bool, error) {
-			return r.StatusCode == http.StatusForbidden, nil
-		},
-		ChallengeSolver: solver,
-	}
-
-	pipeWAF := New(defaultsWAF, ClientFingerprint{})
 	txWAF := AcquireTx(t.Context())
 	txWAF.Flags = FlagChallenge
-
-	respWAF := &http.Response{
-		StatusCode: http.StatusForbidden,
-		Header:     http.Header{"Content-Type": []string{"text/html"}},
-		Body:       io.NopCloser(strings.NewReader("<html>cf-challenge</html>")),
-	}
-
-	reqWAF, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://waf.com", nil)
-	solvedResp, errWAF := pipeWAF.postProcessResponse(reqWAF, respWAF, txWAF)
-	require.NoError(t, errWAF)
-	assert.True(t, solver.solved)
-	assert.Equal(t, http.StatusOK, solvedResp.StatusCode)
 
 	respTranscode := &http.Response{
 		Header: http.Header{"Content-Type": []string{"application/json; charset=windows-1251"}},
@@ -492,7 +468,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	var calls atomic.Int32
 
@@ -538,7 +514,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 func TestPipeline_ProxyFailover_And_Hedging(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	var attempts atomic.Int32
 
@@ -578,7 +554,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 	t.Parallel()
 
 	cacheStore := newMockCacheStore()
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	cacheCfg := &CacheConfig{
 		Store:      cacheStore,
@@ -630,7 +606,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 	stdReq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/trace", nil)
 
 	traceInfo := &telemetry.TraceInfo{}
@@ -657,39 +633,6 @@ func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 
 	assert.GreaterOrEqual(t, traceInfo.Total, time.Duration(0))
 	assert.Equal(t, int64(500), traceInfo.ResponseSize)
-
-	ReleaseTx(tx)
-}
-
-func TestPipeline_FinalizeJA4Report(t *testing.T) {
-	t.Parallel()
-
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
-
-	pipeEngine.finalizeJA4Report(nil)
-
-	traceInfo := &telemetry.TraceInfo{}
-	store := &JA4ReportStore{
-		Target: traceInfo,
-		Report: &ja4.Report{
-			JA4:         "t13d1516h2_8daaf6152771_e5627efa2ab1",
-			Protocol:    "t",
-			Version:     "13",
-			SNI:         "d",
-			CipherCount: 15,
-			ExtCount:    16,
-			ALPN:        "h2",
-		},
-	}
-
-	tx := AcquireTx(t.Context())
-	tx.JA4ReportStore = store
-
-	pipeEngine.finalizeJA4Report(tx)
-
-	require.NotNil(t, traceInfo.JA4)
-	assert.Equal(t, "t13d1516h2_8daaf6152771_e5627efa2ab1", traceInfo.JA4.JA4)
-	assert.Equal(t, "h2", traceInfo.JA4.ALPN)
 
 	ReleaseTx(tx)
 }
@@ -737,71 +680,8 @@ func TestRequestConfig_Lifecycle(t *testing.T) {
 	CloseResponse(nil)
 }
 
-func TestPipeline_PhasePrep_Full(t *testing.T) {
-	t.Parallel()
-
-	var beforeHookCalled bool
-
-	defaults := ClientDefaults{
-		BeforeRequest: []func(*http.Request){
-			func(_ *http.Request) { beforeHookCalled = true },
-		},
-		UARotationProfiles: []BrowserProfile{
-			{UserAgent: "RotatedUA/1.0", ClientHints: map[string]string{"Sec-CH-UA": "Profile1"}},
-		},
-		RefererAutomaton: true,
-		RefererState:     &RefererState{LastURL: *generic.NewSafe("http://previous.com")},
-	}
-
-	fingerprintConfig := ClientFingerprint{
-		PacketPadding: &fingerprint.PaddingConfig{
-			MinPaddingBytes: 5,
-			MaxPaddingBytes: 10,
-			PaddingHeader:   "X-Custom-Padding",
-		},
-	}
-
-	pipeEngine := New(defaults, fingerprintConfig)
-
-	mReq := newMockRequest(t.Context(), "POST", "http://example.com/api")
-	mReq.SetBodyBytes([]byte("upload payload"))
-
-	ctx, reqCfg := AllocRequestConfig(t.Context())
-
-	var uploadBytesRead int64
-
-	reqCfg.UploadProgress = func(current, _ int64) {
-		uploadBytesRead = current
-	}
-	reqCfg.TimeoutOverride = 5 * time.Second
-	reqCfg.ProxyAddr, _ = url.Parse("http://proxy.local:8080")
-
-	mReq.SetHeader("X-Mod-Header", "injected")
-	mReq.SetContext(ctx)
-
-	tx := AcquireTx(ctx)
-	tx.Flags = FlagRotateUA | FlagDPIJitter | FlagRedact
-	tx.DPIJitter = &DPIJitterConfig{MinDelay: 1 * time.Millisecond, MaxDelay: 2 * time.Millisecond}
-	tx.Redact = &RedactConfig{HeadersToRedact: []string{"Authorization"}}
-
-	stdReq := pipeEngine.prepareRequest(mReq, tx)
-
-	assert.True(t, beforeHookCalled)
-	assert.NotEmpty(t, stdReq.Header.Get("X-Custom-Padding"))
-	assert.Equal(t, "http://previous.com", stdReq.Header.Get("Referer"))
-	assert.Equal(t, "RotatedUA/1.0", stdReq.Header.Get("User-Agent"))
-	assert.Equal(t, "Profile1", stdReq.Header.Get("Sec-CH-UA"))
-	assert.Equal(t, "injected", stdReq.Header.Get("X-Mod-Header"))
-
-	_, _ = io.ReadAll(stdReq.Body)
-
-	assert.Greater(t, uploadBytesRead, int64(0))
-
-	ReleaseTx(tx)
-}
-
 func TestPipeline_Cloudflare403WAF(t *testing.T) {
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	var attempts atomic.Int32
 
@@ -830,7 +710,7 @@ func TestPipeline_Cloudflare403WAF(t *testing.T) {
 }
 
 func TestPipeline_MisdirectedRequest421(t *testing.T) {
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	var attempts atomic.Int32
 
@@ -855,7 +735,7 @@ func TestPipeline_MisdirectedRequest421(t *testing.T) {
 }
 
 func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		hdr := make(http.Header)
@@ -880,7 +760,7 @@ func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
 }
 
 func TestPipeline_ServiceUnavailable503(t *testing.T) {
-	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{

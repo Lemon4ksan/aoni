@@ -17,7 +17,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
 type NotFoundResponse struct {
@@ -47,14 +46,6 @@ func main() {
 			}
 		} else {
 			fmt.Printf("Non-API error: %v\n", err)
-		}
-	}
-
-	// Example 2: Check for Cloudflare challenge
-	_, err = client.GetTo[any](ctx, "/challenge-protected-page")
-	if err != nil {
-		if errors.Is(err, challenge.ErrCloudflareDetected) {
-			fmt.Println("Cloudflare challenge detected, need browser-level solving")
 		}
 	}
 
