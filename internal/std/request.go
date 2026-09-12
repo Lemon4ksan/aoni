@@ -307,6 +307,24 @@ func (s *Request) SetBodyStream(r io.Reader, contentLength int64) {
 		s.req.Body = io.NopCloser(r)
 	}
 
+	if seeker, ok := r.(io.Seeker); ok {
+		s.req.GetBody = func() (io.ReadCloser, error) {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
+
+			if rc, ok := r.(io.ReadCloser); ok {
+				return rc, nil
+			}
+
+			return io.NopCloser(r), nil
+		}
+	} else if rewinder, ok := r.(core.BodyRewinder); ok {
+		s.req.GetBody = rewinder.GetBody
+	} else {
+		s.req.GetBody = nil
+	}
+
 	s.req.ContentLength = contentLength
 }
 

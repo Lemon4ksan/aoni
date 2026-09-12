@@ -50,14 +50,6 @@ Security gatekeepers evaluate a 4-tuple vector:
 
 $$\text{Vector} = \langle \text{TTL},\text{Window Size},\text{TCP Options Order},\text{DF Bit} \rangle$$
 
-#### Operating System Signature Discrepancies
-
-| OS Profile | Initial TTL | Typical Window Size | TCP Options Sequence | Don't Fragment (DF) |
-| :--- | :---: | :---: | :--- | :---: |
-| **Linux (Default Go)** | 64 | $10 \times \text{MSS}$ | `mss,sok,ts,nop,ws` | Set (`1`) |
-| **Windows 10 / 11** | 128 | 8192 / 64240 | `mss,nop,ws,nop,nop,sok` | Set (`1`) |
-| **macOS / iOS** | 64 | 65535 | `mss,nop,ws,sok,ts` | Set (`1`) |
-
 #### How `aoni` Bypasses p0f
 Before the OS kernel sends the `SYN` packet, `aoni` intercepts the socket file descriptor via system calls (`syscall.SetsockoptInt`):
 1. **TTL Alignment:** Overrides `IP_TTL` to match the target OS profile (e.g., `128` for Windows).
@@ -93,12 +85,6 @@ A common flaw in rotating proxy workflows is **TLS Session Ticket Correlation**:
                                      │
 [ Request 2 via Proxy B ] ──► (Reuses Same TLS Session Ticket) ──► (CDN Correlates both Exit IPs to 1 Client!)
 ```
-
-#### The Correlation Vulnerability
-When connecting over TLS 1.3, the server issues a `NewSessionTicket` frame containing an encrypted session state. If a client rotates its proxy IP address (Proxy A $\rightarrow$ Proxy B) but reuses the cached TLS Session Ticket:
-1. The CDN sees Request 2 originating from Proxy B's IP address.
-2. However, the ClientHello carries the Session Ticket issued to Proxy A.
-3. The CDN immediately links Proxy A and Proxy B to the **exact same physical client**, burning the entire proxy pool.
 
 #### The `aoni` Defense (`ProxyAwareSessionCache`)
 `aoni` keys its TLS session cache using a compound key:

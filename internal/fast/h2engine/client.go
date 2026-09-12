@@ -41,10 +41,11 @@ type Context struct {
 	Response      *h1engine.Response
 	Err           chan error
 	Trailers      map[string][]string
-	StreamID      uint32
-	streamWindow  int32
-	state         atomic.Int32
-	headersParsed bool
+	StreamID       uint32
+	streamWindow   int32
+	streamRxWindow int32
+	state          atomic.Int32
+	headersParsed  bool
 }
 
 // State yields current lifecycle state of the HTTP/2 stream.
@@ -90,7 +91,10 @@ func (cl *Client) onConnectionDropped(ctx context.Context, c *Conn) {
 	for e := cl.conns.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Conn) == c {
 			cl.conns.Remove(e)
-			_, _ = cl.createConn(ctx)
+
+			if newConn, err := cl.createConn(ctx); err == nil && newConn != nil {
+				cl.conns.PushFront(newConn)
+			}
 
 			break
 		}
@@ -112,8 +116,6 @@ func (cl *Client) createConn(ctx context.Context) (*Conn, error) {
 	if len(cl.orderedKeys) > 0 {
 		c.SetOrderedHeaders(cl.orderedKeys)
 	}
-
-	cl.conns.PushFront(c)
 
 	return c, nil
 }
@@ -324,6 +326,8 @@ func (cl *Client) dialOrWaitLateBindingLocked(ctx context.Context) (*Conn, error
 	if err != nil {
 		return nil, err
 	}
+
+	cl.conns.PushFront(c)
 
 	if existing := cl.findAvailableConnLocked(); existing != nil && existing != c {
 		return existing, nil

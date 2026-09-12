@@ -390,7 +390,7 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	uncompressed := decompressFastResponse(fastResp)
-	pr := NewPooledResponse(fastReq, fastResp)
+	pr := NewPooledResponse(nil, fastResp)
 	pr.SetUncompressed(uncompressed)
 
 	if len(trailers) > 0 {

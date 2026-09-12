@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
@@ -288,11 +289,7 @@ func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 		f.req.Header.SetContentTypeBytes(existingCT)
 	}
 
-	if rc, ok := r.(io.ReadCloser); ok {
-		f.getBody = func() (io.ReadCloser, error) {
-			return rc, nil
-		}
-	} else if seeker, ok := r.(io.Seeker); ok {
+	if seeker, ok := r.(io.Seeker); ok {
 		f.getBody = func() (io.ReadCloser, error) {
 			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 				return nil, err
@@ -304,6 +301,8 @@ func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 
 			return io.NopCloser(r), nil
 		}
+	} else if rewinder, ok := r.(core.BodyRewinder); ok {
+		f.getBody = rewinder.GetBody
 	} else {
 		f.getBody = nil
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"slices"
@@ -31,6 +32,9 @@ var (
 
 	// ErrRetryAfterExceeded is returned when the server's Retry-After delay exceeds opts.MaxRetryAfter.
 	ErrRetryAfterExceeded = errors.New("aoni/middleware: server Retry-After exceeds MaxRetryAfter limit")
+
+	// ErrCannotRewind is returned when a stream request body cannot be rewound for an automated retry.
+	ErrCannotRewind = errors.New("aoni/middleware: cannot retry request with exhausted stream body")
 )
 
 // RetryOnProxyFault is a convenience alias for [proxy.RetryCondition],
@@ -182,6 +186,14 @@ func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
 				}
 
 				if attempt > 1 {
+					if err := rewindRequestBody(req); err != nil {
+						if lastResp != nil {
+							_ = lastResp.Close()
+						}
+
+						return lastResp, err
+					}
+
 					if !allowRetryForMethod(req, activeOpts, lastResp) {
 						break
 					}
@@ -200,7 +212,15 @@ func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
 					}
 
 					if err := waitRetryDelay(ctx, sleepDur, attempt, activeOpts.AsyncThreshold); err != nil {
+						if lastResp != nil {
+							_ = lastResp.Close()
+						}
+
 						return nil, err
+					}
+
+					if lastResp != nil {
+						_ = lastResp.Close()
 					}
 				}
 
@@ -347,10 +367,7 @@ func createBackoffGenerator(opts RetryOptions) *generic.Backoff {
 		factor = 2.0
 	}
 
-	initial := opts.InitialBackoff
-	if initial == 0 && opts.Backoff > 0 {
-		initial = opts.Backoff
-	}
+	initial := generic.Coalesce(opts.InitialBackoff, opts.Backoff)
 
 	jitterFactor := 0.0
 	if opts.Jitter {
@@ -380,4 +397,74 @@ func calculateRetrySleep(resp aoni.Response, bo *generic.Backoff, opts RetryOpti
 	}
 
 	return bo.Next(), false
+}
+
+// rewindRequestBody rewinds a request body stream before replaying it in an automated retry.
+// Returns ErrCannotRewind if the body stream is exhausted and cannot be reproduced.
+func rewindRequestBody(req aoni.Request) error {
+	if req == nil || req.BodyStream() == nil {
+		return nil
+	}
+
+	if rewinder, ok := req.(core.BodyRewinder); ok {
+		rc, err := rewinder.GetBody()
+		if err != nil {
+			return err
+		}
+
+		if rc != nil {
+			req.SetBodyStream(rc, -1)
+			return nil
+		}
+	}
+
+	if httpReq := req.HTTPRequest(); httpReq != nil {
+		if httpReq.Body == nil || httpReq.Body == http.NoBody {
+			return nil
+		}
+
+		if httpReq.GetBody != nil {
+			rc, err := httpReq.GetBody()
+			if err != nil {
+				return err
+			}
+
+			httpReq.Body = rc
+
+			return nil
+		}
+
+		if seeker, ok := httpReq.Body.(io.Seeker); ok {
+			if _, err := seeker.Seek(0, io.SeekStart); err == nil {
+				return nil
+			}
+		}
+
+		return ErrCannotRewind
+	}
+
+	if engineReq, ok := req.EngineRequest().(interface {
+		GetBody() (io.ReadCloser, error)
+		SetBodyStream(io.Reader, int)
+	}); ok {
+		rc, err := engineReq.GetBody()
+		if err != nil {
+			return err
+		}
+
+		if rc != nil {
+			engineReq.SetBodyStream(rc, -1)
+			return nil
+		}
+
+		return ErrCannotRewind
+	}
+
+	if seeker, ok := req.BodyStream().(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err == nil {
+			return nil
+		}
+	}
+
+	return ErrCannotRewind
 }

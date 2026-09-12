@@ -133,7 +133,17 @@ func HandshakeUTLS(
 
 	echConfig := opts.ECHConfigList
 	if len(echConfig) == 0 && opts.AutoECH && opts.DNSResolver != nil && cleanHost != "" {
-		echConfig = resolveECHViaDNS(ctx, opts.DNSResolver, cleanHost)
+		var err error
+
+		echConfig, err = resolveECHViaDNS(ctx, opts.DNSResolver, cleanHost)
+		if err != nil || len(echConfig) == 0 {
+			_ = conn.Close()
+
+			return nil, ja4.Report{}, fmt.Errorf(
+				"aoni/utls: AutoECH enforced but failed to resolve ECH config: %w",
+				err,
+			)
+		}
 	}
 
 	if len(echConfig) > 0 {
@@ -195,20 +205,23 @@ func HandshakeUTLS(
 	return &UConnWrapper{UConn: uConn}, report, nil
 }
 
-func resolveECHViaDNS(ctx context.Context, resolver DNSResolver, host string) []byte {
+func resolveECHViaDNS(ctx context.Context, resolver DNSResolver, host string) ([]byte, error) {
 	type extendedResolver interface {
 		LookupWireRecord(ctx context.Context, host string, qtype uint16) ([]byte, error)
 	}
 
 	if ext, ok := resolver.(extendedResolver); ok {
 		msg, err := ext.LookupWireRecord(ctx, host, wire.TypeHTTPS)
-		if err == nil {
-			ech, _ := wire.ExtractECHFromHTTPSResponse(msg, 0)
-			return ech
+		if err != nil {
+			return nil, err
 		}
+
+		ech, _ := wire.ExtractECHFromHTTPSResponse(msg, 0)
+
+		return ech, nil
 	}
 
-	return nil
+	return nil, errors.New("aoni/utls: resolver does not support HTTPS wire records")
 }
 
 func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) {

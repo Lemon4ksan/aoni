@@ -17,41 +17,75 @@ import (
 // via session ticket correlation.
 type SessionCache struct {
 	mu         sync.RWMutex
-	utlsInner  utls.ClientSessionCache
-	stdInner   tls.ClientSessionCache
+	utlsCaches map[string]utls.ClientSessionCache
+	stdCaches  map[string]tls.ClientSessionCache
 	currentKey string
 }
 
 // NewProxyAwareSessionCache creates a new [SessionCache].
 func NewProxyAwareSessionCache() *SessionCache {
 	return &SessionCache{
-		utlsInner: utls.NewLRUClientSessionCache(256),
-		stdInner:  tls.NewLRUClientSessionCache(256),
+		utlsCaches: make(map[string]utls.ClientSessionCache),
+		stdCaches:  make(map[string]tls.ClientSessionCache),
 	}
 }
 
-// Get retrieves a cached session for the given server name.
-// If the session was cached under a different proxy key, it returns nil
-// to force a fresh handshake.
-func (c *SessionCache) Get(serverName string) (*utls.ClientSessionState, bool) {
+func (c *SessionCache) getUtlsCache(key string) utls.ClientSessionCache {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	cache := c.utlsCaches[key]
+	c.mu.RUnlock()
 
-	if c.utlsInner != nil {
-		return c.utlsInner.Get(serverName)
+	if cache != nil {
+		return cache
 	}
 
-	return nil, false
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.utlsCaches[key] == nil {
+		c.utlsCaches[key] = utls.NewLRUClientSessionCache(256)
+		c.stdCaches[key] = tls.NewLRUClientSessionCache(256)
+	}
+
+	return c.utlsCaches[key]
+}
+
+func (c *SessionCache) getStdCache(key string) tls.ClientSessionCache {
+	c.mu.RLock()
+	cache := c.stdCaches[key]
+	c.mu.RUnlock()
+
+	if cache != nil {
+		return cache
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.stdCaches[key] == nil {
+		c.utlsCaches[key] = utls.NewLRUClientSessionCache(256)
+		c.stdCaches[key] = tls.NewLRUClientSessionCache(256)
+	}
+
+	return c.stdCaches[key]
+}
+
+// Get retrieves a cached session for the given server name.
+func (c *SessionCache) Get(serverName string) (*utls.ClientSessionState, bool) {
+	c.mu.RLock()
+	key := c.currentKey
+	c.mu.RUnlock()
+
+	return c.getUtlsCache(key).Get(serverName)
 }
 
 // Put stores a uTLS session ticket.
 func (c *SessionCache) Put(serverName string, session *utls.ClientSessionState) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	key := c.currentKey
+	c.mu.RUnlock()
 
-	if c.utlsInner != nil {
-		c.utlsInner.Put(serverName, session)
-	}
+	c.getUtlsCache(key).Put(serverName, session)
 }
 
 // StdTLSSessionCache returns an adapter satisfying the standard "crypto/tls".ClientSessionCache interface.
@@ -59,17 +93,10 @@ func (c *SessionCache) StdTLSSessionCache() tls.ClientSessionCache {
 	return &stdTLSCacheAdapter{cache: c}
 }
 
-// SetProxyKey flushes all cached sessions and reinitializes caches when switching proxy endpoints.
+// SetProxyKey sets the default proxy key (used if not cloned).
 func (c *SessionCache) SetProxyKey(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if c.currentKey == key {
-		return
-	}
-
-	c.utlsInner = utls.NewLRUClientSessionCache(256)
-	c.stdInner = tls.NewLRUClientSessionCache(256)
 	c.currentKey = key
 }
 
@@ -77,7 +104,6 @@ func (c *SessionCache) SetProxyKey(key string) {
 func (c *SessionCache) CurrentProxyKey() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
 	return c.currentKey
 }
 
@@ -85,9 +111,43 @@ func (c *SessionCache) CurrentProxyKey() string {
 func (c *SessionCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.utlsCaches = make(map[string]utls.ClientSessionCache)
+	c.stdCaches = make(map[string]tls.ClientSessionCache)
+}
 
-	c.utlsInner = utls.NewLRUClientSessionCache(256)
-	c.stdInner = tls.NewLRUClientSessionCache(256)
+// CloneWithProxy returns a request-scoped wrapper bound to a specific proxy key,
+// avoiding data races and cross-persona leakage on the global cache.
+func (c *SessionCache) CloneWithProxy(key string) *SessionCacheWrapper {
+	return &SessionCacheWrapper{parent: c, proxyKey: key}
+}
+
+type SessionCacheWrapper struct {
+	parent   *SessionCache
+	proxyKey string
+}
+
+func (w *SessionCacheWrapper) Get(serverName string) (*utls.ClientSessionState, bool) {
+	return w.parent.getUtlsCache(w.proxyKey).Get(serverName)
+}
+
+func (w *SessionCacheWrapper) Put(serverName string, session *utls.ClientSessionState) {
+	w.parent.getUtlsCache(w.proxyKey).Put(serverName, session)
+}
+
+func (w *SessionCacheWrapper) SetProxyKey(key string) {
+	w.proxyKey = key
+}
+
+func (w *SessionCacheWrapper) CurrentProxyKey() string {
+	return w.proxyKey
+}
+
+func (w *SessionCacheWrapper) Clear() {
+	w.parent.Clear()
+}
+
+func (w *SessionCacheWrapper) StdTLSSessionCache() tls.ClientSessionCache {
+	return &stdTLSCacheWrapperAdapter{wrapper: w}
 }
 
 type stdTLSCacheAdapter struct {
@@ -96,20 +156,26 @@ type stdTLSCacheAdapter struct {
 
 func (a *stdTLSCacheAdapter) Get(serverName string) (*tls.ClientSessionState, bool) {
 	a.cache.mu.RLock()
-	defer a.cache.mu.RUnlock()
-
-	if a.cache.stdInner != nil {
-		return a.cache.stdInner.Get(serverName)
-	}
-
-	return nil, false
+	key := a.cache.currentKey
+	a.cache.mu.RUnlock()
+	return a.cache.getStdCache(key).Get(serverName)
 }
 
 func (a *stdTLSCacheAdapter) Put(serverName string, session *tls.ClientSessionState) {
-	a.cache.mu.Lock()
-	defer a.cache.mu.Unlock()
+	a.cache.mu.RLock()
+	key := a.cache.currentKey
+	a.cache.mu.RUnlock()
+	a.cache.getStdCache(key).Put(serverName, session)
+}
 
-	if a.cache.stdInner != nil {
-		a.cache.stdInner.Put(serverName, session)
-	}
+type stdTLSCacheWrapperAdapter struct {
+	wrapper *SessionCacheWrapper
+}
+
+func (a *stdTLSCacheWrapperAdapter) Get(serverName string) (*tls.ClientSessionState, bool) {
+	return a.wrapper.parent.getStdCache(a.wrapper.proxyKey).Get(serverName)
+}
+
+func (a *stdTLSCacheWrapperAdapter) Put(serverName string, session *tls.ClientSessionState) {
+	a.wrapper.parent.getStdCache(a.wrapper.proxyKey).Put(serverName, session)
 }

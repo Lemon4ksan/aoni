@@ -1,287 +1,33 @@
-# Aoni Codebase Style & Architecture Guide
+# Codebase Style & Architecture Guide
 
-This document defines the authoritative coding standards, architectural principles, package layout rules, memory allocation guidelines, API design contracts, documentation style, and versioning policy for the **`aoni`** repository.
+This document defines coding standards, package layout, memory allocation guidelines, and the versioning policy for the `aoni` repository.
 
-All current code and future contributions **must** adhere strictly to this guide.
+## 1. Principles
+* **Progressive Disclosure**: Advanced resilience (Happy Eyeballs, WAF solving) is enabled via options without altering base call contracts.
+* **Zero-Allocation Hot Paths**: `fast`, `codec`, `fingerprint` paths must maintain minimal heap footprint via `sync.Pool` and pre-allocation.
+* **RFC Compliance**: Specifications (RFC 9460, 6265bis, 9112) take precedence in protocol framing and fallbacks.
 
-## Table of Contents
+## 2. Initialization & Memory
+* **Constructors**: Use `New...` factory functions. Unkeyed struct literals are forbidden.
+* **Options**: Use functional options (`option.With...`) immutably on `*aoni.Config`.
+* **Pooling**: Pooled objects must implement `Reset()`. Limit capacities (e.g., discard byte buffers > 64 KB).
 
-1. [Architectural Philosophy & Core Principles](#1-architectural-philosophy--core-principles)
-2. [Initialization & Memory Allocation Style](#2-initialization--memory-allocation-style)
-3. [Naming Conventions & Typography](#3-naming-conventions--typography)
-4. [Package Layout & File Structuring Rules](#4-package-layout--file-structuring-rules)
-5. [Documentation & Commenting Style](#5-documentation--commenting-style)
-6. [Function Responsibility & Granularity](#6-function-responsibility--granularity)
-7. [Public API Design & Ergonomics](#7-public-api-design--ergonomics)
-8. [API Stability & Versioning Policy (v0 vs v1)](#8-api-stability--versioning-policy-v0-vs-v1)
-9. [Codebase Inconsistency Audit & Alignment Checklist](#9-codebase-inconsistency-audit--alignment-checklist)
+## 3. Naming & Typography
+* **Acronym Casing**: Enforced strict casing (`HTTP`, `URL`, `TLS`, `DNS`, `QUIC`, `gRPC`, `H2`, `IPv6`).
+* **Package Naming**: Single-word, lowercase, self-describing (`mod`, `codec`, `resiliency`).
 
-## 1. Architectural Philosophy & Core Principles
+## 4. Package Layout
+* Files must not exceed 600–800 lines.
+* Import blocks: Standard library, third-party dependencies, internal repository packages.
 
-`aoni` is a unified, ultra-high-performance Internet Protocol engine for Go. Its design is driven by four fundamental tenets:
+## 5. Documentation Blueprint
+Every exported symbol must document:
+1. Summary Line.
+2. Context & Rationale.
+3. Wire Representation (if applicable).
+4. Code Example.
+5. Invariants (Allocations, RFC Compliance).
 
-### 1.1 Progressive Disclosure of Complexity
-Simple tasks must be simple; complex enterprise tasks must be possible without API friction. A single-line request (`request.GetTo[T]`) executes with zero overhead, while advanced network resilience (Happy Eyeballs v3, uTLS fingerprinting, WAF challenge solving, p0f OS spoofing, SSH/MASQUE tunneling) is selectively enabled via functional options without altering call site contracts.
-
-### 1.2 Zero-Allocation Mindset in Hot Paths
-Hot execution paths (`fast`, `codec`, `fingerprint`, `internal/pipeline`) must maintain an absolute minimum or zero heap allocation footprint under parallel I/O. Object pooling (`sync.Pool`), slice pre-allocation, buffer re-use, and avoiding reflection in runtime loops are mandatory.
-
-### 1.3 High Readability & Pure Go Transparency
-Performance optimizations must never degrade code legibility. Avoid cryptic micro-hacks, unchecked magic constants, or obscure side effects. Code abstractions must remain clean, self-describing, and maintainable.
-
-### 1.4 Strict Standard Adherence & Chromium-Grade Resilience
-All protocol implementations, HPACK/QPACK framing, HTTP status fallbacks (421 Misdirected Request, 408 Request Timeout, 425 Too Early), cookie path sorting (RFC 6265), and ECH (RFC 9460) must rigorously follow IETF RFC and W3C specifications while matching Chromium's network stack resilience.
-
-### 1.5 Decade-Proof Pluggable Pipeline Architecture
-Built on a pure-Go zero-allocation stream-and-codec pipeline architecture, `aoni` strictly decouples request decoration (`mod`), execution middleware (`middleware`), transport framing (`transport`/`fingerprint`), and response unmarshaling (`codec`). Any future network protocol (HTTP/4, Post-Quantum TLS 1.4, novel binary RPC encodings, or custom obfuscation layers) can mount seamlessly into `aoni` as a pluggable pipeline stage without breaking existing public API contracts.
-
-## 2. Initialization & Memory Allocation Style
-
-### 2.1 Struct Initialization & Constructors
-- **Constructors (`New...`)**: Exported types with non-zero defaults, internal goroutines, background janitors, or sync pools **must** provide a `New...` factory function (e.g., `aoni.NewClient`, `fast.NewClient`, `cookie.NewProxyIsolatedJar`). Notice how there's no stutter like in `cookie.NewCookieJar` or `client.NewClient`.
-- **Struct Literals**: Use field-keyed struct initialization for all complex structs. Unkeyed struct literals are forbidden except for simple 1-2 field internal coordinate pairs or 0-field sentinel types (`type NoResponse struct{}`).
-- **Default Zero Values**: Structs should be designed such that their zero-value is safe and usable whenever possible. If zero-values require hydration, the constructor or initialization guard must handle it lazily.
-
-```go
-// GOOD: Keyed fields, clear defaults, lazy initialization guard
-client := &Client{
-    engine: DefaultEngine(doer),
-    defaults: ClientDefaults{
-        MaxResponseSize: 10 * 1024 * 1024,
-    },
-}
-
-// BAD: Unkeyed fields lead to fragile initializations and breaking changes
-client := &Client{doer, nil, cfg}
-```
-
-### 2.2 Functional Options & Immutability
-- Client configuration uses the Functional Options pattern (`option.With...`).
-- Functional options **must** operate immutably on configuration DTOs (`*aoni.Config`).
-- `Client` instances support deep copying (`c.Clone()`) and copy-on-write (`c.With(opts...)`), ensuring zero shared-state data races when instances are shared across goroutines.
-
-### 2.3 Object Pooling (`sync.Pool`) Conventions
-To guarantee zero-allocation hot paths without memory leaks:
-1. **Mandatory Reset**: Every pooled object **must** implement a `Reset()` method that clears all pointers, slices (resliced to `[:0]`), and maps before returning to the pool.
-2. **Capacity Capping**: Discard objects or buffers whose capacity grew excessively during usage (e.g., byte buffers exceeding 64 KB or 1 MB) to prevent pool-induced memory bloat.
-3. **Paired Execution**: Always pair `Get()` with a deferred or explicit `Put()` / `Discard()`.
-
-```go
-func (p *RequestPool) Put(req *Request) {
-    if req == nil {
-        return
-    }
-    // Cap buffer size to avoid holding large allocations in memory
-    if cap(req.bodyBuf) > 64*1024 {
-        return
-    }
-    req.Reset()
-    p.pool.Put(req)
-}
-```
-
-### 2.4 Pre-allocating Slices & Maps
-- Always provide capacity hints when initializing slices and maps in hot execution paths:
-  `make([]T, 0, capacity)` or `make(map[K]V, capacity)`.
-- Avoid slice re-allocations in loops. Use pre-calculated length hints whenever possible.
-
-## 3. Naming Conventions & Typography
-
-### 3.1 Variable & Receiver Naming
-- **Receiver Names**: Standardized, short (1–2 letters), consistent within the package:
-  - `c *Client` (or `fast *Client` in `fast` package)
-  - `r *Request` or `req *Request`
-  - `resp *Response`
-  - `h Header` or `hdr Header`
-  - `w http.ResponseWriter`
-- **Package-Local Variables**: Concise and self-explanatory. Avoid single-letter variables except for standard index counters (`i`, `j`) or key-value pair variables (`k`, `v`).
-
-### 3.2 Protocol Acronym Casing Rules
-Go conventions require acronyms to maintain consistent casing (all uppercase or all lowercase). `aoni` strictly enforces standard casing across all exported and unexported identifiers:
-
-| Acronym | Correct Casing | Incorrect Casing |
-| :--- | :--- | :--- |
-| HTTP | `HTTP`, `http`, `HTTPDoer` | `Http`, `httpDoer` |
-| URL | `URL`, `url`, `BaseURL` | `Url`, `baseUrl` |
-| TLS | `TLS`, `tls`, `TLSConfig`, `tlsConfig` | `Tls`, `TlsConfig` |
-| DNS / DoH / DoQ | `DNS`, `DoH`, `DoQ` | `Dns`, `Doh`, `Doq` |
-| QUIC / HTTP/3 | `QUIC`, `HTTP3`, `H3` | `Quic`, `Http3` |
-| gRPC | `GRPC` or `gRPC` (in package names: `grpc`) | `Grpc` |
-| HTTP/2 | `H2`, `H2Frame` | `H2frame` |
-| JA3 / JA4 | `JA3`, `JA4`, `JA4H` | `Ja3`, `Ja4` |
-| WAF | `WAF`, `WAFSolver` | `Waf` |
-| ECH | `ECH`, `ECHConfig` | `Ech` |
-| IP / IPv6 | `IP`, `IPv6`, `IPv6Subnet` | `Ip`, `Ipv6` |
-| IPC | `IPC`, `IPCDialer` | `Ipc` |
-| SSE / HAR | `SSE`, `HAR` | `Sse`, `Har` |
-
-### 3.3 Function & Method Naming Verbs
-- **Data Retrieval / Dispatch**: `Fetch`, `Do`, `Execute`, `Post`, `Get`, `Request`.
-- **Generic Unmarshaling Methods**: Append `To` suffix for methods that unmarshal directly into a generic type `[T any]` (e.g., `GetTo[T]`, `FetchTo[T]`, `PostTo[T]`, `DecodeTo[T]`).
-- **Functional Options**: Prefix with `With` (e.g., `option.WithProxy`, `option.WithTimeout`, `option.WithChrome`).
-- **Per-Request Modifiers**: Prefix with `With` (e.g., `mod.WithHeader`, `mod.WithJSONBody`, `mod.WithContext`).
-- **Builder Setters**: Prefix with `Set` (e.g., `req.SetHeader`, `req.SetContext`).
-
-### 3.4 Interface Naming
-- Single-method interfaces must end with `-er` (e.g., `HTTPDoer`, `RequestDoer`, `Unwrapper`, `Modifier`).
-- Multi-method domain interfaces must use clear, descriptive noun phrases (e.g., `Requester`, `CookieStorage`).
-
-### 3.5 Package Naming
-- Packages must be single-word, lowercase, and self-describing (`option`, `mod`, `fast`, `grpc`, `cookie`, `codec`, `fingerprint`, `resiliency`, `realtime`, `telemetry`, `tunnel`, `netutil`, `internal`).
-- Avoid generic package names like `util` or `helpers`. Sub-packages inside `netutil` or `resiliency` must reflect their specific domain (e.g., `netutil/proxy`, `netutil/dns`, `resiliency/circuit`).
-
-## 4. Package Layout & File Structuring Rules
-
-### 4.1 Package Separation & Architecture Layers
-
-```text
-aoni/
-├── client.go, config.go, engine.go    // Core public client & engine contract
-├── option/                            // Functional Client Options (option.With...)
-├── mod/                               // Per-Request Modifiers (mod.With...)
-├── fast/                              // High-throughput fasthttp + H2/H3 engine
-├── grpc/                              // Native gRPC client & stream invoker
-├── cookie/                            // Proxy-isolated cookie jars & storage
-├── codec/                             // Response decoders & struct encoders
-├── fingerprint/                       // TLS/JA4/p0f evasion & browser profiles
-├── resiliency/                        // Caching, circuit breakers, WAF solvers
-├── realtime/                          // WebSockets, Socket.IO, SSE, NDJSON
-├── telemetry/                         // HAR generators, latency trackers, inspector
-├── tunnel/                            // MASQUE & TUN adapters
-├── netutil/                           // Network resolvers, rotators, ECH, probes
-└── internal/                          // Internal non-exported engine primitives
-```
-
-### 4.2 File Layout Inside Packages
-Every package must adhere to a standardized file layout:
-1. `doc.go`: Package-level Godoc summary and architectural explanation.
-2. `errors.go`: Package-specific sentinel errors (`Err...`) and custom error types.
-3. `<feature>.go`: Domain implementation files.
-4. `*_test.go`: Comprehensive unit tests, integration tests, and benchmarks.
-
-### 4.3 File Size & Splitting Rules
-- **Maximum File Length**: A single `.go` file should not exceed **600–800 lines**.
-- When a file grows beyond 800 lines or mixes distinct sub-responsibilities, split it logically by feature (e.g., splitting `requests.go` into `requests.go`, `requests_fast.go`, and `requests_helpers.go`).
-
-### 4.4 Import Grouping Order
-Imports must be grouped in exactly 3 sections separated by empty lines, enforced by `gci`:
-1. Standard library packages (`"context"`, `"net/http"`, `"time"`).
-2. Third-party dependency packages (`"github.com/refraction-networking/utls"`, `"github.com/stretchr/testify"`).
-3. Internal repository packages (`"github.com/lemon4ksan/aoni"`, `"github.com/lemon4ksan/aoni/option"`).
-
-## 5. Documentation & Commenting Style
-
-`aoni` follows the **Gold Standard Documentation Blueprint** — combining the architectural rigor and invariant precision of **Swift (DocC)**, the developer experience and instant actionable utility of **Elysia.js**, and the idiomatic markdown conventions of **Go 1.19+**.
-
-> [!IMPORTANT]
-> Documentation must remain **100% compliant with standard `godoc`, `pkgsite`, and IDE language servers (`gopls`)**. Avoid un-idiomatic JSDoc/Doxygen `@param` and `@return` annotations; rely on Go-native prose, bracketed symbol links `[...]`, and Markdown section headers `#`.
-
-### 5.1 The 5-Point Gold Standard Blueprint
-
-Every exported function, method, option, and modifier should follow this structured anatomy:
-
-1. **Summary Line**: Begins with the symbol name and concisely states the primary action/purpose in 1–2 sentences.
-2. **Context & Rationale**: Explains *why* this exists, when to use it vs alternatives, and what happens under the hood (e.g. socket pooling, TLS grease, WAF bypass).
-3. **Wire Representation / Protocol Notes** (when applicable): Visually illustrates what bytes, headers, or frames are sent over the wire.
-4. **Actionable Code Example (`# Example`)**: A copy-paste ready snippet showing immediate usage in context (Elysia DX).
-5. **Invariants & Guarantees (`# Invariants & Allocation` / `# RFC Compliance` / `# Thread Safety`)**: Explicitly documents zero-allocation paths, bounds/clamping behavior, concurrency properties, and authoritative IETF RFC / W3C specifications.
-
-```go
-// WithPriority configures RFC 9218 extensible request priority headers and HTTP/2-3 stream scheduling.
-//
-// Urgency defines the relative processing precedence (0 = highest/critical, 7 = lowest/background).
-// When incremental is true, the server is instructed to stream partial chunks of the response
-// concurrently rather than buffering the entire payload before delivery.
-//
-// # Wire Representation
-//
-//	Priority: u=1, i
-//
-// # Example
-//
-//	resp, err := client.Get(ctx, "/hero-banner.webp",
-//	    mod.WithPriority(1, true),
-//	)
-//
-// # Invariants & Allocations
-//
-//   - Zero-Allocation: Operates on pre-allocated static strings for standard urgencies.
-//   - Clamping: Values outside [0..7] are clamped automatically without returning an error.
-//
-// # RFC Compliance
-//
-// Conforms to RFC 9218 (Extensible Prioritization Scheme for HTTP), Section 3.1.
-func WithPriority(urgency int, incremental bool) RequestModifier
-```
-
-### 5.2 Rules for Exported Identifiers
-- **100% Coverage**: Every exported struct, interface, type, method, function, field, constant, variable, and sentinel error **must** have a doc comment.
-- **First Sentence Rule**: The doc comment **must** begin with the name of the exported symbol being documented.
-- **Doc Links**: Link to related types and methods using Go 1.19+ bracketed links (e.g., `[Client]`, `[mod.WithHeader]`, `[http.CookieJar]`).
-- **No Dry One-Liners**: Avoid vacuous single-line comments (e.g., `// WithProxy sets proxy`). Explain default values, error modes, and interaction with other components.
-
-## 6. Function Responsibility & Granularity
-
-### 6.1 Single Responsibility Principle (SRP)
-- A function should perform exactly one logical operation.
-- Keep function length manageable (target **< 60–80 lines** per function).
-- If an operation requires multiple sequential execution stages (e.g., TLS setup -> HTTP/2 frame construction -> header compression), split each stage into a dedicated, unexported helper function.
-
-### 6.2 Segregation of Hot Paths vs Cold Paths
-- **Hot Paths (`fast/`, `pipeline/`, `codec/`)**: Must maintain zero allocations. Never allocate temporary closures, use `fmt.Sprintf`, perform runtime reflection, or create un-buffered slices in hot execution routines.
-- **Cold Paths (`option/`, `NewClient`, `Configure`)**: Configuration and setup functions may perform allocations, slice copying, and parsing to validate options and pre-compute execution configurations.
-
-### 6.3 Resource Cleanup & Error Handling
-- **Defensive Closing**: Always ensure resource streams and response bodies are closed explicitly (`defer resp.Body.Close()`) when reading responses.
-- **Error Wrapping**: Wrap lower-level errors using `%w` to preserve error chains (`fmt.Errorf("aoni: failed to execute request: %w", err)`).
-- **Context Awareness**: All network operations must respect `context.Context` cancellation and deadline signals.
-
-### 6.4 Error Message Prefix Formatting Standard
-All sentinel errors (`errors.New`) and formatted error strings (`fmt.Errorf`) MUST follow the unified package namespace prefix format:
-- Root package (`aoni`): `"aoni: <description>"`
-- Subpackages (`aoni/<submodule>`): `"aoni/<submodule>: <description>"` (e.g., `"aoni/mod: ..."`, `"aoni/fast: ..."`, `"aoni/values: ..."`, `"aoni/cookie: ..."`, `"aoni/transport: ..."`, `"aoni/grpc: ..."`).
-- Never use spaces (`"aoni mod:"` ❌), colons with space (`"aoni transport:"` ❌), or hyphens (`"aoni-codegen:"` ❌) in error prefixes.
-
-## 7. Public API Design & Ergonomics
-
-### 7.1 Dual-Engine Architecture
-`aoni` provides two specialized client engines sharing a unified design philosophy:
-1. **`aoni.Client`**: 100% `net/http` drop-in compatible via bridge, full middleware chain support, seamless standard library integration.
-2. **`fast.Client` (`aoni/fast`)**: Native high-throughput engine built on `fasthttp` + native H2/H3 for maximum RPS and absolute zero allocations under parallel I/O.
-
-### 7.2 Generics-First Unmarshaling Ergonomics
-`aoni` uses Go generics (`[T any]`) to eliminate boilerplate unmarshaling:
-- `client.GetTo[T](ctx, path)` (or `aoni.GetTo[T](ctx, path)`)
-- `client.PostTo[T](ctx, path, body)` (or `aoni.PostTo[T](ctx, path, body)`)
-- `client.Get(ctx, path)` / `client.Post(ctx, path, body)` (raw `*http.Response`)
-- `client.R().SetResult(&target).Get(path)`
-- `codec.DecodeTo[T](resp, target)`
-
-### 7.3 Immutability & Thread Safety
-Public API objects (such as `aoni.Client` and `aoni.Config`) must be safe for concurrent use across multiple goroutines. Any call that mutates configuration must return a newly cloned instance (`c.With(...)`, `c.Clone()`).
-
-## 8. API Stability & Versioning Policy (v0 vs Perpetual v1)
-
-`aoni` enforces a two-stage API lifecycle model inspired directly by Go's compatibility promise:
-
-### 8.1 Current Stage: `v0.x` (Active Evolution & Architectural Refactoring)
-- **Status**: Experimental & Rapid Refactoring phase.
-- **Breaking Changes**: Breaking changes to exported APIs, signature refinements, and package reorganizations **are permitted** during this phase to eliminate legacy technical debt, guarantee zero-alloc hot paths, and align the entire codebase with this Style Guide.
-- **Goal**: Rapidly achieve total consistency, peak throughput, and 100% RFC compliance before freezing the public interface.
-
-### 8.2 Future Stage: `v1.0.0+` (Perpetual v1 Compatibility Promise)
-- **Status**: Perpetual Frozen Production API.
-- **Go-Style Perpetual `v1` Guarantee**: Once `v1.0.0` is released, the public API is **permanently frozen and guaranteed forever** (modeled after the Go 1 compatibility promise). There will be no breaking `v2` redesigns or major API overhauls that break user code.
-- **Additive Evolution**: All future features, performance optimizations, and protocol additions must be 100% additive, non-breaking, and backwards-compatible with existing `v1` call sites.
-- **Deprecation Policy**: If a symbol is superseded by a superior abstraction, it will be marked with a Go-native `// Deprecated: ...` doc comment and retained indefinitely to preserve total backward compatibility.
-
-## 9. Codebase Inconsistency Audit & Alignment Checklist
-
-To bring the existing codebase into 100% compliance with this Style Guide, the following audit checklist will be executed across all packages:
-
-- [ ] **Acronym Standardization**: Audit and fix non-conforming acronym casing (e.g. rename `Url` -> `URL`, `Http` -> `HTTP`, `Ja4` -> `JA4`, `Waf` -> `WAF`).
-- [ ] **Doc Comments Audit**: Ensure 100% of exported types, functions, methods, fields, and sentinel errors have Godoc comments starting with the symbol name.
-- [ ] **Slice Pre-allocation**: Replace un-capacitated `make([]T, 0)` calls in hot paths with `make([]T, 0, capacity)`.
-- [ ] **`sync.Pool` Reset Check**: Verify all pooled objects implement and call `Reset()` before returning to the pool.
-- [ ] **File Size Audit**: Check files exceeding 600–800 lines (`client.go`, `config.go`, `option.go`, `requests.go`) and split them into modular feature files where applicable.
-- [ ] **Linter Enforcement**: Ensure `make format` and `make lint` execute cleanly with zero linter warnings.
+## 6. API Versioning Policy
+* **Current Stage (v0.x)**: Breaking changes permitted for architecture refinement and zero-alloc consistency.
+* **Future Stage (v1.0.0+)**: Permanent backward compatibility. Additive evolution only.

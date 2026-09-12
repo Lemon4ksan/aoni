@@ -603,26 +603,43 @@ func (c *Conn) readLoop() {
 
 		r := c.getStream(fr.Stream())
 
-		if r != nil {
-			if r.State() == streamClosed {
-				ReleaseFrameHeader(fr)
-				continue
+		// HPACK decoder state MUST be processed even if stream is dead or missing
+		// per RFC 9113 §4.3 & §8.1 to preserve connection table synchronization.
+		if r == nil || r.State() == streamClosed {
+			if fr.Type() == FrameHeaders || fr.Type() == FrameContinuation {
+				if h, ok := fr.Body().(FrameWithHeaders); ok {
+					resp := h1engine.AcquireResponse()
+					if _, decErr := c.readHeader(h.Headers(), resp); decErr != nil {
+						c.lastErr = decErr
+
+						h1engine.ReleaseResponse(resp)
+						ReleaseFrameHeader(fr)
+
+						break
+					}
+
+					h1engine.ReleaseResponse(resp)
+				}
 			}
 
-			err := c.readStream(fr, r)
-			if err == nil {
-				if fr.Flags().Has(FlagEndStream) {
-					r.SetState(streamClosed)
-					c.finish(r, fr.Stream(), nil)
-				}
-			} else {
-				r.SetState(streamClosed)
-				c.finish(r, fr.Stream(), err)
+			ReleaseFrameHeader(fr)
 
-				if errors.Is(err, FlowControlError) {
-					ReleaseFrameHeader(fr)
-					break
-				}
+			continue
+		}
+
+		err = c.readStream(fr, r)
+		if err == nil {
+			if fr.Flags().Has(FlagEndStream) {
+				r.SetState(streamClosed)
+				c.finish(r, fr.Stream(), nil)
+			}
+		} else {
+			r.SetState(streamClosed)
+			c.finish(r, fr.Stream(), err)
+
+			if errors.Is(err, FlowControlError) {
+				ReleaseFrameHeader(fr)
+				break
 			}
 		}
 
@@ -673,6 +690,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	}
 
 	atomic.StoreInt32(&ctx.streamWindow, initWin)
+	atomic.StoreInt32(&ctx.streamRxWindow, 6291456)
 
 	fr := AcquireFrameHeader()
 	defer ReleaseFrameHeader(fr)
@@ -1154,14 +1172,15 @@ func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {
 }
 
 func (c *Conn) updateServerWindow(inc int32) error {
-	old := atomic.LoadInt32(&c.serverWindow)
-	if old > 0 && old > (1<<31-1)-inc {
-		return ErrWindowAboveLimits
+	for {
+		old := atomic.LoadInt32(&c.serverWindow)
+		if int64(old)+int64(inc) > int64(1<<31-1) {
+			return ErrWindowAboveLimits
+		}
+		if atomic.CompareAndSwapInt32(&c.serverWindow, old, old+inc) {
+			return nil
+		}
 	}
-
-	atomic.AddInt32(&c.serverWindow, inc)
-
-	return nil
 }
 
 func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
@@ -1171,14 +1190,15 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 		return nil
 	}
 
-	old := atomic.LoadInt32(&reqCtx.streamWindow)
-	if old > 0 && old > (1<<31-1)-inc {
-		return ErrWindowAboveLimits
+	for {
+		old := atomic.LoadInt32(&reqCtx.streamWindow)
+		if int64(old)+int64(inc) > int64(1<<31-1) {
+			return ErrWindowAboveLimits
+		}
+		if atomic.CompareAndSwapInt32(&reqCtx.streamWindow, old, old+inc) {
+			return nil
+		}
 	}
-
-	atomic.AddInt32(&reqCtx.streamWindow, inc)
-
-	return nil
 }
 
 // handleGoAway processes a received GOAWAY frame (RFC 9113 §6.8 & §8.7).
@@ -1269,11 +1289,11 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 		if data.Len() != 0 {
 			reqCtx.Response.AppendBody(data.Data())
 
-			atomic.AddInt32(&reqCtx.streamWindow, -dataLen)
+			atomic.AddInt32(&reqCtx.streamRxWindow, -dataLen)
 
-			if atomic.LoadInt32(&reqCtx.streamWindow) < 3145728 {
-				inc := 6291456 - atomic.LoadInt32(&reqCtx.streamWindow)
-				atomic.StoreInt32(&reqCtx.streamWindow, 6291456)
+			if atomic.LoadInt32(&reqCtx.streamRxWindow) < 3145728 {
+				inc := 6291456 - atomic.LoadInt32(&reqCtx.streamRxWindow)
+				atomic.StoreInt32(&reqCtx.streamRxWindow, 6291456)
 				c.updateWindow(fr.Stream(), int(inc))
 			}
 		}
@@ -1294,6 +1314,9 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 
 	case FrameGoAway:
 		return ErrGoAwayRetryable
+
+	case FrameWindowUpdate:
+		return c.handleWindowUpdate(fr)
 	}
 
 	return nil

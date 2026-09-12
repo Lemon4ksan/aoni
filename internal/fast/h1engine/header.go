@@ -3039,6 +3039,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		return 0, s.err
 	}
 
+	if contentLengthSeen && transferEncodingSeen {
+		h.connectionClose = true
+		return 0, errors.New("both Content-Length and Transfer-Encoding are present (RFC 9112 Section 6.1)")
+	}
+
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
@@ -3211,6 +3216,11 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 	if s.err != nil {
 		h.connectionClose = true
 		return 0, s.err
+	}
+
+	if contentLengthSeen && transferEncodingSeen {
+		h.connectionClose = true
+		return 0, errors.New("both Content-Length and Transfer-Encoding are present (RFC 9112 Section 6.1)")
 	}
 
 	if h.contentLength < 0 {
