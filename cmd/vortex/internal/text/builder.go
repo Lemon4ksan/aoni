@@ -18,10 +18,6 @@ type Document struct {
 
 // Len returns the count of nodes in the document.
 func (d *Document) Len() int {
-	if d == nil {
-		return 0
-	}
-
 	return len(d.Nodes)
 }
 
@@ -53,10 +49,6 @@ func NewDocument() *DocumentBuilder {
 // Release returns the builder to the internal sync pool for reuse.
 // The builder must not be used after calling Release.
 func (b *DocumentBuilder) Release() {
-	if b == nil {
-		return
-	}
-
 	b.nodes = b.nodes[:0]
 	docPool.Put(b)
 }

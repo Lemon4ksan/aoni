@@ -49,8 +49,20 @@ linters:
     - perfsprint
     - gosec
     - wsl_v5
+    - depguard
 
   settings:
+    depguard:
+      rules:
+        root-isolation:
+          files:
+            - "$root/*.go"
+          deny:
+            - pkg: "unsafe"
+              desc: "Package aoni must not import unsafe directly. All dirty hacks must be in /internal/ or /fast/."
+            - pkg: "sync"
+              desc: "Package aoni must not import sync directly to avoid sync.Pool usage."
+
     revive:
       rules:
         - name: exported

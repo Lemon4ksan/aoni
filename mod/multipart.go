@@ -12,17 +12,34 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"slices"
 	"strings"
+	"sync"
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/http/header"
-	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
+var multipartBufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+type pooledBufferReader struct {
+	*bytes.Reader
+	buf *bytes.Buffer
+}
+
+func (r *pooledBufferReader) Close() error {
+	r.buf.Reset()
+	multipartBufPool.Put(r.buf)
+	return nil
+}
+
 // WithMultipart constructs an [RequestModifier] building an in-memory multipart/form-data request body
+
 // conforming to RFC 7578 §4.1 (Boundary) and §4.2 (Content-Disposition: form-data).
 func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return RequestModifier{
@@ -40,27 +57,12 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 				}
 			}
 
-			if estCap < 64*1024 {
-				estCap = 64 * 1024
+			buf := multipartBufPool.Get().(*bytes.Buffer)
+			if buf.Cap() < estCap {
+				buf.Grow(estCap)
 			}
 
-			offBuf, err := offheap.NewBuffer(estCap)
-
-			var (
-				body     io.Writer = &bytes.Buffer{}
-				getBytes           = func() []byte {
-					return body.(*bytes.Buffer).Bytes()
-				}
-			)
-
-			if err == nil {
-				defer offBuf.Release()
-
-				body = offBuf
-				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
-			}
-
-			writer := multipart.NewWriter(body)
+			writer := multipart.NewWriter(buf)
 
 			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
@@ -91,7 +93,12 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 				return
 			}
 
-			req.SetBodyBytes(getBytes())
+			b := buf.Bytes()
+			req.SetBodyBytes(b)
+			req.SetBodyStream(&pooledBufferReader{
+				Reader: bytes.NewReader(b),
+				buf:    buf,
+			}, int64(len(b)))
 			req.SetHeader(header.ContentType, writer.FormDataContentType())
 		},
 	}
@@ -121,27 +128,12 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 				}
 			}
 
-			if estCap < 64*1024 {
-				estCap = 64 * 1024
+			buf := multipartBufPool.Get().(*bytes.Buffer)
+			if buf.Cap() < estCap {
+				buf.Grow(estCap)
 			}
 
-			offBuf, err := offheap.NewBuffer(estCap)
-
-			var (
-				body     io.Writer = &bytes.Buffer{}
-				getBytes           = func() []byte {
-					return body.(*bytes.Buffer).Bytes()
-				}
-			)
-
-			if err == nil {
-				defer offBuf.Release()
-
-				body = offBuf
-				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
-			}
-
-			writer := multipart.NewWriter(body)
+			writer := multipart.NewWriter(buf)
 
 			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
@@ -179,7 +171,12 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 				return
 			}
 
-			req.SetBodyBytes(getBytes())
+			b := buf.Bytes()
+			req.SetBodyBytes(b)
+			req.SetBodyStream(&pooledBufferReader{
+				Reader: bytes.NewReader(b),
+				buf:    buf,
+			}, int64(len(b)))
 			req.SetHeader(header.ContentType, writer.FormDataContentType())
 		},
 	}

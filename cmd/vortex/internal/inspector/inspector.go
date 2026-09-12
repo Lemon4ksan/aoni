@@ -277,10 +277,6 @@ func (i *TrafficInspector) captureBody(req *http.Request) string {
 
 // AddCapturedRequest manually inserts a pre-captured request into history and broadcasts it to web clients.
 func (i *TrafficInspector) AddCapturedRequest(req CapturedRequest) {
-	if i == nil {
-		return
-	}
-
 	i.saveAndBroadcast(req)
 }
 

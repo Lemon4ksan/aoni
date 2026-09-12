@@ -5,6 +5,7 @@
 package perf
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -242,8 +243,15 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 						return
 					}
 
-					if _, err := conn.Write(respBytes); err != nil {
-						return
+					reqs := bytes.Count(buf[:n], []byte("GET "))
+					if reqs == 0 {
+						reqs = 1
+					}
+
+					for k := 0; k < reqs; k++ {
+						if _, err := conn.Write(respBytes); err != nil {
+							return
+						}
 					}
 				}
 			}(c)

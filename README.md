@@ -155,6 +155,7 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 | HTTP Client / Engine | RPS (12 Cores) | Allocations | Memory / op | HTTP/2 & HTTP/3 | Post-Quantum TLS 1.3 | Chromium JA4 Profile |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **`aoni/fast` (`io_uring`)** | **2,480,000+** | **0 allocs/op** | **0 B/op** | **✓ (H2/H3/QUIC)** | **✓ (ML-KEM 768)** | **✓** |
+| **`aoni/fast` (PGO / Sockets)** | **2,126,000+** | **0 allocs/op** | **0 B/op** | **✓ (H2/H3/QUIC)** | **✓ (ML-KEM 768)** | **✓** |
 | **`aoni.Client` (Stdlib)** | **640,000+** | **1 alloc/op** | **24 B/op** | **✓ (H2/H3/QUIC)** | **✓ (ML-KEM 768)** | **✓** |
 | `fasthttp` | 1,910,000 | 0 allocs/op | 0 B/op | ✗ (No H2/H3) | ✗ | ✗ |
 | `net/http` (Stdlib) | 165,000 | 78 allocs/op | 6,800 B/op | ⚠️ (H2 only) | ✗ | ✗ |
@@ -308,7 +309,7 @@ client := aoni.NewClient(nil,
 | :--- | :---: | :---: | :---: | :---: |
 | **URL Parsing (`net/url.Parse`)** | 295.1 ns | **85.2 ns** (`net/url`) | **3.5x Faster** | L1 CRC32 Cache |
 | **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`net/psl`) | **1.9x Faster** | **0 B / 0 allocs** |
-| **QPACK RFC 9204 Block Codec** | 2,500+ ns (`quic-go/qpack`) | **472.7 ns** (`internal/fast/h3engine`) | **5.3x Faster** | **0 B / 0 allocs** |
+| **QPACK RFC 9204 Block Codec** | 2,500+ ns (`quic-go/qpack`) | **461.3 ns** (`internal/fast/h3engine`) | **5.4x Faster** | **0 B / 0 allocs** |
 | **HPACK Field Decoder** | 391.9 ns (`x/net/http2/hpack`) | **329.2 ns** (`internal/fast/h2engine`) | **1.19x Faster** | **0 B / 0 allocs** |
 | **HPACK Huffman Encoder** | 18.5 ns | **13.99 ns** (`internal/fast/h2engine`) | **1.32x Faster** | **0 B / 0 allocs** |
 | **Timestamping (`vDSO` Bypass)** | 3.15 ns (`time.Now`) | **0.28 ns** (`silicon/clock`) | **11.2x Faster** | **0 B / 0 allocs** |
@@ -325,7 +326,7 @@ client := aoni.NewClient(nil,
 | :--- | :---: | :---: | :---: | :--- |
 | **ASCII Header Case-Folding & Match** | 8.47 ns/match | **1.71 ns/match** | **⚡ 4.95x Faster** | Vectorized bitwise unrolling & branch elimination |
 | **HPACK / QPACK Huffman Bitstream Pack** | 324.32 MB/s (464.6 ns) | **697.84 MB/s (215.9 ns)** | **⚡ 2.15x Faster** | 64-bit barrel-shifter & register packing |
-| **QUIC / Protobuf Varint Codec** | 22.41 ns/op | **15.19 ns/op** | **⚡ 1.48x Faster** | Unrolled bitmask extraction & branch prediction |
+| **QUIC / Protobuf Varint Codec** | 22.41 ns/op | **1.55 ns/op** | **⚡ 14.4x Faster** | Unrolled bitmask extraction & branch prediction |
 | **EWMA Latency & Jitter Filter** | 2.74 ns/sample | **1.92 ns/sample** | **⚡ 1.43x Faster** | Fused multiply-accumulate & float register pipelining |
 
 </details>

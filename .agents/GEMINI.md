@@ -15,7 +15,7 @@ This document outlines the architecture, coding standards, build/test commands, 
 ### Key Capabilities & Architectural Pillars
 - **Dual Engines under a Single Interface**:
   - `aoni.Client` — 100% `net/http` compatibility, full middleware chain support, seamless standard ecosystem integration.
-  - `aoni/fast` (`fast.Client`) — Native engine built on top of `fasthttp` + H2/H3 for extreme silicon throughput (1.87M+ RPS, absolute zero allocations under parallel I/O).
+  - `aoni/fast` (`fast.Client`) — Native engine built on top of `fasthttp` + H2/H3 for extreme silicon throughput (2.12M+ RPS, absolute zero allocations under parallel I/O).
 - **Chromium-Grade Resilience & RFC Compliance**:
   - **Happy Eyeballs v3**: Protocol racing across H3/H2/H1.
   - **Auto-Recovery**: Automatic connection re-routing on HTTP 421 (Misdirected Request), HTTP 408 (Request Timeout), HTTP 425 (Too Early / 0-RTT rejection).

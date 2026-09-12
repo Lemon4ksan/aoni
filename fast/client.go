@@ -85,11 +85,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 		protocolState: newProtocolState(),
 	}
 
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&c.cfg)
-		}
-	}
+	generic.ApplyOptions(&c.cfg, opts...)
 
 	c.applyEngineConfig()
 	c.applyCustomDialer()
@@ -309,16 +305,22 @@ func (c *Client) Request(
 }
 
 func acquireFastPair() (*h1engine.Request, *h1engine.Response) {
-	return h1engine.AcquireRequest(), h1engine.AcquireResponse()
+	req := h1engine.AcquireRequest()
+	resp := h1engine.AcquireResponse()
+
+	WrapRequest(req)
+	WrapResponse(resp)
+
+	return req, resp
 }
 
 func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
 	if req != nil {
-		h1engine.ReleaseRequest(req)
+		ReleaseRequestSafe(req)
 	}
 
 	if resp != nil {
-		h1engine.ReleaseResponse(resp)
+		ReleaseResponseSafe(resp)
 	}
 }
 
@@ -355,6 +357,8 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 		fastReq = fr
 	} else {
 		fastReq = h1engine.AcquireRequest()
+		WrapRequest(fastReq)
+
 		mustRelease = true
 
 		fastReq.Header.SetMethod(req.Method())
@@ -377,12 +381,14 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 	if mustRelease {
 		defer func() {
 			if !released {
-				h1engine.ReleaseRequest(fastReq)
+				ReleaseRequestSafe(fastReq)
 			}
 		}()
 	}
 
 	fastResp := h1engine.AcquireResponse()
+	WrapResponse(fastResp)
+
 	ctx := req.Context()
 
 	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
@@ -393,7 +399,7 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 
 	if err != nil {
 		if !autoReleased {
-			h1engine.ReleaseResponse(fastResp)
+			ReleaseResponseSafe(fastResp)
 		}
 
 		return nil, err

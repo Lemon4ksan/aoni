@@ -217,7 +217,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1engine.Re
 			}
 
 			dummyReq.Release()
-			h1engine.ReleaseRequest(dummyFastReq)
+			ReleaseRequestSafe(dummyFastReq)
 		}
 
 		if len(reqCfg.ALPNOverride) > 0 {

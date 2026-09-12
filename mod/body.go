@@ -83,8 +83,8 @@ func WithBodyBytes(b []byte) RequestModifier {
 //	resp, err := client.Post(ctx, "/users",
 //	    mod.WithJSONBody(CreateUserReq{Name: "Alice", Email: "alice@example.com"}),
 //	)
-func WithJSONBody(payload any) RequestModifier {
-	if payload == nil {
+func WithJSONBody[T any](payload T) RequestModifier {
+	if any(payload) == nil {
 		return RequestModifier{}
 	}
 
@@ -106,7 +106,7 @@ func WithJSONBody(payload any) RequestModifier {
 }
 
 // WithJSON is a convenient alias for [WithJSONBody].
-func WithJSON(payload any) RequestModifier {
+func WithJSON[T any](payload T) RequestModifier {
 	return WithJSONBody(payload)
 }
 
@@ -124,32 +124,32 @@ func WithJSON(payload any) RequestModifier {
 //	resp, err := client.Post(ctx, "/items",
 //	    mod.WithSmartBody(map[string]int{"count": 42}),
 //	)
-func WithSmartBody(body any) RequestModifier {
-	if body == nil {
+func WithSmartBody[T any](body T) RequestModifier {
+	if any(body) == nil {
 		return RequestModifier{}
 	}
 
-	if mod, ok := body.(RequestModifier); ok {
+	if mod, ok := any(body).(RequestModifier); ok {
 		return mod
 	}
 
-	if msg, ok := body.(proto.Message); ok {
+	if msg, ok := any(body).(proto.Message); ok {
 		return WithProtoBody(msg)
 	}
 
-	if uv, ok := body.(url.Values); ok {
+	if uv, ok := any(body).(url.Values); ok {
 		return WithFormValues(uv)
 	}
 
-	if r, ok := body.(io.Reader); ok {
+	if r, ok := any(body).(io.Reader); ok {
 		return WithBody(r)
 	}
 
-	if b, ok := body.([]byte); ok {
+	if b, ok := any(body).([]byte); ok {
 		return WithBodyBytes(b)
 	}
 
-	if s, ok := body.(string); ok {
+	if s, ok := any(body).(string); ok {
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
 			ContentType: header.MIMETextPlainCharsetUTF8,
@@ -167,8 +167,8 @@ func WithSmartBody(body any) RequestModifier {
 //	resp, err := client.Post(ctx, "/soap-endpoint",
 //	    mod.WithXMLBody(myXMLStruct),
 //	)
-func WithXMLBody(payload any) RequestModifier {
-	if payload == nil {
+func WithXMLBody[T any](payload T) RequestModifier {
+	if any(payload) == nil {
 		return RequestModifier{}
 	}
 
@@ -190,8 +190,8 @@ func WithXMLBody(payload any) RequestModifier {
 }
 
 // WithYAMLBody marshals payload to YAML and sets Content-Type to "application/yaml".
-func WithYAMLBody(payload any) RequestModifier {
-	if payload == nil {
+func WithYAMLBody[T any](payload T) RequestModifier {
+	if any(payload) == nil {
 		return RequestModifier{}
 	}
 
@@ -307,15 +307,15 @@ func WithFormValues(values url.Values) RequestModifier {
 //	resp, err := client.Post(ctx, "/login",
 //	    mod.WithFormBody(LoginForm{User: "john", Pass: "secret"}),
 //	)
-func WithFormBody(payload any) RequestModifier {
+func WithFormBody[T any](payload T) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req Request) {
-			if payload == nil {
+			if any(payload) == nil {
 				return
 			}
 
-			if r, ok := payload.(io.Reader); ok {
+			if r, ok := any(payload).(io.Reader); ok {
 				req.SetBodyStream(r, -1)
 				req.SetHeader(header.ContentType, header.MIMEApplicationForm)
 				return

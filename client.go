@@ -119,10 +119,6 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 
 // Unwrap returns the underlying execution engine.
 func (c *Client) Unwrap() HTTPDoer {
-	if c == nil {
-		return nil
-	}
-
 	return c.engine
 }
 

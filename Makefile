@@ -70,6 +70,8 @@ cover-html: cover ## Generate coverage report and open interactive HTML in brows
 lint: ## Run golangci-lint check
 	@printf "$(CYAN)Running linter...$(RESET)\n"
 	golangci-lint run ./...
+	@printf "$(CYAN)Running AST borrow checker...$(RESET)\n"
+	go run ./cmd/vortex borrow ./...
 
 format: ## Format code and auto-fix linter suggestions
 	@printf "$(CYAN)Formatting Go code...$(RESET)\n"

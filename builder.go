@@ -61,12 +61,8 @@ func newRequestPool() *requestPool {
 
 // Get retrieves a pooled [RequestBuilder] instance bound to any engine or client.
 func (p *requestPool) Get(doer HTTPRequester) *RequestBuilder {
-	if doer == nil {
-		doer = DefaultClient
-	}
-
 	r := p.storage.Get()
-	r.client = doer
+	r.client = generic.CoalesceNil[HTTPRequester](doer, DefaultClient)
 	r.consumed = false
 
 	return r
@@ -172,10 +168,6 @@ func (r *RequestBuilder) Reset() {
 
 // Release resets the request builder and returns it to the free-list pool.
 func (r *RequestBuilder) Release() {
-	if r == nil {
-		return
-	}
-
 	r.consumed = true
 	r.Reset()
 	requestBuilderPool.Put(r)

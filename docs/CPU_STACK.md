@@ -43,7 +43,7 @@ This specification documents the low-level hardware alignment, native PLAN9 x86-
 | :--- | :--- | :--- |
 | Request Pool Lifecycle | 122,891,942 Ops/sec | ~42 CPU Clock Cycles |
 | URL Template & Cache | 22,548,748 Ops/sec | Zero-Alloc Byte Slice Pool |
-| Fast Engine Core | 1,689,131 RPS | ~2500 Clock Cycles / Tx |
+| Fast Engine Core | 2,126,754 RPS | ~2480 Clock Cycles / Tx |
 | AVX2 VPXOR Masker | 69.02 GB/sec | Memory Bus Bandwidth |
 | WebSocket 1KB Masking | 68.69 GB/sec | L1/L2 Write Bandwidth |
 | OS Socket Network | 154,508 RPS | OS Kernel Bottleneck |

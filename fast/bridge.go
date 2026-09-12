@@ -21,7 +21,7 @@ import (
 // NewStdClient adapts a fast [Client] into a standard Go [*http.Client].
 //
 // It bridges third-party libraries (e.g., resty, go-resty, AWS SDKs, or custom API SDKs)
-// with aoni/fast's ultra-high-throughput fasthttp transport pipeline (1.5M+ RPS, 0 allocs).
+// with aoni/fast's ultra-high-throughput fasthttp transport pipeline (2.12M+ RPS, 0 allocs).
 // Sets [http.Client.CheckRedirect] to [http.ErrUseLastResponse], delegating all redirect handling
 // internally to aoni's pipeline to prevent double-handling or socket leaks.
 // Returns a fully compatible [*http.Client] that routes all requests through aoni/fast's fasthttp engine.

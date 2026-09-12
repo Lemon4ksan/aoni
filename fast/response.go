@@ -52,8 +52,8 @@ func (b *fastBodyReadCloser) Bytes() (data []byte, volatile bool) {
 
 func (b *fastBodyReadCloser) Close() error {
 	b.once.Do(func() {
-		h1engine.ReleaseRequest(b.fastReq)
-		h1engine.ReleaseResponse(b.fastResp)
+		ReleaseRequestSafe(b.fastReq)
+		ReleaseResponseSafe(b.fastResp)
 	})
 
 	return nil
@@ -532,12 +532,12 @@ func (r *PooledResponse) Close() error {
 		_ = r.Response.Close()
 
 		if r.fastReq != nil {
-			h1engine.ReleaseRequest(r.fastReq)
+			ReleaseRequestSafe(r.fastReq)
 			r.fastReq = nil
 		}
 
 		if r.fastResp != nil {
-			h1engine.ReleaseResponse(r.fastResp)
+			ReleaseResponseSafe(r.fastResp)
 			r.fastResp = nil
 		}
 

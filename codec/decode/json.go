@@ -7,8 +7,9 @@ package decode
 import (
 	"io"
 
-	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/codec/json"
+
+	"github.com/lemon4ksan/aoni/internal/arena"
 )
 
 // JSONDecoderConfig configures parsing options for JSON response streams.
@@ -75,12 +76,10 @@ func (jsonDecoder) Decode(reader io.Reader, target any) error {
 	return json.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
-// JSONScoped parses JSON response payload into a type T allocated within the specified [borrow.Scope].
+// JSONArena parses JSON response payload into a type T allocated within the specified arena.
 // Employs NoCopy: true parsing to avoid string allocations for fields referencing the underlying buffer.
-//
-//vortex:ignore borrow-must-release
-func JSONScoped[T any](reader io.Reader, scope *borrow.Scope) (*T, error) {
-	target := borrow.Alloc[T](scope).Get()
+func JSONArena[T any](reader io.Reader, a *arena.Arena) (*T, error) {
+	target := arena.Alloc[T](a)
 
 	if data, _, ok := InspectBytes(reader); ok {
 		data = StripBOMBytes(data)
@@ -96,7 +95,7 @@ func JSONScoped[T any](reader io.Reader, scope *borrow.Scope) (*T, error) {
 		return target, nil
 	}
 
-	data, err := io.ReadAll(StripBOM(reader))
+	data, err := a.ReadAll(StripBOM(reader))
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/ast"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/borrow"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/core"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/oracle"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/perf"
@@ -38,6 +39,7 @@ func DefaultCommands(runner base.AppRunner) []base.Command {
 	// Top-level shortcuts for frequent dev workflows
 	cmds = append(cmds, &perf.CmdBench{})
 	cmds = append(cmds, &perf.CmdCover{})
+	cmds = append(cmds, &borrow.CmdBorrow{})
 
 	// Workspace Management
 	cmds = append(cmds, workspace.Commands(runner)...)

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/codec/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
@@ -22,6 +21,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/lemon4ksan/aoni/internal/arena"
 )
 
 type errorReader struct{}
@@ -921,7 +922,7 @@ func BenchmarkDecode_GRPCWeb_FastPath(b *testing.B) {
 	}
 }
 
-func TestJSONScoped(t *testing.T) {
+func TestJSONArena(t *testing.T) {
 	t.Parallel()
 
 	type User struct {
@@ -929,22 +930,22 @@ func TestJSONScoped(t *testing.T) {
 		Age  int    `json:"age"`
 	}
 
-	scope := borrow.NewScope()
-	defer scope.Release()
+	scope := arena.Acquire()
+	defer arena.Release(scope)
 
 	payload := []byte(`{"name":"Aoni","age":42}`)
-	user, err := JSONScoped[User](bytes.NewReader(payload), scope)
+	user, err := JSONArena[User](bytes.NewReader(payload), scope)
 	require.NoError(t, err)
 	assert.Equal(t, "Aoni", user.Name)
 	assert.Equal(t, 42, user.Age)
 }
 
-func BenchmarkJSONScoped(b *testing.B) {
+func BenchmarkJSONArena(b *testing.B) {
 	payload := []byte(`{"name":"Aoni High Performance Reactor","age":42}`)
 	br := mockBytesReader{data: payload, volatile: true}
 
-	scope := borrow.NewScope()
-	defer scope.Release()
+	scope := arena.Acquire()
+	defer arena.Release(scope)
 
 	type User struct {
 		Name string `json:"name"`
@@ -955,6 +956,6 @@ func BenchmarkJSONScoped(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, _ = JSONScoped[User](br, scope)
+		_, _ = JSONArena[User](br, scope)
 	}
 }

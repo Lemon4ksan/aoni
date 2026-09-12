@@ -106,6 +106,7 @@ func (c *Client) raceProtocolHandshakes(
 
 	go func() {
 		h3Resp := h1engine.AcquireResponse()
+		WrapResponse(h3Resp)
 
 		tr, h3Err, handled := c.tryDispatchH3(raceCtx, host, fastReq, h3Resp)
 		if handled && h3Err == nil {
@@ -113,7 +114,7 @@ func (c *Client) raceProtocolHandshakes(
 			return
 		}
 
-		h1engine.ReleaseResponse(h3Resp)
+		ReleaseResponseSafe(h3Resp)
 
 		results <- raceResult{err: h3Err, isH3: true}
 	}()
@@ -138,7 +139,7 @@ func (c *Client) raceProtocolHandshakes(
 
 		if res.isH3 && res.err == nil {
 			res.resp.CopyTo(fastResp)
-			h1engine.ReleaseResponse(res.resp)
+			ReleaseResponseSafe(res.resp)
 			return res.trailers, nil, false
 		}
 
@@ -148,11 +149,14 @@ func (c *Client) raceProtocolHandshakes(
 
 		go func() {
 			tcpReq := h1engine.AcquireRequest()
-			defer h1engine.ReleaseRequest(tcpReq)
+
+			WrapRequest(tcpReq)
+			defer ReleaseRequestSafe(tcpReq)
 
 			fastReq.CopyTo(tcpReq)
 
 			tcpResp := h1engine.AcquireResponse()
+			WrapResponse(tcpResp)
 
 			tr, tcpErr, released := c.dispatchH1OrH2(raceCtx, host, tcpReq, tcpResp)
 			if tcpErr == nil {
@@ -160,7 +164,7 @@ func (c *Client) raceProtocolHandshakes(
 				return
 			}
 
-			h1engine.ReleaseResponse(tcpResp)
+			ReleaseResponseSafe(tcpResp)
 
 			results <- raceResult{err: tcpErr, autoReleased: released, isH3: false}
 		}()
@@ -180,7 +184,7 @@ func (c *Client) raceProtocolHandshakes(
 
 			if res.err == nil && res.resp != nil {
 				res.resp.CopyTo(fastResp)
-				h1engine.ReleaseResponse(res.resp)
+				ReleaseResponseSafe(res.resp)
 				return res.trailers, nil, res.autoReleased
 			}
 
@@ -214,7 +218,7 @@ func drainLateRaceResponses(results chan raceResult, remaining int) {
 		select {
 		case res := <-results:
 			if res.resp != nil {
-				h1engine.ReleaseResponse(res.resp)
+				ReleaseResponseSafe(res.resp)
 			}
 		case <-timer.C:
 			return
@@ -509,8 +513,8 @@ func (c *Client) executeFastHTTP(
 				req.Header.Del(header.Host)
 			}
 
-			h1engine.ReleaseRequest(req)
-			h1engine.ReleaseResponse(resp)
+			ReleaseRequestSafe(req)
+			ReleaseResponseSafe(resp)
 		}()
 
 		return ctx.Err(), true
