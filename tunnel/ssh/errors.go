@@ -4,49 +4,36 @@
 
 package ssh
 
-import (
-	"github.com/lemon4ksan/aoni/tunnel/ssh/agent"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
-)
+import "errors"
 
 var (
 	// ErrSSHDialFailed is returned when connecting or authenticating with an SSH server fails.
-	ErrSSHDialFailed = client.ErrSSHDialFailed
+	ErrSSHDialFailed = errors.New("aoni/ssh/client: connection or authentication failed")
 
 	// ErrSSHClosed is returned when attempting an operation on an inactive SSH client.
-	ErrSSHClosed = client.ErrSSHClosed
+	ErrSSHClosed = errors.New("aoni/ssh/client: session is closed")
 
 	// ErrInvalidPrivateKey is returned when parsing an invalid or encrypted PEM private key fails.
-	ErrInvalidPrivateKey = client.ErrInvalidPrivateKey
+	ErrInvalidPrivateKey = errors.New("aoni/ssh/client: invalid or encrypted private key")
+
+	// ErrInvalidCertificate is returned when parsing or validating an OpenSSH certificate fails.
+	ErrInvalidCertificate = errors.New("aoni/ssh/client: invalid or corrupted ssh certificate")
 
 	// ErrHostKeyMismatch is returned when a host key does not match the entry in known_hosts.
-	ErrHostKeyMismatch = client.ErrHostKeyMismatch
+	ErrHostKeyMismatch = errors.New("aoni/ssh/client: host key mismatch detected")
 
 	// ErrHostNotFound is returned when a host key is missing from the known_hosts file.
-	ErrHostNotFound = client.ErrHostNotFound
+	ErrHostNotFound = errors.New("aoni/ssh/client: host not found in known_hosts")
 
 	// ErrCommandInitFailed is returned when environment variables or session options fail to apply.
-	ErrCommandInitFailed = client.ErrCommandInitFailed
+	ErrCommandInitFailed = errors.New("aoni/ssh/client: command initialization failed")
 
 	// ErrProxyAndJumpConflict is returned when attempting to set both a SOCKS5 proxy and an SSH jump host on the same client.
-	ErrProxyAndJumpConflict = client.ErrProxyAndJumpConflict
-
-	// ErrAgentUnavailable is returned when the SSH_AUTH_SOCK environment variable is not configured.
-	ErrAgentUnavailable = agent.ErrAgentUnavailable
+	ErrProxyAndJumpConflict = errors.New("aoni/ssh/client: cannot combine proxy and jump host on the same client level")
 
 	// ErrFingerprintMismatch is returned when the remote host key fingerprint does not match the expected SHA256 pin.
-	ErrFingerprintMismatch = client.ErrFingerprintMismatch
-
-	// ErrInvalidTargetFile is returned when a target SCP filename contains control characters (\r, \n, \x00).
-	ErrInvalidTargetFile = sftp.ErrInvalidTargetFile
+	ErrFingerprintMismatch = errors.New("aoni/ssh/client: host key fingerprint mismatch")
 
 	// ErrPtyRequestFailed is returned when the server rejects a pseudo-terminal (PTY) allocation request.
-	ErrPtyRequestFailed = client.ErrPtyRequestFailed
-
-	// ErrInvalidChunkSize is returned when parallel SFTP transfer chunkSize is less than or equal to zero.
-	ErrInvalidChunkSize = sftp.ErrInvalidChunkSize
-
-	// ErrParallelTransferFailed is returned when one or more chunks fail during parallel SFTP transfer.
-	ErrParallelTransferFailed = sftp.ErrParallelTransferFailed
+	ErrPtyRequestFailed = errors.New("aoni/ssh/client: failed to request pseudo-terminal")
 )

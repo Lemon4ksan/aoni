@@ -2,15 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package wire
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 
+	"github.com/lemon4ksan/foundation/net/quic/varint"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+)
 
-	impl "github.com/lemon4ksan/aoni/internal/masque"
+var (
+	ErrInvalidCapsule      = errors.New("aoni/masque: invalid capsule format")
+	ErrEmptyAddressRequest = errors.New("aoni/masque: address request capsule cannot be empty")
 )
 
 const (
@@ -44,6 +49,7 @@ func NewAssignedAddressSlab(capacity int) (*offheap.SlabAllocator[AssignedAddres
 }
 
 // DecodeAddressAssignPayloadPOD parses AssignedAddressPOD entries using offheap.AllocStruct when arena is provided.
+
 func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*AssignedAddressPOD, error) {
 	var entries []*AssignedAddressPOD
 
@@ -211,12 +217,12 @@ type IPAddressRange struct {
 
 // EncodeVarint encodes v into b using QUIC variable-length integer encoding (RFC 9000 §16 / RFC 9297 §1.1).
 func EncodeVarint(v uint64, b []byte) int {
-	return impl.EncodeVarintSlice(v, b)
+	return varint.EncodeVarintSlice(v, b)
 }
 
 // DecodeVarint decodes a QUIC variable-length integer from b, returning value and byte length (RFC 9000 §16).
 func DecodeVarint(b []byte) (uint64, int, error) {
-	v, n, err := impl.DecodeVarint(b)
+	v, n, err := varint.DecodeVarint(b)
 	if err != nil {
 		return 0, 0, ErrInvalidCapsule
 	}

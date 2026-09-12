@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package bridge
 
 import (
 	"bufio"
@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/tunnel/masque"
 )
 
 func TestBuildUDPProxyURI(t *testing.T) {
@@ -170,7 +171,7 @@ func TestDialUDPProxy(t *testing.T) {
 		targetURL := "https://proxy.example.com/.well-known/masque/udp/dns.google/53/"
 		conn, resp, err := DialUDPProxy(t.Context(), dialer, targetURL)
 
-		assert.ErrorIs(t, err, ErrHandshakeFailed)
+		assert.ErrorIs(t, err, masque.ErrHandshakeFailed)
 		assert.Nil(t, conn)
 		require.NotNil(t, resp)
 		assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
@@ -200,7 +201,7 @@ func TestDialUDPProxy(t *testing.T) {
 		dialer := &mockWSDialer{}
 		_, _, err := DialUDPProxy(t.Context(), dialer, ":invalid-udp-uri")
 
-		assert.ErrorIs(t, err, ErrInvalidURITemplate)
+		assert.ErrorIs(t, err, masque.ErrInvalidURITemplate)
 	})
 
 	t.Run("context with deadline", func(t *testing.T) {

@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package client_test
+package ssh_test
 
 import (
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
+
 	"bytes"
 	"net"
 	"os"
@@ -17,39 +19,38 @@ import (
 	golangssh "golang.org/x/crypto/ssh"
 
 	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 )
 
 func TestOptions(t *testing.T) {
 	t.Run("WithPort", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		opt := client.WithPort(2222)
+		opt := ssh.WithPort(2222)
 		err := opt(c, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, uint(2222), c.Port)
 	})
 
 	t.Run("WithPassword", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		opt := client.WithPassword("supersecret")
+		opt := ssh.WithPassword("supersecret")
 		err := opt(c, cfg)
 		require.NoError(t, err)
 		assert.Len(t, cfg.Auth, 1)
 	})
 
 	t.Run("WithKeyboardInteractive", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
 		handler := func(_, _, _ string, _ bool) (string, error) {
 			return "ans", nil
 		}
 
-		opt := client.WithKeyboardInteractive(handler)
+		opt := ssh.WithKeyboardInteractive(handler)
 		err := opt(c, cfg)
 		require.NoError(t, err)
 		assert.Len(t, cfg.Auth, 1)
@@ -59,27 +60,27 @@ func TestOptions(t *testing.T) {
 		pemBytes, signer, _ := generateTestKeyPair(t)
 
 		t.Run("WithKey valid", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			err := client.WithKey(pemBytes, "")(c, cfg)
+			err := ssh.WithKey(pemBytes, "")(c, cfg)
 			require.NoError(t, err)
 			assert.Len(t, cfg.Auth, 1)
 		})
 
 		t.Run("WithKey invalid", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			err := client.WithKey([]byte("bad pem"), "")(c, cfg)
+			err := ssh.WithKey([]byte("bad pem"), "")(c, cfg)
 			assert.Error(t, err)
 		})
 
 		t.Run("WithSigner", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			err := client.WithSigner(signer)(c, cfg)
+			err := ssh.WithSigner(signer)(c, cfg)
 			require.NoError(t, err)
 			assert.Len(t, cfg.Auth, 1)
 		})
@@ -96,10 +97,10 @@ func TestOptions(t *testing.T) {
 		certSigner, err := golangssh.NewCertSigner(userCert, userSigner)
 		require.NoError(t, err)
 
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err = client.WithCertSigner(certSigner)(c, cfg)
+		err = ssh.WithCertSigner(certSigner)(c, cfg)
 		require.NoError(t, err)
 		assert.Len(t, cfg.Auth, 1)
 	})
@@ -111,72 +112,72 @@ func TestOptions(t *testing.T) {
 		pemBytes, _, _ := generateTestKeyPair(t)
 		require.NoError(t, os.WriteFile(keyFile, pemBytes, 0o600))
 
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err := client.WithKeyFile(keyFile, "")(c, cfg)
+		err := ssh.WithKeyFile(keyFile, "")(c, cfg)
 		require.NoError(t, err)
 		assert.Len(t, cfg.Auth, 1)
 
-		err = client.WithKeyFile(filepath.Join(tempDir, "missing"), "")(c, cfg)
+		err = ssh.WithKeyFile(filepath.Join(tempDir, "missing"), "")(c, cfg)
 		assert.Error(t, err)
 	})
 
 	t.Run("WithAgent variants", func(t *testing.T) {
 		t.Run("WithAgent nil conn", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			err := client.WithAgent(nil)(c, cfg)
+			err := ssh.WithAgent(nil)(c, cfg)
 			require.NoError(t, err)
 			assert.Empty(t, cfg.Auth)
 		})
 
 		t.Run("WithAgentSocket empty", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			err := client.WithAgentSocket("")(c, cfg)
+			err := ssh.WithAgentSocket("")(c, cfg)
 			require.NoError(t, err)
 			assert.Empty(t, cfg.Auth)
 		})
 
 		t.Run("WithDefaultAgent", func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
 			t.Setenv("SSH_AUTH_SOCK", "")
 
-			err := client.WithDefaultAgent()(c, cfg)
+			err := ssh.WithDefaultAgent()(c, cfg)
 			require.NoError(t, err)
 		})
 	})
 
 	t.Run("WithTimeout", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err := client.WithTimeout(10*time.Second)(c, cfg)
+		err := ssh.WithTimeout(10*time.Second)(c, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, 10*time.Second, cfg.Timeout)
 	})
 
 	t.Run("WithWindowSize and WithMaxPacketSize", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		require.NoError(t, client.WithWindowSize(8192)(c, cfg))
+		require.NoError(t, ssh.WithWindowSize(8192)(c, cfg))
 		assert.Equal(t, uint32(8192), c.WindowSize)
 
-		require.NoError(t, client.WithMaxPacketSize(4096)(c, cfg))
+		require.NoError(t, ssh.WithMaxPacketSize(4096)(c, cfg))
 		assert.Equal(t, uint32(4096), c.MaxPacketSize)
 	})
 
 	t.Run("WithHighPerformanceDefaults", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err := client.WithHighPerformanceDefaults()(c, cfg)
+		err := ssh.WithHighPerformanceDefaults()(c, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(16*1024*1024), c.WindowSize)
 		assert.Equal(t, uint32(64*1024), c.MaxPacketSize)
@@ -189,15 +190,15 @@ func TestOptions(t *testing.T) {
 		knownFile := filepath.Join(tempDir, "known_hosts")
 		require.NoError(t, os.WriteFile(knownFile, []byte(""), 0o600))
 
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err := client.WithKnownHosts(knownFile)(c, cfg)
+		err := ssh.WithKnownHosts(knownFile)(c, cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.HostKeyCallback)
 
 		ensureFile := filepath.Join(tempDir, "new_dir", "known_hosts")
-		err = client.WithEnsureKnownHosts(ensureFile)(c, cfg)
+		err = ssh.WithEnsureKnownHosts(ensureFile)(c, cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.HostKeyCallback)
 	})
@@ -206,10 +207,10 @@ func TestOptions(t *testing.T) {
 		_, _, pubKey := generateTestKeyPair(t)
 		fp := golangssh.FingerprintSHA256(pubKey)
 
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		err := client.WithFingerprint(fp)(c, cfg)
+		err := ssh.WithFingerprint(fp)(c, cfg)
 		require.NoError(t, err)
 		require.NotNil(t, cfg.HostKeyCallback)
 
@@ -218,31 +219,31 @@ func TestOptions(t *testing.T) {
 
 		_, _, otherPubKey := generateTestKeyPair(t)
 		err = cfg.HostKeyCallback("127.0.0.1", dummyAddr, otherPubKey)
-		assert.ErrorIs(t, err, client.ErrFingerprintMismatch)
+		assert.ErrorIs(t, err, ssh.ErrFingerprintMismatch)
 	})
 
 	t.Run("WithCiphers, WithKeyExchanges, WithLegacyCiphers", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		require.NoError(t, client.WithCiphers([]string{"my-cipher"})(c, cfg))
+		require.NoError(t, ssh.WithCiphers([]string{"my-cipher"})(c, cfg))
 		assert.Contains(t, cfg.Ciphers, "my-cipher")
 
-		require.NoError(t, client.WithKeyExchanges([]string{"my-kex"})(c, cfg))
+		require.NoError(t, ssh.WithKeyExchanges([]string{"my-kex"})(c, cfg))
 		assert.Contains(t, cfg.KeyExchanges, "my-kex")
 
-		require.NoError(t, client.WithLegacyCiphers()(c, cfg))
+		require.NoError(t, ssh.WithLegacyCiphers()(c, cfg))
 		assert.Contains(t, cfg.Ciphers, "aes128-cbc")
 	})
 
 	t.Run("WithRequestPty and WithPtyTerminal", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		require.NoError(t, client.WithRequestPty(true)(c, cfg))
+		require.NoError(t, ssh.WithRequestPty(true)(c, cfg))
 		assert.True(t, c.RequestPty)
 
-		require.NoError(t, client.WithPtyTerminal("vt100", 120, 50)(c, cfg))
+		require.NoError(t, ssh.WithPtyTerminal("vt100", 120, 50)(c, cfg))
 		assert.True(t, c.RequestPty)
 		assert.Equal(t, "vt100", c.PtyTerm)
 		assert.Equal(t, 120, c.PtyWidth)
@@ -252,41 +253,41 @@ func TestOptions(t *testing.T) {
 	t.Run(
 		"WithInsecureIgnoreHostKey, WithHostKeyCallback, WithHostKeyAlgorithms, WithBannerCallback",
 		func(t *testing.T) {
-			c := &client.Client{}
+			c := &ssh.Client{}
 			cfg := &golangssh.ClientConfig{}
 
-			require.NoError(t, client.WithInsecureIgnoreHostKey()(c, cfg))
+			require.NoError(t, ssh.WithInsecureIgnoreHostKey()(c, cfg))
 			assert.NotNil(t, cfg.HostKeyCallback)
 
 			cb := func(_ string, _ net.Addr, _ golangssh.PublicKey) error { return nil }
-			require.NoError(t, client.WithHostKeyCallback(cb)(c, cfg))
+			require.NoError(t, ssh.WithHostKeyCallback(cb)(c, cfg))
 
-			require.NoError(t, client.WithHostKeyAlgorithms([]string{"ssh-ed25519"})(c, cfg))
+			require.NoError(t, ssh.WithHostKeyAlgorithms([]string{"ssh-ed25519"})(c, cfg))
 			assert.Equal(t, []string{"ssh-ed25519"}, cfg.HostKeyAlgorithms)
 
 			bannerCb := func(_ string) error { return nil }
-			require.NoError(t, client.WithBannerCallback(bannerCb)(c, cfg))
+			require.NoError(t, ssh.WithBannerCallback(bannerCb)(c, cfg))
 			assert.NotNil(t, cfg.BannerCallback)
 		},
 	)
 
 	t.Run("WithProxy and WithJump", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		require.NoError(t, client.WithProxy("socks5://127.0.0.1:1080")(c, cfg))
+		require.NoError(t, ssh.WithProxy("socks5://127.0.0.1:1080")(c, cfg))
 		assert.Equal(t, "socks5://127.0.0.1:1080", c.ProxyURL)
 
-		jumpClient := &client.Client{}
-		require.NoError(t, client.WithJump(jumpClient)(c, cfg))
+		jumpClient := &ssh.Client{}
+		require.NoError(t, ssh.WithJump(jumpClient)(c, cfg))
 		assert.Equal(t, jumpClient, c.Jump)
 	})
 
 	t.Run("WithConfig", func(t *testing.T) {
-		c := &client.Client{}
+		c := &ssh.Client{}
 		cfg := &golangssh.ClientConfig{}
 
-		opt := client.WithConfig(func(c *golangssh.ClientConfig) error {
+		opt := ssh.WithConfig(func(c *golangssh.ClientConfig) error {
 			c.User = "custom-user"
 			return nil
 		})
@@ -298,25 +299,25 @@ func TestOptions(t *testing.T) {
 func TestCmdOptions(t *testing.T) {
 	t.Parallel()
 
-	cmd := &client.Cmd{
+	cmd := &ssh.Cmd{
 		Session: &golangssh.Session{},
 	}
 
-	client.WithPath("/usr/bin/bash")(cmd)
+	ssh.WithPath("/usr/bin/bash")(cmd)
 	assert.Equal(t, "/usr/bin/bash", cmd.Path)
 
 	bufOut := &bytes.Buffer{}
-	client.WithStdout(bufOut)(cmd)
+	ssh.WithStdout(bufOut)(cmd)
 	assert.Equal(t, bufOut, cmd.Stdout)
 
 	bufErr := &bytes.Buffer{}
-	client.WithStderr(bufErr)(cmd)
+	ssh.WithStderr(bufErr)(cmd)
 	assert.Equal(t, bufErr, cmd.Stderr)
 
 	bufIn := bytes.NewReader([]byte("input"))
-	client.WithStdin(bufIn)(cmd)
+	ssh.WithStdin(bufIn)(cmd)
 	assert.Equal(t, bufIn, cmd.Stdin)
 
-	client.WithEnv([]string{"FOO=bar"})(cmd)
+	ssh.WithEnv([]string{"FOO=bar"})(cmd)
 	assert.Equal(t, []string{"FOO=bar"}, cmd.Env)
 }

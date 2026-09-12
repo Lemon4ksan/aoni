@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package bridge
 
 import (
 	"context"
@@ -13,13 +13,15 @@ import (
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
+
+	"github.com/lemon4ksan/aoni/tunnel/masque"
 )
 
 func TestBridgeTUNDatagram_NilArgs(t *testing.T) {
 	t.Parallel()
 
-	assert.Error(t, BridgeTUNDatagram(t.Context(), nil, nil, BridgeOptions{}))
-	assert.Error(t, BridgeTUNDatagram(t.Context(), newBridgeMockAdapter("t0"), nil, BridgeOptions{}))
+	assert.Error(t, TUNDatagram(t.Context(), nil, nil, Options{}))
+	assert.Error(t, TUNDatagram(t.Context(), newBridgeMockAdapter("t0"), nil, Options{}))
 }
 
 func TestBridgeTUNDatagram_BasicForwarding(t *testing.T) {
@@ -28,7 +30,7 @@ func TestBridgeTUNDatagram_BasicForwarding(t *testing.T) {
 	adapter := newBridgeMockAdapter("tun_d0")
 	stream := newMockStream()
 	dgrams := newMockDatagramTransport()
-	sess := NewSession(stream, dgrams)
+	sess := masque.NewSession(stream, dgrams)
 
 	defer adapter.Close()
 	defer sess.Close()
@@ -37,7 +39,7 @@ func TestBridgeTUNDatagram_BasicForwarding(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = BridgeTUNDatagram(ctx, adapter, sess, BridgeOptions{})
+		_ = TUNDatagram(ctx, adapter, sess, Options{})
 	}()
 
 	// 1. Packet from TUN -> Datagram
@@ -76,12 +78,12 @@ func TestBridgeTUNDatagram_IngressFilterAndMTU(t *testing.T) {
 	adapter := newBridgeMockAdapter("tun_d1")
 	stream := newMockStream()
 	dgrams := newMockDatagramTransport()
-	sess := NewSession(stream, dgrams)
+	sess := masque.NewSession(stream, dgrams)
 
 	defer adapter.Close()
 	defer sess.Close()
 
-	opts := BridgeOptions{
+	opts := Options{
 		AllowedPrefixes: []netip.Prefix{
 			netip.MustParsePrefix("10.0.0.0/16"),
 		},
@@ -92,7 +94,7 @@ func TestBridgeTUNDatagram_IngressFilterAndMTU(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = BridgeTUNDatagram(ctx, adapter, sess, opts)
+		_ = TUNDatagram(ctx, adapter, sess, opts)
 	}()
 
 	// Spoofed packet (192.168.1.100) -> dropped by uRPF

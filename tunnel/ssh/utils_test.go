@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package client_test
+package ssh_test
 
 import (
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
+
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -16,8 +18,6 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 	golangssh "golang.org/x/crypto/ssh"
-
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 )
 
 func generateTestKeyPair(t *testing.T) ([]byte, golangssh.Signer, golangssh.PublicKey) {
@@ -58,7 +58,7 @@ func TestParseKey(t *testing.T) {
 
 		pemBytes, _, _ := generateTestKeyPair(t)
 
-		signer, err := client.ParseKey(pemBytes, "")
+		signer, err := ssh.ParseKey(pemBytes, "")
 		require.NoError(t, err)
 		require.NotNil(t, signer)
 	})
@@ -69,7 +69,7 @@ func TestParseKey(t *testing.T) {
 		pass := "secret123"
 		pemBytes := generateEncryptedKey(t, pass)
 
-		signer, err := client.ParseKey(pemBytes, pass)
+		signer, err := ssh.ParseKey(pemBytes, pass)
 		require.NoError(t, err)
 		require.NotNil(t, signer)
 	})
@@ -80,18 +80,18 @@ func TestParseKey(t *testing.T) {
 		pass := "secret123"
 		pemBytes := generateEncryptedKey(t, pass)
 
-		signer, err := client.ParseKey(pemBytes, "wrongpass")
+		signer, err := ssh.ParseKey(pemBytes, "wrongpass")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, client.ErrInvalidPrivateKey)
+		assert.ErrorIs(t, err, ssh.ErrInvalidPrivateKey)
 		assert.Nil(t, signer)
 	})
 
 	t.Run("invalid pem data", func(t *testing.T) {
 		t.Parallel()
 
-		signer, err := client.ParseKey([]byte("not-a-pem-key"), "")
+		signer, err := ssh.ParseKey([]byte("not-a-pem-key"), "")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, client.ErrInvalidPrivateKey)
+		assert.ErrorIs(t, err, ssh.ErrInvalidPrivateKey)
 		assert.Nil(t, signer)
 	})
 }
@@ -108,7 +108,7 @@ func TestParseKeyFile(t *testing.T) {
 	t.Run("existing valid key file", func(t *testing.T) {
 		t.Parallel()
 
-		signer, err := client.ParseKeyFile(keyPath, "")
+		signer, err := ssh.ParseKeyFile(keyPath, "")
 		require.NoError(t, err)
 		require.NotNil(t, signer)
 	})
@@ -116,7 +116,7 @@ func TestParseKeyFile(t *testing.T) {
 	t.Run("non existent key file", func(t *testing.T) {
 		t.Parallel()
 
-		signer, err := client.ParseKeyFile(filepath.Join(tempDir, "non_existent"), "")
+		signer, err := ssh.ParseKeyFile(filepath.Join(tempDir, "non_existent"), "")
 		require.Error(t, err)
 		assert.Nil(t, signer)
 	})
@@ -125,7 +125,7 @@ func TestParseKeyFile(t *testing.T) {
 func TestDefaultKnownHostsPath(t *testing.T) {
 	t.Parallel()
 
-	path, err := client.DefaultKnownHostsPath()
+	path, err := ssh.DefaultKnownHostsPath()
 	require.NoError(t, err)
 	assert.NotEmpty(t, path)
 	assert.Contains(t, path, filepath.Join(".ssh", "known_hosts"))
@@ -138,7 +138,7 @@ func TestKnownHostsAndEnsure(t *testing.T) {
 	knownFile := filepath.Join(tempDir, "subdir", "known_hosts")
 
 	t.Run("EnsureKnownHosts creates file and parent dir", func(t *testing.T) {
-		cb, err := client.EnsureKnownHosts(knownFile)
+		cb, err := ssh.EnsureKnownHosts(knownFile)
 		require.NoError(t, err)
 		require.NotNil(t, cb)
 
@@ -148,7 +148,7 @@ func TestKnownHostsAndEnsure(t *testing.T) {
 	})
 
 	t.Run("KnownHosts loads existing file", func(t *testing.T) {
-		cb, err := client.KnownHosts(knownFile)
+		cb, err := ssh.KnownHosts(knownFile)
 		require.NoError(t, err)
 		require.NotNil(t, cb)
 	})
@@ -167,28 +167,28 @@ func TestAddAndCheckKnownHost(t *testing.T) {
 	host := "example.com:2222"
 
 	t.Run("check before adding returns host not found", func(t *testing.T) {
-		_, err := client.EnsureKnownHosts(knownFile)
+		_, err := ssh.EnsureKnownHosts(knownFile)
 		require.NoError(t, err)
 
-		ok, err := client.CheckKnownHost(host, addr, pubKey, knownFile)
+		ok, err := ssh.CheckKnownHost(host, addr, pubKey, knownFile)
 		assert.False(t, ok)
-		assert.ErrorIs(t, err, client.ErrHostNotFound)
+		assert.ErrorIs(t, err, ssh.ErrHostNotFound)
 	})
 
 	t.Run("add known host", func(t *testing.T) {
-		err := client.AddKnownHost(host, addr, pubKey, knownFile)
+		err := ssh.AddKnownHost(host, addr, pubKey, knownFile)
 		require.NoError(t, err)
 	})
 
 	t.Run("check known host matched", func(t *testing.T) {
-		ok, err := client.CheckKnownHost(host, addr, pubKey, knownFile)
+		ok, err := ssh.CheckKnownHost(host, addr, pubKey, knownFile)
 		assert.True(t, ok)
 		assert.NoError(t, err)
 	})
 
 	t.Run("check host key mismatch", func(t *testing.T) {
-		ok, err := client.CheckKnownHost(host, addr, otherPubKey, knownFile)
+		ok, err := ssh.CheckKnownHost(host, addr, otherPubKey, knownFile)
 		assert.True(t, ok)
-		assert.ErrorIs(t, err, client.ErrHostKeyMismatch)
+		assert.ErrorIs(t, err, ssh.ErrHostKeyMismatch)
 	})
 }

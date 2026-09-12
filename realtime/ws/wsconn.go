@@ -352,6 +352,10 @@ func (c *wsRawConn) ReadFrameHeaderPOD(arena *offheap.Arena) (*WSFrameHeaderPOD,
 
 	hdr.PayloadLen = length
 	if masked {
+		if _, err := io.ReadFull(c.br, c.readMask[:]); err != nil {
+			return nil, err
+		}
+
 		hdr.MaskKey = c.readMask
 	}
 

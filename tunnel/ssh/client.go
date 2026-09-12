@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package client provides an enterprise-grade SSH tunneling, command execution, and file transfer client.
-package client
+// Package ssh provides an enterprise-grade SSH tunneling, command execution, and file transfer client.
+package ssh
 
 import (
 	"bufio"
@@ -83,17 +83,15 @@ func New(ctx context.Context, user, targetAddr string, opts ...Option) (*Client,
 	}
 
 	config := &ssh.ClientConfig{
-		Config: ssh.Config{
-			Ciphers: []string{
-				"aes128-gcm@openssh.com",
-				"chacha20-poly1305@openssh.com",
-				"aes256-gcm@openssh.com",
-			},
-			KeyExchanges: []string{
-				"curve25519-sha256",
-				"curve25519-sha256@libssh.org",
-				"ecdh-sha2-nistp256",
-			},
+		Ciphers: []string{
+			"aes128-gcm@openssh.com",
+			"chacha20-poly1305@openssh.com",
+			"aes256-gcm@openssh.com",
+		},
+		KeyExchanges: []string{
+			"curve25519-sha256",
+			"curve25519-sha256@libssh.org",
+			"ecdh-sha2-nistp256",
 		},
 		User:          user,
 		Timeout:       20 * time.Second,

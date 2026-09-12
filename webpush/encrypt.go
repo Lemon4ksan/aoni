@@ -94,7 +94,7 @@ func encryptWithKeys(plaintext []byte, uaPub *ecdh.PublicKey, authSecret []byte,
 		rs = cfg.RecordSize
 	}
 
-	// 1. Derive shared secret: ECDH(as_private, ua_public)
+	// Derive shared secret: ECDH(as_private, ua_public)
 	ecdhSecret, err := asPriv.ECDH(uaPub)
 	if err != nil {
 		return nil, fmt.Errorf("aoni/webpush: ECDH calculation failed: %w", err)
@@ -102,42 +102,42 @@ func encryptWithKeys(plaintext []byte, uaPub *ecdh.PublicKey, authSecret []byte,
 
 	uaPubBytes := uaPub.Bytes()
 
-	// 2. HKDF-Extract(salt=auth_secret, IKM=ecdh_secret) -> PRK_key
+	// HKDF-Extract(salt=auth_secret, IKM=ecdh_secret) -> PRK_key
 	prkKey := hmacSHA256(authSecret, ecdhSecret)
 
-	// 3. HKDF-Expand(PRK_key, key_info, L_key=32) -> IKM
+	// HKDF-Expand(PRK_key, key_info, L_key=32) -> IKM
 	keyInfo := bytes.Join([][]byte{
 		[]byte("WebPush: info\x00"),
 		uaPubBytes,
 		asPubBytes,
 		{0x01},
 	}, nil)
-	ikm := hmacSHA256(prkKey, keyInfo)
 
-	// 4. HKDF-Extract(salt, IKM) -> PRK
+	// HKDF-Extract(salt, IKM) -> PRK
+	ikm := hmacSHA256(prkKey, keyInfo)
 	prk := hmacSHA256(salt, ikm)
 
-	// 5. HKDF-Expand(PRK, cek_info, L_cek=16) -> CEK
+	// HKDF-Expand(PRK, cek_info, L_cek=16) -> CEK
 	cekInfo := []byte("Content-Encoding: aes128gcm\x00\x01")
 	cek := hmacSHA256(prk, cekInfo)[:16]
 
-	// 6. HKDF-Expand(PRK, nonce_info, L_nonce=12) -> NONCE
+	// HKDF-Expand(PRK, nonce_info, L_nonce=12) -> NONCE
 	nonceInfo := []byte("Content-Encoding: nonce\x00\x01")
 	nonce := hmacSHA256(prk, nonceInfo)[:12]
 
-	// 7. Construct ECE header: salt(16) + rs(4) + idlen(1) + keyid(65) = 86 octets
+	// Construct ECE header: salt(16) + rs(4) + idlen(1) + keyid(65) = 86 octets
 	header := make([]byte, HeaderLength, HeaderLength+len(plaintext)+1+16)
 	copy(header[0:16], salt)
 	binary.BigEndian.PutUint32(header[16:20], rs)
 	header[20] = byte(len(asPubBytes))
 	copy(header[21:86], asPubBytes)
 
-	// 8. Plaintext with delimiter 0x02
+	// Plaintext with delimiter 0x02
 	padded := make([]byte, len(plaintext)+1)
 	copy(padded, plaintext)
 	padded[len(plaintext)] = 0x02
 
-	// 9. AES-128-GCM encryption
+	// AES-128-GCM encryption
 	block, err := aes.NewCipher(cek)
 	if err != nil {
 		return nil, err
@@ -177,7 +177,7 @@ func Decrypt(payload []byte, uaPriv *ecdh.PrivateKey, authSecret []byte) ([]byte
 		return nil, ErrDecryptionFailed
 	}
 
-	// 1. ECDH(ua_private, as_public)
+	// ECDH(ua_private, as_public)
 	ecdhSecret, err := uaPriv.ECDH(asPub)
 	if err != nil {
 		return nil, ErrDecryptionFailed
@@ -185,7 +185,7 @@ func Decrypt(payload []byte, uaPriv *ecdh.PrivateKey, authSecret []byte) ([]byte
 
 	uaPubBytes := uaPriv.PublicKey().Bytes()
 
-	// 2. HKDF-Extract(salt=auth_secret, IKM=ecdh_secret) -> PRK_key
+	// HKDF-Extract(salt=auth_secret, IKM=ecdh_secret) -> PRK_key
 	prkKey := hmacSHA256(authSecret, ecdhSecret)
 
 	// 3. HKDF-Expand(PRK_key, key_info, L_key=32) -> IKM
@@ -195,19 +195,19 @@ func Decrypt(payload []byte, uaPriv *ecdh.PrivateKey, authSecret []byte) ([]byte
 		asPubBytes,
 		{0x01},
 	}, nil)
-	ikm := hmacSHA256(prkKey, keyInfo)
 
-	// 4. HKDF-Extract(salt, IKM) -> PRK
+	// HKDF-Extract(salt, IKM) -> PRK
+	ikm := hmacSHA256(prkKey, keyInfo)
 	prk := hmacSHA256(salt, ikm)
 
-	// 5. Derive CEK and NONCE
+	// Derive CEK and NONCE
 	cekInfo := []byte("Content-Encoding: aes128gcm\x00\x01")
 	cek := hmacSHA256(prk, cekInfo)[:16]
 
 	nonceInfo := []byte("Content-Encoding: nonce\x00\x01")
 	nonce := hmacSHA256(prk, nonceInfo)[:12]
 
-	// 6. AES-128-GCM decryption
+	// AES-128-GCM decryption
 	block, err := aes.NewCipher(cek)
 	if err != nil {
 		return nil, err

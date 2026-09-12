@@ -2,28 +2,32 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package bridge
 
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"time"
 	"unsafe"
 
+	"github.com/lemon4ksan/foundation/net/packet/tcp"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
+	"github.com/lemon4ksan/aoni/tunnel/masque"
+	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
-// BridgeTUNDatagram connects a Layer 3 TUN adapter to a MASQUE Datagram session (RFC 9484 §5 & §6)
+// TUNDatagram connects a Layer 3 TUN adapter to a MASQUE Datagram session (RFC 9484 §5 & §6)
 // while enforcing BCP 38 / RFC 2827 uRPF ingress filtering (RFC 9484 §11), PMTUD ICMP Packet Too Big
 // signaling (RFC 9484 §7.2.1 & §10.1), and TCP SYN MSS clamping (RFC 9293) with 0 B/op.
-func BridgeTUNDatagram(
+func TUNDatagram(
 	ctx context.Context,
 	adapter tun.Adapter,
-	session *Session,
-	opts BridgeOptions,
+	session *masque.Session,
+	opts Options,
 ) error {
 	if adapter == nil {
 		return errors.New("aoni/masque: nil tun adapter")
@@ -57,15 +61,15 @@ func forwardAdapterToSession(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	adapter tun.Adapter,
-	session *Session,
-	opts BridgeOptions,
+	session *masque.Session,
+	opts Options,
 ) {
-	vtable := NewIPProtocolVTable()
+	vtable := route.NewIPProtocolVTable()
 
 	// Register fast-path handler for TCP (6) to enforce MSS Clamping
 	vtable.Register(6, func(packet []byte) error {
 		if opts.MaxMTU > 0 {
-			ClampTCPMSSInPlace(packet, opts.MaxMTU)
+			tcp.ClampMSSInPlace(packet, opts.MaxMTU)
 		}
 
 		return nil
@@ -98,8 +102,8 @@ func forwardAdapterToSession(
 
 				packet := buf[:n]
 
-				srcIP := ExtractSrcIP(packet)
-				if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
+				srcIP := route.ExtractSrcIP(packet)
+				if err := route.ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
 					continue
 				}
 
@@ -123,7 +127,7 @@ func forwardSessionToAdapter(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	adapter tun.Adapter,
-	session *Session,
+	session *masque.Session,
 ) {
 	for {
 		select {
@@ -141,7 +145,7 @@ func forwardSessionToAdapter(
 					continue
 				}
 
-				if errors.Is(err, context.Canceled) || errors.Is(err, netErrClosed) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
 					return
 				}
 

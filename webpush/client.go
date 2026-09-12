@@ -15,10 +15,11 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // MessageOption defines functional modifiers for outbound push messages.
-type MessageOption func(*Message)
+type MessageOption = generic.Option[*Message]
 
 // WithTTL sets the message Time-To-Live retention duration (RFC 8030 §5.2).
 func WithTTL(ttl time.Duration) MessageOption {
@@ -107,20 +108,9 @@ func (c *Client) Send(ctx context.Context, sub *Subscription, msg *Message) (*ht
 		ttl = 24 * time.Hour
 	}
 
-	ttlSeconds := int64(ttl.Seconds())
-	if ttlSeconds < 0 {
-		ttlSeconds = 0
-	}
-
-	urgency := msg.Urgency
-	if urgency == "" {
-		urgency = UrgencyNormal
-	}
-
-	vapidCfg := msg.VAPID
-	if vapidCfg == nil {
-		vapidCfg = c.vapid
-	}
+	ttlSeconds := max(int64(ttl.Seconds()), 0)
+	urgency := generic.Coalesce(msg.Urgency, UrgencyNormal)
+	vapidCfg := generic.CoalesceNil(msg.VAPID, c.vapid)
 
 	var mods []aoni.RequestModifier
 
@@ -183,11 +173,7 @@ func (c *Client) SendJSON(
 		Payload: data,
 	}
 
-	for _, opt := range opts {
-		if opt != nil {
-			opt(msg)
-		}
-	}
+	generic.ApplyOptions(msg, opts...)
 
 	return c.Send(ctx, sub, msg)
 }

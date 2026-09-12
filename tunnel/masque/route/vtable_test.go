@@ -2,21 +2,22 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque_test
+package route_test
 
 import (
 	"testing"
 
+	icmp "github.com/lemon4ksan/foundation/net/packet/icmp"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
-	"github.com/lemon4ksan/aoni/tunnel/masque"
+	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 )
 
 func TestIPProtocolVTable(t *testing.T) {
 	t.Parallel()
 
-	vt := masque.NewIPProtocolVTable()
+	vt := route.NewIPProtocolVTable()
 
 	tcpHandled := false
 	udpHandled := false
@@ -66,7 +67,7 @@ func TestIPProtocolVTable(t *testing.T) {
 
 	// Truncated packet error
 	err = vt.DispatchIPPacket([]byte{0x45})
-	assert.ErrorIs(t, err, masque.ErrInvalidIPHeader)
+	assert.ErrorIs(t, err, icmp.ErrInvalidIPHeader)
 
 	// Unhandled protocol
 	ipv4RAW := make([]byte, 20)
@@ -74,5 +75,5 @@ func TestIPProtocolVTable(t *testing.T) {
 	ipv4RAW[9] = 255
 
 	err = vt.DispatchIPPacket(ipv4RAW)
-	assert.ErrorIs(t, err, masque.ErrUnhandledProtocol)
+	assert.ErrorIs(t, err, route.ErrUnhandledProtocol)
 }

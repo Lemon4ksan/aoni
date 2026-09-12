@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package client_test
+package ssh_test
 
 import (
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -26,7 +28,6 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
 
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 	aonisftp "github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
 )
 
@@ -325,13 +326,13 @@ func TestClientConnectionAndAuth(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
-		c, err := client.New(
+		c, err := ssh.New(
 			ctx,
 			srv.user,
 			srv.addr,
-			client.WithPort(srv.port),
-			client.WithPassword(srv.password),
-			client.WithInsecureIgnoreHostKey(),
+			ssh.WithPort(srv.port),
+			ssh.WithPassword(srv.password),
+			ssh.WithInsecureIgnoreHostKey(),
 		)
 		require.NoError(t, err)
 
@@ -350,16 +351,16 @@ func TestClientConnectionAndAuth(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 
-		c, err := client.New(
+		c, err := ssh.New(
 			ctx,
 			srv.user,
 			srv.addr,
-			client.WithPort(srv.port),
-			client.WithPassword("wrongpass"),
-			client.WithInsecureIgnoreHostKey(),
+			ssh.WithPort(srv.port),
+			ssh.WithPassword("wrongpass"),
+			ssh.WithInsecureIgnoreHostKey(),
 		)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, client.ErrSSHDialFailed)
+		assert.ErrorIs(t, err, ssh.ErrSSHDialFailed)
 		assert.Nil(t, c)
 	})
 
@@ -369,13 +370,13 @@ func TestClientConnectionAndAuth(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
-		c, err := client.New(
+		c, err := ssh.New(
 			ctx,
 			srv.user,
 			srv.addr,
-			client.WithPort(srv.port),
-			client.WithSigner(srv.hostKey),
-			client.WithInsecureIgnoreHostKey(),
+			ssh.WithPort(srv.port),
+			ssh.WithSigner(srv.hostKey),
+			ssh.WithInsecureIgnoreHostKey(),
 		)
 		require.NoError(t, err)
 
@@ -391,13 +392,13 @@ func TestClientCommandExecution(t *testing.T) {
 	srv := startMockServer(t)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
 
@@ -456,13 +457,13 @@ func TestScriptExecution(t *testing.T) {
 	srv := startMockServer(t)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
 
@@ -502,13 +503,13 @@ func TestStream(t *testing.T) {
 	srv := startMockServer(t)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
 
@@ -540,13 +541,13 @@ func TestSFTPTransfers(t *testing.T) {
 	srv := startMockServer(t)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
 
@@ -610,13 +611,13 @@ func TestSCPTransfers(t *testing.T) {
 	srv := startMockServer(t)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	require.NoError(t, err)
 
@@ -654,39 +655,39 @@ func TestErrorConditions(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
-		jumpClient := &client.Client{}
+		jumpClient := &ssh.Client{}
 
-		_, err := client.New(
+		_, err := ssh.New(
 			ctx,
 			"user",
 			"127.0.0.1",
-			client.WithJump(jumpClient),
-			client.WithProxy("socks5://127.0.0.1:1080"),
+			ssh.WithJump(jumpClient),
+			ssh.WithProxy("socks5://127.0.0.1:1080"),
 		)
-		assert.ErrorIs(t, err, client.ErrProxyAndJumpConflict)
+		assert.ErrorIs(t, err, ssh.ErrProxyAndJumpConflict)
 	})
 
 	t.Run("Operations on closed client", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
-		c := &client.Client{}
+		c := &ssh.Client{}
 		require.NoError(t, c.Close())
 
 		_, err := c.Run(t.Context(), "echo hi")
-		assert.ErrorIs(t, err, client.ErrSSHClosed)
+		assert.ErrorIs(t, err, ssh.ErrSSHClosed)
 
 		_, err = c.Command(t.Context(), "echo")
-		assert.ErrorIs(t, err, client.ErrSSHClosed)
+		assert.ErrorIs(t, err, ssh.ErrSSHClosed)
 
 		_, err = c.NewSftp()
-		assert.ErrorIs(t, err, client.ErrSSHClosed)
+		assert.ErrorIs(t, err, ssh.ErrSSHClosed)
 
 		err = c.WriteFile(ctx, strings.NewReader("test"), 4, "file.txt")
-		assert.ErrorIs(t, err, client.ErrSSHClosed)
+		assert.ErrorIs(t, err, ssh.ErrSSHClosed)
 
 		_, err = c.DialContext(ctx, "tcp", "127.0.0.1:80")
-		assert.ErrorIs(t, err, client.ErrSSHClosed)
+		assert.ErrorIs(t, err, ssh.ErrSSHClosed)
 	})
 }
 
@@ -707,7 +708,7 @@ Host *
     Port 22
 `
 
-	cfg, err := client.ParseSSHConfig(strings.NewReader(configText))
+	cfg, err := ssh.ParseSSHConfig(strings.NewReader(configText))
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 

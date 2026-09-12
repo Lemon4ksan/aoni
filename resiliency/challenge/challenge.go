@@ -98,15 +98,17 @@ func extractBodyPrefix(resp *http.Response, fallbackLimit int64) ([]byte, error)
 		return nil, err
 	}
 
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{
+	resp.Body = multiReadCloser{
 		Reader: io.MultiReader(bytes.NewReader(buf), resp.Body),
 		Closer: resp.Body,
 	}
 
 	return buf, nil
+}
+
+type multiReadCloser struct {
+	io.Reader
+	io.Closer
 }
 
 // isHTMLContentType reports whether contentType header signifies HTML markup.

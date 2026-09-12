@@ -56,6 +56,12 @@ func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 				timer := pool.AcquireTimer(waitTime)
 				select {
 				case <-ctx.Done():
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
 					pool.ReleaseTimer(timer)
 					return nil, ErrSlidingWindowCanceled
 				case <-timer.C:

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/iokit"
@@ -94,7 +95,15 @@ type limitDecoder struct {
 }
 
 func (l limitDecoder) Decode(reader io.Reader, target any) error {
-	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
+	lr := limitReaderPool.Get().(*io.LimitedReader)
+	lr.R = reader
+	lr.N = l.maxBytes
+	defer func() {
+		lr.R = nil
+		limitReaderPool.Put(lr)
+	}()
+
+	return l.decoder.Decode(lr, target)
 }
 
 // LimitDecoder caps response payload input stream consumption at maxBytes.
@@ -275,4 +284,10 @@ func UnmarshalJSON(data []byte, target any) error {
 // UnmarshalYAML parses YAML bytes into target using [YAMLDecoder].
 func UnmarshalYAML(data []byte, target any) error {
 	return YAMLDecoder.Decode(bytes.NewReader(data), target)
+}
+
+var limitReaderPool = sync.Pool{
+	New: func() any {
+		return new(io.LimitedReader)
+	},
 }

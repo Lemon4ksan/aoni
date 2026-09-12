@@ -10,7 +10,6 @@ import (
 	"io"
 	"iter"
 	"net/http"
-	"slices"
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -322,7 +321,7 @@ func (f *Request) GetBody() (io.ReadCloser, error) {
 	}
 
 	if body := f.req.Body(); len(body) > 0 {
-		return io.NopCloser(bytes.NewReader(slices.Clone(body))), nil
+		return io.NopCloser(bytes.NewReader(body)), nil
 	}
 
 	return nil, nil

@@ -20,13 +20,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/aoni/tunnel/ssh/ca"
+	"github.com/lemon4ksan/aoni/tunnel/ssh/tarpit"
+
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
-
-	"github.com/lemon4ksan/aoni/tunnel/ssh"
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 )
 
 type mockServer struct {
@@ -196,7 +197,7 @@ func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	cl, err := ssh.NewClient(
+	cl, err := ssh.New(
 		ctx,
 		"e2e_user",
 		"127.0.0.1:"+srv.port,
@@ -216,7 +217,7 @@ func TestE2E_ServerClient_PasswordAuth(t *testing.T) {
 func TestE2E_CA_CertAuthentication(t *testing.T) {
 	t.Parallel()
 
-	caObj, _, err := ssh.GenerateCA()
+	caObj, _, err := ca.GenerateCA()
 	require.NoError(t, err)
 
 	_, userPriv, err := ed25519.GenerateKey(rand.Reader)
@@ -249,7 +250,7 @@ func TestE2E_CA_CertAuthentication(t *testing.T) {
 
 	srv := startTestSSHServer(t, cfg)
 
-	cl, err := ssh.NewClient(
+	cl, err := ssh.New(
 		t.Context(),
 		"cert_user",
 		"127.0.0.1:"+srv.port,
@@ -274,7 +275,7 @@ func TestE2E_SFTP_FileTransfers(t *testing.T) {
 
 	srv := startTestSSHServer(t, cfg)
 
-	cl, err := ssh.NewClient(
+	cl, err := ssh.New(
 		t.Context(),
 		"sftp_user",
 		"127.0.0.1:"+srv.port,
@@ -310,7 +311,7 @@ func TestTarpit_FacadeAliases(t *testing.T) {
 	c1, c2 := net.Pipe()
 	ctx, cancel := context.WithCancel(t.Context())
 
-	go ssh.TarpitTrap(ctx, c1, 10*time.Millisecond)
+	go tarpit.Trap(ctx, c1, 10*time.Millisecond)
 
 	buf := make([]byte, 128)
 	n, err := c2.Read(buf)
@@ -338,12 +339,12 @@ func TestClient_ListenSOCKS5_DynamicPortForwarding(t *testing.T) {
 	srv := startTestSSHServer(t, cfg)
 	ctx := t.Context()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(80),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(80),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	if err != nil {
 		return

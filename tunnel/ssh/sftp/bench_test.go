@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
 	"io"
 	"net"
 	"os"
@@ -21,7 +22,6 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	golangssh "golang.org/x/crypto/ssh"
 
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
 	aonisftp "github.com/lemon4ksan/aoni/tunnel/ssh/sftp"
 )
 
@@ -177,13 +177,13 @@ func BenchmarkTransfers(b *testing.B) {
 	srv := startMockServer(b)
 	ctx := context.Background()
 
-	c, err := client.New(
+	c, err := ssh.New(
 		ctx,
 		srv.user,
 		srv.addr,
-		client.WithPort(srv.port),
-		client.WithPassword(srv.password),
-		client.WithInsecureIgnoreHostKey(),
+		ssh.WithPort(srv.port),
+		ssh.WithPassword(srv.password),
+		ssh.WithInsecureIgnoreHostKey(),
 	)
 	if err != nil {
 		b.Fatal(err)

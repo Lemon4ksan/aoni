@@ -15,6 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/packet"
+	"github.com/lemon4ksan/foundation/net/packet/tcp"
+
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
@@ -398,7 +401,7 @@ func TestTCPMSSClamping(t *testing.T) {
 		binary.BigEndian.PutUint16(tcpHdr[22:24], 1460)
 
 		// Clamp MSS to MaxMTU = 1300 (MaxMSS = 1300 - 40 = 1260)
-		ClampTCPMSSInPlace(packet, 1300)
+		tcp.ClampMSSInPlace(packet, 1300)
 
 		// Verify MSS option was clamped from 1460 down to 1260
 		clampedMSS := binary.BigEndian.Uint16(tcpHdr[22:24])
@@ -425,7 +428,7 @@ func TestTCPMSSClamping(t *testing.T) {
 		binary.BigEndian.PutUint16(tcpHdr[22:24], 1440)
 
 		// Clamp MSS for IPv6 to MaxMTU = 1300 (MaxMSS = 1300 - 60 = 1240)
-		ClampTCPMSSInPlace(packet, 1300)
+		tcp.ClampMSSInPlace(packet, 1300)
 
 		clampedMSS := binary.BigEndian.Uint16(tcpHdr[22:24])
 		assert.Equal(t, uint16(1240), clampedMSS)
@@ -446,7 +449,7 @@ func TestTCPMSSClamping(t *testing.T) {
 		tcpHdr[21] = 4
 		binary.BigEndian.PutUint16(tcpHdr[22:24], 1460)
 
-		ClampTCPMSSInPlace(packet, 1300)
+		tcp.ClampMSSInPlace(packet, 1300)
 
 		// MSS should remain unchanged (1460) because SYN flag was not set
 		assert.Equal(t, uint16(1460), binary.BigEndian.Uint16(tcpHdr[22:24]))
@@ -466,7 +469,7 @@ func TestICMPChecksumCalculations(t *testing.T) {
 			0xac, 0x10, 0x0a, 0x63,
 			0xac, 0x10, 0x0a, 0x0c,
 		}
-		csum := calculateInternetChecksum(data)
+		csum := packet.CalculateInternetChecksum(data)
 		assert.NotZero(t, csum)
 	})
 
@@ -477,7 +480,7 @@ func TestICMPChecksumCalculations(t *testing.T) {
 		dst := netip.MustParseAddr("2001:db8::2")
 		icmpMsg := []byte{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00}
 
-		csum := calculateICMPv6Checksum(src, dst, icmpMsg)
+		csum := packet.CalculateICMPv6Checksum(src, dst, icmpMsg)
 		assert.NotZero(t, csum)
 	})
 }

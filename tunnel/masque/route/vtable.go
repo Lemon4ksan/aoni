@@ -2,7 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package route
+
+import (
+	"errors"
+
+	icmp "github.com/lemon4ksan/foundation/net/packet/icmp"
+)
+
+var ErrUnhandledProtocol = errors.New("aoni/masque: unhandled ip protocol")
 
 // PacketHandler handles an IP packet payload.
 type PacketHandler func(packet []byte) error
@@ -26,7 +34,7 @@ func (v *IPProtocolVTable) Register(proto byte, handler PacketHandler) {
 // falling back to VTable jump-table lookup for cold protocols (ICMP, ICMPv6, IGMP, etc.).
 func (v *IPProtocolVTable) DispatchIPPacket(packet []byte) error {
 	if len(packet) < 20 {
-		return ErrInvalidIPHeader
+		return icmp.ErrInvalidIPHeader
 	}
 
 	var proto byte
@@ -38,13 +46,13 @@ func (v *IPProtocolVTable) DispatchIPPacket(packet []byte) error {
 		proto = packet[9]
 	case 6:
 		if len(packet) < 40 {
-			return ErrInvalidIPHeader
+			return icmp.ErrInvalidIPHeader
 		}
 
 		proto = packet[6]
 
 	default:
-		return ErrInvalidIPHeader
+		return icmp.ErrInvalidIPHeader
 	}
 
 	// Monomorphic Hot-Path (99%+ of Layer 3 IP traffic): TCP (6) & UDP (17)

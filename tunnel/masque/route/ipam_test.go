@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package route
 
 import (
 	"net/netip"
@@ -10,6 +10,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
+
+	"github.com/lemon4ksan/aoni/tunnel/masque/wire"
 )
 
 func TestIPAM_AllocationAndRelease(t *testing.T) {
@@ -32,7 +34,7 @@ func TestIPAM_AllocationAndRelease(t *testing.T) {
 
 	// 2. Specific address request
 	reqIP := netip.MustParseAddr("10.8.0.7")
-	assignedReq, err := ipam.Allocate([]RequestedAddress{
+	assignedReq, err := ipam.Allocate([]wire.RequestedAddress{
 		{
 			Addr:      reqIP,
 			RequestID: 5,

@@ -35,6 +35,8 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
+const maxGRPCWebFrameSize = 16 * 1024 * 1024 // 16MB
+
 // ErrTargetNotProtoMessage is returned when a target output variable does not implement [proto.Message].
 var ErrTargetNotProtoMessage = errors.New("aoni/stream: target type does not implement proto.Message")
 
@@ -284,25 +286,34 @@ func (r *SSEReader[T]) NextEvent() (SSEEvent, error) {
 	var currentEvent SSEEvent
 
 	for {
-		lineBytes, err := r.br.ReadSlice('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if len(lineBytes) > 0 {
-					parseSSELineBytes(lineBytes, &currentEvent)
+		var lineBytes []byte
+		for {
+			chunk, isPrefix, err := r.br.ReadLine()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					if len(lineBytes) > 0 || len(chunk) > 0 {
+						lineBytes = append(lineBytes, chunk...)
+						parseSSELineBytes(lineBytes, &currentEvent)
 
-					if currentEvent.Data != "" || currentEvent.Event != "" {
-						if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
-							return SSEEvent{}, io.EOF
+						if currentEvent.Data != "" || currentEvent.Event != "" {
+							if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
+								return SSEEvent{}, io.EOF
+							}
+
+							return currentEvent, nil
 						}
-
-						return currentEvent, nil
 					}
+
+					return SSEEvent{}, io.EOF
 				}
 
-				return SSEEvent{}, io.EOF
+				return SSEEvent{}, err
 			}
 
-			return SSEEvent{}, err
+			lineBytes = append(lineBytes, chunk...)
+			if !isPrefix {
+				break
+			}
 		}
 
 		if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
@@ -351,6 +362,15 @@ func SeqToChan[T any](ctx context.Context, seq iter.Seq2[T, error], closer io.Cl
 		defer close(errs)
 
 		if closer != nil {
+			done := make(chan struct{})
+			defer close(done)
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = closer.Close()
+				case <-done:
+				}
+			}()
 			defer closer.Close()
 		}
 
@@ -814,6 +834,10 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 	flags := header[0]
 	length := binary.BigEndian.Uint32(header[1:5])
 
+	if length > maxGRPCWebFrameSize {
+		return zero, false, errors.New("aoni/stream: grpc-web frame exceeds maximum allowed size (16MB)")
+	}
+
 	var payload []byte
 	if length >= 16*1024 {
 		offBuf, bufErr := offheap.NewBuffer(int(length))
@@ -943,16 +967,39 @@ func (r *NDJSONReader[T]) Next() generic.Result[T] {
 		return generic.Failure[T](io.EOF)
 	}
 
+	const maxNDJSONLineLength = 16 * 1024 * 1024 // 16MB
+
 	for {
-		line, err := r.br.ReadBytes('\n')
-		if err != nil && len(line) == 0 {
-			return generic.Failure[T](err)
+		var (
+			line    []byte
+			readErr error
+		)
+		for {
+			chunk, isPrefix, err := r.br.ReadLine()
+			if err != nil {
+				readErr = err
+				if len(line) == 0 && len(chunk) == 0 {
+					return generic.Failure[T](err)
+				}
+
+				line = append(line, chunk...)
+				break
+			}
+
+			line = append(line, chunk...)
+			if len(line) > maxNDJSONLineLength {
+				return generic.Failure[T](errors.New("aoni/stream: ndjson line exceeds maximum allowed size (16MB)"))
+			}
+
+			if !isPrefix {
+				break
+			}
 		}
 
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
-			if err != nil {
-				return generic.Failure[T](err)
+			if readErr != nil {
+				return generic.Failure[T](readErr)
 			}
 
 			continue

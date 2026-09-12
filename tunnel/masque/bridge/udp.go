@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package bridge
 
 import (
 	"bufio"
@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/tunnel/masque"
 )
 
 const (
@@ -49,7 +50,7 @@ func DialUDPProxy(
 ) (net.Conn, *http.Response, error) {
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidURITemplate, err)
+		return nil, nil, fmt.Errorf("%w: %w", masque.ErrInvalidURITemplate, err)
 	}
 
 	host := parsed.Hostname()
@@ -118,7 +119,7 @@ func performCONNECTUDPHandshake(
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {
-		return resp, ErrHandshakeFailed
+		return resp, masque.ErrHandshakeFailed
 	}
 
 	return resp, nil

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package masque
+package bridge
 
 import (
 	"bytes"
@@ -124,7 +124,7 @@ func TestBridgeTUN_Default(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = BridgeTUN(ctx, adapter, clientConn)
+		_ = TUN(ctx, adapter, clientConn)
 	}()
 
 	packet := make([]byte, 20)
@@ -152,7 +152,7 @@ func TestBridgeTUNWithOptions_IngressFiltering(t *testing.T) {
 	defer serverConn.Close()
 	defer adapter.Close()
 
-	opts := BridgeOptions{
+	opts := Options{
 		AllowedPrefixes: []netip.Prefix{
 			netip.MustParsePrefix("10.0.0.0/16"),
 		},
@@ -162,7 +162,7 @@ func TestBridgeTUNWithOptions_IngressFiltering(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = BridgeTUNWithOptions(ctx, adapter, clientConn, opts)
+		_ = TUNWithOptions(ctx, adapter, clientConn, opts)
 	}()
 
 	// Packet 1: Spoofed IP 192.168.1.100 (should be dropped by uRPF)
@@ -199,7 +199,7 @@ func TestBridgeTUNWithOptions_MTULimit(t *testing.T) {
 	defer serverConn.Close()
 	defer adapter.Close()
 
-	opts := BridgeOptions{
+	opts := Options{
 		MaxMTU: 1300,
 	}
 
@@ -207,7 +207,7 @@ func TestBridgeTUNWithOptions_MTULimit(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = BridgeTUNWithOptions(ctx, adapter, clientConn, opts)
+		_ = TUNWithOptions(ctx, adapter, clientConn, opts)
 	}()
 
 	// Oversized packet (1400 bytes > MaxMTU 1300)

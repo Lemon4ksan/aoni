@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/lemon4ksan/aoni/tunnel/ssh/client"
+	aonissh "github.com/lemon4ksan/aoni/tunnel/ssh"
 )
 
 // CA represents an enterprise-grade SSH Certificate Authority capable of signing
@@ -35,7 +35,7 @@ func NewCA(signer ssh.Signer) *CA {
 
 // NewCAFromPEM parses a CA private key from PEM bytes.
 func NewCAFromPEM(keyPEM []byte, passphrase string) (*CA, error) {
-	signer, err := client.ParseKey(keyPEM, passphrase)
+	signer, err := aonissh.ParseKey(keyPEM, passphrase)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCAKey, err)
 	}

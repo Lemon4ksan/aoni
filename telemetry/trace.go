@@ -11,7 +11,6 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/http/httptrace"
 	"net/textproto"
@@ -328,10 +327,7 @@ func TriggerGot1xxResponse(ctx context.Context, code int, header http.Header) er
 		return nil
 	}
 
-	mimeHeader := make(textproto.MIMEHeader, len(header))
-	maps.Copy(mimeHeader, header)
-
-	return trace.Got1xxResponse(code, mimeHeader)
+	return trace.Got1xxResponse(code, textproto.MIMEHeader(header))
 }
 
 // TruncateBody limits output payload representations to maxBytes without unnecessary allocations.

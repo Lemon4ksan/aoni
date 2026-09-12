@@ -10,7 +10,6 @@ import (
 	"encoding/xml"
 	"io"
 	"net/url"
-	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/net/http/header"
@@ -49,24 +48,9 @@ func WithBody(r io.Reader) RequestModifier {
 		}
 	}
 
-	if br, ok := r.(*bytes.Reader); ok {
-		buf := make([]byte, br.Len())
-		_, _ = br.ReadAt(buf, 0)
-
-		return RequestModifier{
-			Kind:  core.ModBodyBytes,
-			Bytes: buf,
-		}
-	}
-
-	if sr, ok := r.(*strings.Reader); ok {
-		buf := make([]byte, sr.Len())
-		_, _ = sr.ReadAt(buf, 0)
-
-		return RequestModifier{
-			Kind:  core.ModBodyBytes,
-			Bytes: buf,
-		}
+	return RequestModifier{
+		Kind:   core.ModBodyStream,
+		Stream: r,
 	}
 
 	return RequestModifier{

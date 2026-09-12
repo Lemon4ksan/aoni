@@ -118,7 +118,15 @@ func (c *Client) raceProtocolHandshakes(
 	}()
 
 	staggerTimer := pool.AcquireTimer(staggerDelay)
-	defer pool.ReleaseTimer(staggerTimer)
+	defer func() {
+		if !staggerTimer.Stop() {
+			select {
+			case <-staggerTimer.C:
+			default:
+			}
+		}
+		pool.ReleaseTimer(staggerTimer)
+	}()
 
 	var tcpStarted bool
 
@@ -134,9 +142,13 @@ func (c *Client) raceProtocolHandshakes(
 		tcpStarted = true
 
 		go func() {
+			tcpReq := h1engine.AcquireRequest()
+			defer h1engine.ReleaseRequest(tcpReq)
+			fastReq.CopyTo(tcpReq)
+
 			tcpResp := h1engine.AcquireResponse()
 
-			tr, tcpErr, released := c.dispatchH1OrH2(raceCtx, host, fastReq, tcpResp)
+			tr, tcpErr, released := c.dispatchH1OrH2(raceCtx, host, tcpReq, tcpResp)
 			if tcpErr == nil {
 				results <- raceResult{trailers: tr, err: nil, autoReleased: released, isH3: false, resp: tcpResp}
 				return
@@ -175,7 +187,15 @@ func (c *Client) raceProtocolHandshakes(
 
 func drainLateRaceResponses(results chan raceResult) {
 	timer := pool.AcquireTimer(500 * time.Millisecond)
-	defer pool.ReleaseTimer(timer)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		pool.ReleaseTimer(timer)
+	}()
 
 	for range 2 {
 		select {

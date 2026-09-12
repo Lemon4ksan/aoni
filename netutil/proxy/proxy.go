@@ -150,25 +150,33 @@ type trackedClient struct {
 	client          aoni.HTTPDoer
 	proxyURL        string
 	tracker         *health.Tracker
+	mu              sync.RWMutex
 	domainCooldowns *generic.Cache[string, struct{}]
 }
 
 func (tc *trackedClient) IsDomainCooledDown(domain string) bool {
-	if tc.domainCooldowns == nil {
+	tc.mu.RLock()
+	cache := tc.domainCooldowns
+	tc.mu.RUnlock()
+
+	if cache == nil {
 		return false
 	}
 
-	_, exists := tc.domainCooldowns.Get(domain)
+	_, exists := cache.Get(domain)
 
 	return exists
 }
 
 func (tc *trackedClient) PutDomainInCooldown(domain string, duration time.Duration) {
+	tc.mu.Lock()
 	if tc.domainCooldowns == nil {
 		tc.domainCooldowns = generic.NewCache[string, struct{}]()
 	}
+	cache := tc.domainCooldowns
+	tc.mu.Unlock()
 
-	tc.domainCooldowns.Set(domain, struct{}{}, duration)
+	cache.Set(domain, struct{}{}, duration)
 }
 
 // Rotator balances requests across a pool of proxy clients, supporting sticky sessions, health probing, and domain cooldowns.
@@ -337,7 +345,9 @@ func (r *Rotator) ResetDomainCooldowns() {
 	r.mu.RUnlock()
 
 	for _, tc := range clients {
+		tc.mu.Lock()
 		tc.domainCooldowns = generic.NewCache[string, struct{}]()
+		tc.mu.Unlock()
 	}
 }
 

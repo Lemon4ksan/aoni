@@ -346,33 +346,31 @@ type fastNativeDoer struct {
 }
 
 func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
-	fastReq, ok := req.EngineRequest().(*h1engine.Request)
-	if !ok || fastReq == nil {
-		if stdReqObj := req.HTTPRequest(); stdReqObj != nil {
-			stdResp, err := f.client.HTTP().Do(stdReqObj) //nolint:bodyclose
-			if err != nil {
-				return nil, err
+	var (
+		fastReq     *h1engine.Request
+		mustRelease bool
+	)
+
+	if fr, ok := req.EngineRequest().(*h1engine.Request); ok && fr != nil {
+		fastReq = fr
+	} else {
+		fastReq = h1engine.AcquireRequest()
+		mustRelease = true
+		fastReq.Header.SetMethod(req.Method())
+		fastReq.SetRequestURI(req.URL())
+		if stream := req.BodyStream(); stream != nil {
+			fastReq.SetBodyStream(stream, -1)
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			fastReq.SetBody(bb)
+		}
+		if headers := req.Headers(); headers != nil {
+			for k, v := range headers {
+				fastReq.Header.AddBytesKV(k, v)
 			}
-
-			return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
 		}
-
-		stdReq, err := http.NewRequestWithContext(
-			req.Context(),
-			req.Method(),
-			req.URL(),
-			req.BodyStream(),
-		) //nolint:gosec
-		if err != nil {
-			return nil, err
-		}
-
-		stdResp, err := f.client.HTTP().Do(stdReq) //nolint:bodyclose
-		if err != nil {
-			return nil, err
-		}
-
-		return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	}
+	if mustRelease {
+		defer h1engine.ReleaseRequest(fastReq)
 	}
 
 	fastResp := h1engine.AcquireResponse()

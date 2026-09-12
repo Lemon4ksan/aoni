@@ -7,6 +7,8 @@ package masque_test
 import (
 	"testing"
 
+	"github.com/lemon4ksan/aoni/tunnel/masque/route"
+
 	"github.com/lemon4ksan/aoni/tunnel/masque"
 )
 
@@ -69,7 +71,7 @@ func FuzzIPPacketExtract(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, packet []byte) {
-		_ = masque.ExtractDestIP(packet)
-		_ = masque.ExtractSrcIP(packet)
+		_ = route.ExtractDestIP(packet)
+		_ = route.ExtractSrcIP(packet)
 	})
 }

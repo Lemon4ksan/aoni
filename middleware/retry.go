@@ -168,9 +168,8 @@ func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
 				ensureIdempotencyKey(req)
 			}
 
-			bo := createBackoffGenerator(activeOpts)
-
 			var (
+				bo       *generic.Backoff
 				lastResp aoni.Response
 				lastErr  error
 			)
@@ -185,6 +184,10 @@ func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
 				if attempt > 1 {
 					if !allowRetryForMethod(req, activeOpts, lastResp) {
 						break
+					}
+
+					if bo == nil {
+						bo = createBackoffGenerator(activeOpts)
 					}
 
 					sleepDur, exceeded := calculateRetrySleep(lastResp, bo, activeOpts)
