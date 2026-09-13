@@ -238,6 +238,15 @@ func (c *Client) Request(
 	method, path string,
 	mods ...aoni.RequestModifier,
 ) (aoni.Response, error) {
+	return c.requestInternal(ctx, method, path, nil, mods)
+}
+
+func (c *Client) requestInternal(
+	ctx context.Context,
+	method, path string,
+	bodyMod *aoni.RequestModifier,
+	mods []aoni.RequestModifier,
+) (aoni.Response, error) {
 	if handler := c.resolveProtocolHandler(path); handler != nil {
 		stdReq, err := http.NewRequestWithContext(ctx, method, path, nil)
 		if err != nil {
@@ -255,7 +264,7 @@ func (c *Client) Request(
 	fastReq, fastResp := acquireFastPair()
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
-	if len(mods) == 0 && c.prepared.FastPathCapable && (ctx == nil || ctx.Done() == nil) {
+	if len(mods) == 0 && bodyMod == nil && c.prepared.FastPathCapable && (ctx == nil || ctx.Done() == nil) {
 		if err := c.resolveTargetFastURI(fastReq, path); err != nil {
 			releaseFastPair(fastReq, fastResp)
 
@@ -285,6 +294,10 @@ func (c *Client) Request(
 	}
 
 	c.applyDefaultHeaders(reqAdapter)
+
+	if bodyMod != nil {
+		c.applyModifiers(reqAdapter, []aoni.RequestModifier{*bodyMod})
+	}
 
 	if len(mods) > 0 {
 		c.applyModifiers(reqAdapter, mods)
@@ -1025,7 +1038,7 @@ func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) p
 		BeforeRequest:        d.BeforeRequest,
 		AfterResponse:        d.AfterResponse,
 		Inspector:            d.Inspector,
-		ResponseValidator:    d.ResponseValidator,
+		ResponseValidators:   d.ResponseValidators,
 		RefererState:         referer,
 		MaxResponseSize:      d.MaxResponseSize,
 		MultiReadThreshold:   d.MultiReadThreshold,

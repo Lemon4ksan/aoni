@@ -277,41 +277,29 @@ func (c *Client) executeFast(
 	body any,
 	mods []aoni.RequestModifier,
 ) (aoni.Response, error) {
-	req := NewRequest(c)
-	defer req.Release()
-
-	req.SetContext(ctx)
-	req.SetMethod(method)
-
-	if err := c.resolveTargetFastURI(req.FastHTTP(), path); err != nil {
-		return nil, &aoni.APIError{StatusCode: http.StatusBadRequest, Err: err}
+	if body == nil {
+		return c.requestInternal(ctx, method, path, nil, mods)
 	}
 
-	c.applyDefaultHeaders(req)
-
-	if body != nil {
-		var bodyMod aoni.RequestModifier
-		switch b := body.(type) {
-		case aoni.RequestModifier:
-			bodyMod = b
-		case []byte:
-			bodyMod = mod.WithBodyBytes(b)
-		case string:
-			bodyMod = mod.WithBodyBytes([]byte(b))
-		default:
-			data, err := json.Marshal(body)
-			if err != nil {
-				return nil, err
-			}
-			bodyMod = mod.WithBodyBytes(data)
+	var bodyMod aoni.RequestModifier
+	switch b := body.(type) {
+	case aoni.RequestModifier:
+		bodyMod = b
+	case []byte:
+		bodyMod = mod.WithBodyBytes(b)
+	case string:
+		bodyMod = mod.WithBodyBytes([]byte(b))
+	default:
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
 		}
-
-		if bodyMod.Kind != 0 || bodyMod.Fn != nil {
-			bodyMod.Apply(req)
-		}
+		bodyMod = mod.WithBodyBytes(data)
 	}
 
-	c.applyModifiers(req, mods)
+	if bodyMod.Kind != 0 || bodyMod.Fn != nil {
+		return c.requestInternal(ctx, method, path, &bodyMod, mods)
+	}
 
-	return c.Do(req)
+	return c.requestInternal(ctx, method, path, nil, mods)
 }
