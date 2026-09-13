@@ -34,7 +34,7 @@ type HeaderOrderingConn struct {
 }
 
 func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
-	if len(c.OrderedKeys) > 0 && bytes.Contains(b, bytesconv.S2B(sectionTerminator)) {
+	if len(c.OrderedKeys) > 0 && simd.MatchCRLFCRLF(b) {
 		if rewritten, ok := ReorderHeaders(b, c.OrderedKeys); ok {
 			b = rewritten
 		}
@@ -45,10 +45,13 @@ func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
 
 // ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order with zero heap allocations (RFC 9112 §2.1 & §3.2).
 func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
-	headerBytes, body, ok := bytes.Cut(raw, bytesconv.S2B(sectionTerminator))
-	if !ok {
+	idx := simd.IndexCRLFCRLFVector(raw)
+	if idx < 0 {
 		return nil, false
 	}
+
+	headerBytes := raw[:idx-4]
+	body := raw[idx:]
 
 	var stackBuf [64]headerEntry
 
