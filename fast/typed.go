@@ -277,6 +277,18 @@ func (c *Client) executeFast(
 	body any,
 	mods []aoni.RequestModifier,
 ) (aoni.Response, error) {
+	req := NewRequest(c)
+	defer req.Release()
+
+	req.SetContext(ctx)
+	req.SetMethod(method)
+
+	if err := c.resolveTargetFastURI(req.FastHTTP(), path); err != nil {
+		return nil, &aoni.APIError{StatusCode: http.StatusBadRequest, Err: err}
+	}
+
+	c.applyDefaultHeaders(req)
+
 	if body != nil {
 		var bodyMod aoni.RequestModifier
 		switch b := body.(type) {
@@ -291,18 +303,15 @@ func (c *Client) executeFast(
 			if err != nil {
 				return nil, err
 			}
-
 			bodyMod = mod.WithBodyBytes(data)
 		}
 
 		if bodyMod.Kind != 0 || bodyMod.Fn != nil {
-			allMods := make([]aoni.RequestModifier, 0, len(mods)+1)
-			allMods = append(allMods, bodyMod)
-			allMods = append(allMods, mods...)
-
-			return c.Request(ctx, method, path, allMods...)
+			bodyMod.Apply(req)
 		}
 	}
 
-	return c.Request(ctx, method, path, mods...)
+	c.applyModifiers(req, mods)
+
+	return c.Do(req)
 }

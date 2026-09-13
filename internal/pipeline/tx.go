@@ -54,7 +54,7 @@ type Tx struct {
 	OrderedHeaders     []string                             // Emulated browser header order
 	ALPNOverride       []string                             // Custom TLS ALPN protocol list
 	Fallback           core.FallbackFunc                    // Failure fallback handler
-	ResponseValidator  func(resp *http.Response) error      // Custom response validation predicate
+	ResponseValidators []func(resp *http.Response) error      // Custom response validation predicate
 	SoftErrorDetectors []func(*http.Response, []byte) error // Custom response soft error detectors
 	RetryPolicy        *core.RetryOverride                  // Per-request retry policy
 	SocketController   netutil.SocketController             // Low-level socket dialer hook
@@ -118,7 +118,7 @@ func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {
 		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk
 		tx.ProxyURL = reqCfg.ProxyAddr
 		tx.TraceInfo = reqCfg.TraceInfo
-		tx.ResponseValidator = reqCfg.ResponseValidator
+		tx.ResponseValidators = reqCfg.ResponseValidators
 		tx.SoftErrorDetectors = reqCfg.SoftErrorDetectors
 		tx.UnsafePhaseOrder = reqCfg.UnsafePhaseOrder
 

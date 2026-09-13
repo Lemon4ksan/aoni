@@ -127,10 +127,12 @@ func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
 
 // WithResponseValidator registers a global response validator executed immediately after receiving headers.
 //
-// If the validator returns an error, decoding is aborted and the error is propagated to the caller.
+// WithResponseValidator registers a global response validator executed immediately after receiving headers.
 func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Defaults.ResponseValidator = fn
+		if fn != nil {
+			cfg.Defaults.ResponseValidators = append(cfg.Defaults.ResponseValidators, fn)
+		}
 	}
 }
 

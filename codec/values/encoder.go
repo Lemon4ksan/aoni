@@ -140,6 +140,19 @@ func serializeValue[S valueSink](sink S, f *mapper.FieldSchema, fieldValue refle
 	}
 
 	val := fieldValue.Interface()
+	
+	if uve, ok := val.(URLValueEncoder); ok {
+		tmp := make(url.Values)
+		if err := uve.EncodeValues(tmp); err != nil {
+			return &ValueError{Field: f.Name, Err: err}
+		}
+		for k, list := range tmp {
+			for _, item := range list {
+				sink.Add(k, item)
+			}
+		}
+		return nil
+	}
 
 	if pm, ok := val.(proto.Message); ok {
 		opts := protojson.MarshalOptions{UseProtoNames: true}

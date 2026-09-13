@@ -56,6 +56,11 @@ func Encode(v any) (url.Values, error) {
 	return res, nil
 }
 
+// URLValueEncoder is implemented by models to bypass reflection and inject query parameters directly.
+type URLValueEncoder interface {
+	EncodeValues(url.Values) error
+}
+
 // EncodeInto encodes structure or map fields into an existing [url.Values] instance.
 func EncodeInto(values url.Values, v any) error {
 	if v == nil || values == nil {
@@ -70,6 +75,10 @@ func EncodeInto(values url.Values, v any) error {
 		}
 
 		return nil
+	}
+
+	if uve, ok := v.(URLValueEncoder); ok {
+		return uve.EncodeValues(values)
 	}
 
 	val := refkit.DerefValue(reflect.ValueOf(v))
@@ -105,6 +114,21 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 			}
 		}
 
+		return nil
+	}
+
+	if uve, ok := v.(URLValueEncoder); ok {
+		tmp := make(url.Values)
+		if err := uve.EncodeValues(tmp); err != nil {
+			return err
+		}
+		
+		first := sb.Len() == 0
+		for k, list := range tmp {
+			for _, item := range list {
+				writeQueryKeyValuePair(sb, k, item, &first)
+			}
+		}
 		return nil
 	}
 

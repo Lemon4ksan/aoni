@@ -63,21 +63,9 @@ func WithFallback(f core.FallbackFunc) RequestModifier {
 func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier {
 	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
-
-		existing := cfg.ResponseValidator
-		if existing != nil {
-			cfg.ResponseValidator = func(resp *http.Response) error {
-				if err := existing(resp); err != nil {
-					return err
-				}
-
-				return fn(resp)
-			}
-
-			return
+		if fn != nil {
+			cfg.ResponseValidators = append(cfg.ResponseValidators, fn)
 		}
-
-		cfg.ResponseValidator = fn
 	})
 }
 

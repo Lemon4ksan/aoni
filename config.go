@@ -663,7 +663,7 @@ type ClientDefaults struct {
 	AfterResponse []func(resp *http.Response, err error)
 
 	// ResponseValidator validates response status codes and headers before structured unmarshaling begins.
-	ResponseValidator func(*http.Response) error
+	ResponseValidators []func(*http.Response) error
 
 	// SoftErrorDetectors inspects initial body bytes non-destructively for application-level soft errors
 	// (e.g. HTTP 200 OK responses containing HTML login pages or JSON business error payloads).
@@ -1155,7 +1155,7 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 		BeforeRequest:                c.cfg.Defaults.BeforeRequest,
 		AfterResponse:                c.cfg.Defaults.AfterResponse,
 		Inspector:                    c.cfg.Defaults.Inspector,
-		ResponseValidator:            c.cfg.Defaults.ResponseValidator,
+		ResponseValidators:            c.cfg.Defaults.ResponseValidators,
 		SoftErrorDetectors:           c.cfg.Defaults.toInternalSoftErrorDetectors(),
 		RefererState:                 c.referer,
 		MaxResponseSize:              c.cfg.Defaults.MaxResponseSize,

@@ -77,7 +77,7 @@ type RequestConfig struct {
 	HedgingDelayOverride *time.Duration
 	ProxyAddr            *url.URL
 	DNSResolver          netdial.DNSResolver
-	ResponseValidator    func(resp *http.Response) error
+	ResponseValidators   []func(resp *http.Response) error
 	SoftErrorDetectors   []func(*http.Response, []byte) error
 	RetryPolicy          *core.RetryOverride
 	SocketController     netutil.SocketController

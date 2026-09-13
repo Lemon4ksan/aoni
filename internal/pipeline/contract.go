@@ -195,7 +195,7 @@ type ClientDefaults struct {
 	BeforeRequest                []func(req *http.Request)
 	AfterResponse                []func(resp *http.Response, err error)
 	Inspector                    telemetry.TrafficInspector
-	ResponseValidator            func(*http.Response) error
+	ResponseValidators           []func(*http.Response) error
 	SoftErrorDetectors           []func(*http.Response, []byte) error
 	UARotationProfiles           []BrowserProfile
 	RefererState                 *RefererState

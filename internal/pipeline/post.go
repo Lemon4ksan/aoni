@@ -351,18 +351,19 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 		return nil
 	}
 
-	validator := tx.ResponseValidator
-	if validator == nil {
-		validator = p.defaults.ResponseValidator
+	validators := tx.ResponseValidators
+	if len(validators) == 0 {
+		validators = p.defaults.ResponseValidators
 	}
 
-	if validator != nil {
-		if err := validator(resp); err != nil {
-			if resp.Body != nil {
-				_ = resp.Body.Close()
+	for _, validator := range validators {
+		if validator != nil {
+			if err := validator(resp); err != nil {
+				if resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+				return err
 			}
-
-			return err
 		}
 	}
 

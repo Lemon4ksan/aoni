@@ -438,6 +438,8 @@ func (c *Client) retry421Misdirected(
 
 	c.removeH2Client(host)
 
+	fastReq.SetConnectionClose()
+
 	fastReq.Header.Del("Alt-Svc")
 
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
