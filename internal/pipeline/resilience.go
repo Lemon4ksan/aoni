@@ -212,7 +212,7 @@ func (p *Pipeline[Req, Resp]) selectNextProxy(proxies []*url.URL, isRetry bool) 
 func (p *Pipeline[Req, Resp]) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*http.Request, error) {
 	newReq := req
 
-	cfg := GetRequestConfig(req.Context())
+	cfg := GetRequestConfig(req)
 	if cfg != nil {
 		ctx := cookie.WithProxyAddress(req.Context(), proxyURL.String())
 		newReq = req.WithContext(ctx)
@@ -244,7 +244,7 @@ func (p *Pipeline[Req, Resp]) executeWithHedging(
 	doer Doer,
 	pipeHedging *HedgingConfig,
 ) (*http.Response, error) {
-	cfg := GetRequestConfig(req.Context())
+	cfg := GetRequestConfig(req)
 
 	allowNonReadOnly := (cfg != nil && cfg.AllowNonReadOnlyHedging) ||
 		(pipeHedging != nil && pipeHedging.AllowNonReadOnly)

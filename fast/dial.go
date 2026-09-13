@@ -13,8 +13,9 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/lemon4ksan/mach/client/h1"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 )
@@ -138,8 +139,8 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	return cfg
 }
 
-func defaultFasthttpClient() *h1engine.Client {
-	return &h1engine.Client{
+func defaultFasthttpClient() *h1.Client {
+	return &h1.Client{
 		ReadTimeout:         0,
 		WriteTimeout:        0,
 		MaxConnsPerHost:     512,
@@ -147,12 +148,12 @@ func defaultFasthttpClient() *h1engine.Client {
 	}
 }
 
-func cloneFasthttpClient(c *h1engine.Client) *h1engine.Client {
+func cloneFasthttpClient(c *h1.Client) *h1.Client {
 	if c == nil {
-		return &h1engine.Client{}
+		return &h1.Client{}
 	}
 
-	return &h1engine.Client{
+	return &h1.Client{
 		Transport:                     c.Transport,
 		DialTimeout:                   c.DialTimeout,
 		Dial:                          c.Dial,
@@ -179,7 +180,7 @@ func cloneFasthttpClient(c *h1engine.Client) *h1engine.Client {
 	}
 }
 
-func isCustomDialerSet(engine *h1engine.Client, defaultDial func(string) (net.Conn, error)) bool {
+func isCustomDialerSet(engine *h1.Client, defaultDial func(string) (net.Conn, error)) bool {
 	if engine == nil || engine.Dial == nil {
 		return false
 	}

@@ -9,11 +9,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
-func decompressFastResponse(resp *h1engine.Response) bool {
+func decompressFastResponse(resp *h1.Response) bool {
 	encodingBytes := resp.Header.ContentEncoding()
 	if len(encodingBytes) == 0 {
 		return false
@@ -38,7 +37,7 @@ func decompressFastResponse(resp *h1engine.Response) bool {
 	return false
 }
 
-func enforceContentLengthTruncation(resp *h1engine.Response) {
+func enforceContentLengthTruncation(resp *h1.Response) {
 	if resp == nil {
 		return
 	}

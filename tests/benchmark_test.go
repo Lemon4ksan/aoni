@@ -20,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
-
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
@@ -30,6 +28,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
+	"github.com/lemon4ksan/aoni/testutil"
 )
 
 type benchPayload struct {
@@ -43,12 +42,12 @@ type queryParams struct {
 	Limit int    `query:"limit,omitempty"`
 }
 
-// setupInmemoryStdServer starts an in-memory net/http server over h1engine.InmemoryListener
+// setupInmemoryStdServer starts an in-memory net/http server over testutil.InmemoryListener
 // and returns a pre-configured *http.Client that routes connections to it.
-func setupInmemoryStdServer(b *testing.B, handler http.Handler) (*h1engine.InmemoryListener, *http.Client) {
+func setupInmemoryStdServer(b *testing.B, handler http.Handler) (*testutil.InmemoryListener, *http.Client) {
 	b.Helper()
 
-	ln := h1engine.NewInmemoryListener()
+	ln := testutil.NewInmemoryListener()
 	srv := &http.Server{Handler: handler}
 
 	go func() { _ = srv.Serve(ln) }()

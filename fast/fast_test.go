@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -50,7 +50,7 @@ func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 	ctx := context.Background()
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
 
-	fastReq := h1engine.AcquireRequest()
+	fastReq := h1.AcquireRequest()
 	defer ReleaseRequestSafe(fastReq)
 
 	cfg := &aoni.Config{}
@@ -61,7 +61,7 @@ func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 func TestResponse_JSON_And_String(t *testing.T) {
 	t.Parallel()
 
-	fastResp := h1engine.AcquireResponse()
+	fastResp := h1.AcquireResponse()
 	defer ReleaseResponseSafe(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000}`)
@@ -93,7 +93,7 @@ func TestResponse_JSON_And_String(t *testing.T) {
 }
 
 func BenchmarkResponse_JSON(b *testing.B) {
-	fastResp := h1engine.AcquireResponse()
+	fastResp := h1.AcquireResponse()
 	defer ReleaseResponseSafe(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)
@@ -116,7 +116,7 @@ func BenchmarkResponse_JSON(b *testing.B) {
 }
 
 func BenchmarkResponse_JSONNoCopy(b *testing.B) {
-	fastResp := h1engine.AcquireResponse()
+	fastResp := h1.AcquireResponse()
 	defer ReleaseResponseSafe(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)

@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package h1engine
+package testutil
 
 import (
 	"errors"
 	"net"
 	"sync"
+
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 // ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.
@@ -48,10 +50,6 @@ func (ln *InmemoryListener) SetLocalAddr(localAddr net.Addr) {
 }
 
 // Accept implements net.Listener's Accept.
-//
-// It is safe calling Accept from concurrently running goroutines.
-//
-// Accept returns new connection per each Dial call.
 func (ln *InmemoryListener) Accept() (net.Conn, error) {
 	select {
 	case <-ln.done:
@@ -126,22 +124,13 @@ func (ln *InmemoryListener) Addr() net.Addr {
 }
 
 // Dial creates new client<->server connection.
-// Just like a real Dial it only returns once the server
-// has accepted the connection.
-//
-// It is safe calling Dial from concurrently running goroutines.
 func (ln *InmemoryListener) Dial() (net.Conn, error) {
 	return ln.DialWithLocalAddr(nil)
 }
 
 // DialWithLocalAddr creates new client<->server connection.
-// Just like a real Dial it only returns once the server
-// has accepted the connection. The local address of the
-// client connection can be set with local.
-//
-// It is safe calling Dial from concurrently running goroutines.
 func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) {
-	pc := NewPipeConns()
+	pc := h1.NewPipeConns()
 
 	pc.SetAddresses(local, ln.Addr(), ln.Addr(), local)
 
@@ -174,7 +163,6 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 		return nil, ErrInmemoryListenerClosed
 	}
 
-	// Wait until the connection has been accepted.
 	select {
 	case <-accepted:
 		return cConn, nil

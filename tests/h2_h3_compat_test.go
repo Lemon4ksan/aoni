@@ -17,17 +17,17 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
-	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
-	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
+	coreh2 "github.com/lemon4ksan/mach/core/h2"
+	coreh3 "github.com/lemon4ksan/mach/core/h3"
+	"github.com/lemon4ksan/mach/quic/quicvarint"
 )
 
 func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
-	hpEnc := h2engine.AcquireHPACK()
-	defer h2engine.ReleaseHPACK(hpEnc)
+	hpEnc := coreh2.AcquireHPACK()
+	defer coreh2.ReleaseHPACK(hpEnc)
 
-	hpDec := h2engine.AcquireHPACK()
-	defer h2engine.ReleaseHPACK(hpDec)
+	hpDec := coreh2.AcquireHPACK()
+	defer coreh2.ReleaseHPACK(hpDec)
 
 	headersToTest := []struct {
 		key   string
@@ -41,11 +41,11 @@ func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
 		{"x-aoni-version", "2.0.0"},
 	}
 
-	hFrame := h2engine.AcquireFrame(h2engine.FrameHeaders).(*h2engine.Headers)
-	defer h2engine.ReleaseFrame(hFrame)
+	hFrame := coreh2.AcquireFrame(coreh2.FrameHeaders).(*coreh2.Headers)
+	defer coreh2.ReleaseFrame(hFrame)
 
-	hf := h2engine.AcquireHeaderField()
-	defer h2engine.ReleaseHeaderField(hf)
+	hf := coreh2.AcquireHeaderField()
+	defer coreh2.ReleaseHeaderField(hf)
 
 	for _, h := range headersToTest {
 		hf.Set(h.key, h.value)
@@ -57,7 +57,7 @@ func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
 	currBuf := rawHeaders
 
 	for len(currBuf) > 0 {
-		hfRecv := h2engine.AcquireHeaderField()
+		hfRecv := coreh2.AcquireHeaderField()
 
 		var err error
 
@@ -65,7 +65,7 @@ func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
 		require.NoError(t, err)
 
 		decodedHeaders[hfRecv.Key()] = hfRecv.Value()
-		h2engine.ReleaseHeaderField(hfRecv)
+		coreh2.ReleaseHeaderField(hfRecv)
 	}
 
 	for _, expected := range headersToTest {
@@ -79,10 +79,10 @@ func TestH2_FrameSerializationRoundtrip(t *testing.T) {
 	bw := bufio.NewWriter(&buf)
 
 	// 1. SETTINGS Frame
-	settingsHeader := h2engine.AcquireFrameHeader()
-	defer h2engine.ReleaseFrameHeader(settingsHeader)
+	settingsHeader := coreh2.AcquireFrameHeader()
+	defer coreh2.ReleaseFrameHeader(settingsHeader)
 
-	st := h2engine.AcquireFrame(h2engine.FrameSettings).(*h2engine.Settings)
+	st := coreh2.AcquireFrame(coreh2.FrameSettings).(*coreh2.Settings)
 	st.SetMaxConcurrentStreams(100)
 	st.SetMaxWindowSize(1 << 20)
 	settingsHeader.SetBody(st)
@@ -93,23 +93,23 @@ func TestH2_FrameSerializationRoundtrip(t *testing.T) {
 	_ = bw.Flush()
 
 	br := bufio.NewReader(&buf)
-	parsedHeader, err := h2engine.ReadFrameFrom(br)
+	parsedHeader, err := coreh2.ReadFrameFrom(br)
 	require.NoError(t, err)
 
-	defer h2engine.ReleaseFrameHeader(parsedHeader)
+	defer coreh2.ReleaseFrameHeader(parsedHeader)
 
-	assert.Equal(t, h2engine.FrameSettings, parsedHeader.Type())
-	parsedSettings := parsedHeader.Body().(*h2engine.Settings)
+	assert.Equal(t, coreh2.FrameSettings, parsedHeader.Type())
+	parsedSettings := parsedHeader.Body().(*coreh2.Settings)
 	assert.Equal(t, uint32(100), parsedSettings.MaxConcurrentStreams())
 	assert.Equal(t, uint32(1<<20), parsedSettings.MaxWindowSize())
 
 	// 2. DATA Frame
-	dataHeader := h2engine.AcquireFrameHeader()
-	defer h2engine.ReleaseFrameHeader(dataHeader)
+	dataHeader := coreh2.AcquireFrameHeader()
+	defer coreh2.ReleaseFrameHeader(dataHeader)
 
 	dataHeader.SetStream(1)
 
-	df := h2engine.AcquireFrame(h2engine.FrameData).(*h2engine.Data)
+	df := coreh2.AcquireFrame(coreh2.FrameData).(*coreh2.Data)
 	df.SetEndStream(true)
 	df.SetData([]byte("fast h2 payload"))
 	dataHeader.SetBody(df)
@@ -122,14 +122,14 @@ func TestH2_FrameSerializationRoundtrip(t *testing.T) {
 	_ = bw.Flush()
 
 	br.Reset(&buf)
-	parsedDataHeader, err := h2engine.ReadFrameFrom(br)
+	parsedDataHeader, err := coreh2.ReadFrameFrom(br)
 	require.NoError(t, err)
 
-	defer h2engine.ReleaseFrameHeader(parsedDataHeader)
+	defer coreh2.ReleaseFrameHeader(parsedDataHeader)
 
-	assert.Equal(t, h2engine.FrameData, parsedDataHeader.Type())
+	assert.Equal(t, coreh2.FrameData, parsedDataHeader.Type())
 	assert.Equal(t, uint32(1), parsedDataHeader.Stream())
-	parsedData := parsedDataHeader.Body().(*h2engine.Data)
+	parsedData := parsedDataHeader.Body().(*coreh2.Data)
 	assert.True(t, parsedData.EndStream())
 	assert.Equal(t, []byte("fast h2 payload"), parsedData.Data())
 }
@@ -153,14 +153,14 @@ func TestH3_AltSvcParsingAndCaching(t *testing.T) {
 }
 
 func TestH2_SettingsAckAndFlowControl(t *testing.T) {
-	st := h2engine.AcquireFrame(h2engine.FrameSettings).(*h2engine.Settings)
-	defer h2engine.ReleaseFrame(st)
+	st := coreh2.AcquireFrame(coreh2.FrameSettings).(*coreh2.Settings)
+	defer coreh2.ReleaseFrame(st)
 
 	st.SetAck(true)
 	assert.True(t, st.IsAck())
 
-	wu := h2engine.AcquireFrame(h2engine.FrameWindowUpdate).(*h2engine.WindowUpdate)
-	defer h2engine.ReleaseFrame(wu)
+	wu := coreh2.AcquireFrame(coreh2.FrameWindowUpdate).(*coreh2.WindowUpdate)
+	defer coreh2.ReleaseFrame(wu)
 
 	wu.SetIncrement(65535)
 	assert.Equal(t, 65535, wu.Increment())
@@ -169,12 +169,12 @@ func TestH2_SettingsAckAndFlowControl(t *testing.T) {
 func TestH3_FramesParsing(t *testing.T) {
 	var buf []byte
 
-	buf = quicvarint.Append(buf, h3engine.FrameTypeHeaders)
+	buf = quicvarint.Append(buf, coreh3.FrameTypeHeaders)
 	buf = quicvarint.Append(buf, 1024)
 
 	r := bytes.NewReader(buf)
-	frType, frLen, err := h3engine.ReadFrameHeader(r)
+	frType, frLen, err := coreh3.ReadFrameHeader(r)
 	require.NoError(t, err)
-	assert.Equal(t, h3engine.FrameTypeHeaders, frType)
+	assert.Equal(t, coreh3.FrameTypeHeaders, frType)
 	assert.Equal(t, uint64(1024), frLen)
 }

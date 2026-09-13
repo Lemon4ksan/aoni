@@ -174,7 +174,7 @@ func FallbackEx(isFailure func(aoni.Response, error) bool) aoni.Middleware {
 				return resp, err
 			}
 
-			cfg := aoni.GetRequestConfig(req.Context())
+			cfg := aoni.GetRequestConfig(req)
 			if cfg != nil && cfg.Fallback != nil {
 				fbResp, fbErr := cfg.Fallback(req, err)
 				if fbErr == nil && fbResp != nil {

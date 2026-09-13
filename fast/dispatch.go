@@ -16,9 +16,9 @@ import (
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
@@ -26,18 +26,18 @@ import (
 // racing HTTP/3 (QUIC) against HTTP/2/HTTP/1 (TCP/TLS) with a staggered fallback timer.
 func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	sanitizeTraceHeaders(fastReq)
 
 	// Enforce RFC 8470 / RFC 9001: 0-RTT Early Data is strictly restricted to safe idempotent methods.
 	method := bytesconv.B2S(fastReq.Header.Method())
-	if method != h1engine.MethodGet && method != h1engine.MethodHead && method != h1engine.MethodOptions {
+	if method != h1.MethodGet && method != h1.MethodHead && method != h1.MethodOptions {
 		reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 		reqCfg.Disable0RTT = true
 
-		fastReq.Header.Del(h1engine.HeaderEarlyData)
+		fastReq.Header.Del(h1.HeaderEarlyData)
 	}
 
 	host := bytesconv.B2S(fastReq.URI().Host())
@@ -79,14 +79,14 @@ type raceResult struct {
 	err          error
 	autoReleased bool
 	isH3         bool
-	resp         *h1engine.Response
+	resp         *h1.Response
 }
 
 func (c *Client) raceProtocolHandshakes(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 	staggerDelay time.Duration,
 ) (map[string][]string, error, bool) {
 	if staggerDelay <= 0 {
@@ -105,7 +105,7 @@ func (c *Client) raceProtocolHandshakes(
 	}()
 
 	go func() {
-		h3Resp := h1engine.AcquireResponse()
+		h3Resp := h1.AcquireResponse()
 		WrapResponse(h3Resp)
 
 		tr, h3Err, handled := c.tryDispatchH3(raceCtx, host, fastReq, h3Resp)
@@ -148,14 +148,14 @@ func (c *Client) raceProtocolHandshakes(
 		remaining++
 
 		go func() {
-			tcpReq := h1engine.AcquireRequest()
+			tcpReq := h1.AcquireRequest()
 
 			WrapRequest(tcpReq)
 			defer ReleaseRequestSafe(tcpReq)
 
 			fastReq.CopyTo(tcpReq)
 
-			tcpResp := h1engine.AcquireResponse()
+			tcpResp := h1.AcquireResponse()
 			WrapResponse(tcpResp)
 
 			tr, tcpErr, released := c.dispatchH1OrH2(raceCtx, host, tcpReq, tcpResp)
@@ -229,8 +229,8 @@ func drainLateRaceResponses(results chan raceResult, remaining int) {
 func (c *Client) dispatchH1OrH2(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	alpnMode := c.resolveALPNMode(ctx, fastReq)
 	if alpnMode == aoni.AlpnH2 {
@@ -245,8 +245,8 @@ func (c *Client) dispatchH1OrH2(
 func (c *Client) tryDispatchH3(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	h3 := c.getH3Client()
 
@@ -276,8 +276,8 @@ func (c *Client) tryDispatchH3(
 func (c *Client) tryDispatchH2(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	h2Cl := c.getH2Client(host)
 
@@ -312,8 +312,8 @@ func (c *Client) tryDispatchH2(
 func (c *Client) dispatchH1WithFallbacks(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	err, autoReleased := c.executeFastHTTP(ctx, fastReq, fastResp)
 	if autoReleased {
@@ -341,8 +341,8 @@ func (c *Client) dispatchH1WithFallbacks(
 func (c *Client) fallbackH1ToH2(
 	ctx context.Context,
 	host string,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	fastResp.Reset()
 
@@ -382,8 +382,8 @@ func (c *Client) isRecoverableStatus(ctx context.Context, code int) bool {
 
 func (c *Client) recoverSpecialStatus(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (map[string][]string, error, bool) {
 	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	if reqCfg.SpecialRecoveryDone {
@@ -407,8 +407,8 @@ func (c *Client) recoverSpecialStatus(
 
 func (c *Client) retry425TooEarly(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
@@ -424,8 +424,8 @@ func (c *Client) retry425TooEarly(
 
 func (c *Client) retry421Misdirected(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
@@ -447,8 +447,8 @@ func (c *Client) retry421Misdirected(
 
 func (c *Client) retry408Timeout(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	ctx, reqCfg := pipeline.AllocRequestConfig(ctx)
 	reqCfg.SpecialRecoveryDone = true
@@ -459,7 +459,7 @@ func (c *Client) retry408Timeout(
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
 }
 
-func (c *Client) recordAltSvcIfPresent(host string, fastResp *h1engine.Response) {
+func (c *Client) recordAltSvcIfPresent(host string, fastResp *h1.Response) {
 	if c.protocolState.altSvc == nil {
 		return
 	}
@@ -471,8 +471,8 @@ func (c *Client) recordAltSvcIfPresent(host string, fastResp *h1engine.Response)
 
 func (c *Client) executeFastHTTP(
 	ctx context.Context,
-	req *h1engine.Request,
-	resp *h1engine.Response,
+	req *h1.Request,
+	resp *h1.Response,
 ) (err error, autoReleased bool) {
 	if err := ctx.Err(); err != nil {
 		return err, false
@@ -535,7 +535,7 @@ func (c *Client) executeFastHTTP(
 }
 
 func (c *Client) setupFastHTTPSchemeAndHost(
-	req *h1engine.Request,
+	req *h1.Request,
 ) (isHTTPS bool, origHost []byte, hasHostHeader bool, cleanup func()) {
 	isHTTPS = bytes.EqualFold(req.URI().Scheme(), []byte("https"))
 	origHost = req.URI().Host()
@@ -572,7 +572,7 @@ func (c *Client) setupFastHTTPSchemeAndHost(
 	return isHTTPS, origHost, hasHostHeader, cleanup
 }
 
-func (c *Client) configureFastHTTPProxy(ctx context.Context, req *h1engine.Request, isHTTPS bool) {
+func (c *Client) configureFastHTTPProxy(ctx context.Context, req *h1.Request, isHTTPS bool) {
 	var proxyURL *url.URL
 	if c.cfg.Network.ProxyAddr != nil {
 		proxyURL = c.cfg.Network.ProxyAddr
@@ -594,7 +594,7 @@ func (c *Client) configureFastHTTPProxy(ctx context.Context, req *h1engine.Reque
 	}
 }
 
-func (c *Client) doFastHTTPEngine(ctx context.Context, req *h1engine.Request, resp *h1engine.Response) error {
+func (c *Client) doFastHTTPEngine(ctx context.Context, req *h1.Request, resp *h1.Response) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		return c.engine.DoDeadline(req, resp, deadline)
 	}
@@ -607,8 +607,8 @@ func (c *Client) doFastHTTPEngine(ctx context.Context, req *h1engine.Request, re
 }
 
 func (c *Client) executeFastHTTPWithStaleRetry(
-	req *h1engine.Request,
-	resp *h1engine.Response,
+	req *h1.Request,
+	resp *h1.Response,
 	do func() error,
 	onRetry func(),
 ) error {
@@ -642,7 +642,7 @@ func isStaleKeepAliveError(err error) bool {
 }
 
 // fastRespReset resets fasthttp response buffers safely.
-func fastRespReset(resp *h1engine.Response) {
+func fastRespReset(resp *h1.Response) {
 	if resp != nil {
 		resp.Reset()
 	}
@@ -651,7 +651,7 @@ func fastRespReset(resp *h1engine.Response) {
 // ensureConnectionTE ensures 'Connection: TE' is present if a 'TE' header is configured on the request.
 // RFC 9112 §7.4 / RFC 9110 §7.6.1: A sender of the TE header field MUST also include "TE" within the Connection
 // header field to prevent hop-by-hop forwarding by intermediaries that do not support its semantics.
-func ensureConnectionTE(req *h1engine.Request) {
+func ensureConnectionTE(req *h1.Request) {
 	te := req.Header.Peek("TE")
 	if len(te) == 0 {
 		return
@@ -681,7 +681,7 @@ func isH2FrameOnH1Error(err error) bool {
 		strings.Contains(errStr, "\x00\x00\x04")
 }
 
-func sanitizeTraceHeaders(req *h1engine.Request) {
+func sanitizeTraceHeaders(req *h1.Request) {
 	if bytesconv.EqualFoldASCII(bytesconv.B2S(req.Header.Method()), header.MethodTrace) {
 		req.Header.Del(header.Authorization)
 		req.Header.Del(header.ProxyAuthorization)

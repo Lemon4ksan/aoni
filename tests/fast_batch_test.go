@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 func TestFast_DoBatch(t *testing.T) {
@@ -178,13 +178,13 @@ func (n *nullConn) Write(b []byte) (int, error) {
 }
 
 func BenchmarkRequest_WriteBuffered(b *testing.B) {
-	req := h1engine.AcquireRequest()
+	req := h1.AcquireRequest()
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("http://localhost:8080/api/v1/update")
 	req.Header.SetContentType("application/json")
 	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
 	req.SetBody([]byte(`{"user_id":12345,"status":"active","payload":"simd_zero_copy_payload"}`))
-	defer h1engine.ReleaseRequest(req)
+	defer h1.ReleaseRequest(req)
 
 	nc := &nullConn{}
 	bw := bufio.NewWriter(nc)
@@ -203,13 +203,13 @@ func BenchmarkRequest_WriteBuffered(b *testing.B) {
 }
 
 func BenchmarkRequest_WriteVectored(b *testing.B) {
-	req := h1engine.AcquireRequest()
+	req := h1.AcquireRequest()
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("http://localhost:8080/api/v1/update")
 	req.Header.SetContentType("application/json")
 	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
 	req.SetBody([]byte(`{"user_id":12345,"status":"active","payload":"simd_zero_copy_payload"}`))
-	defer h1engine.ReleaseRequest(req)
+	defer h1.ReleaseRequest(req)
 
 	nc := &nullConn{}
 

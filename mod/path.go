@@ -180,7 +180,7 @@ func resolveQueryString(req Request, query any) (string, error) {
 		return string(b), nil
 	}
 
-	cfg := pipeline.GetRequestConfig(req.Context())
+	cfg := pipeline.GetRequestConfig(req)
 	if cfg != nil && cfg.QueryEncoder != nil {
 		qVals, err := cfg.QueryEncoder(query)
 		if err != nil || len(qVals) == 0 {

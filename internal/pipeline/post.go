@@ -467,7 +467,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 		return applyCharsetTranscoding(r, body), nil
 	})
 
-	if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.DownloadProgress != nil {
+	if cfg := GetRequestConfig(req); cfg != nil && cfg.DownloadProgress != nil {
 		progress := cfg.DownloadProgress
 
 		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
@@ -489,7 +489,7 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 		return false
 	}
 
-	cfg := GetRequestConfig(req.Context())
+	cfg := GetRequestConfig(req)
 
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
@@ -508,7 +508,7 @@ func (p *Pipeline[Req, Resp]) applyContentDecompression(
 	if normEnc == dict.ContentEncodingDCZ || normEnc == dict.ContentEncodingDCB {
 		var dictData []byte
 		if req != nil && req.Context() != nil {
-			cfg := GetRequestConfig(req.Context())
+			cfg := GetRequestConfig(req)
 			if cfg != nil && cfg.AvailableDictionary != nil {
 				dictData = cfg.AvailableDictionary.Data
 			} else if p.defaults.DictionaryStore != nil && req.URL != nil {
@@ -558,7 +558,7 @@ func stageDictionaryCapture[Req, Resp any](
 		return resp, nil
 	}
 
-	cfg := GetRequestConfig(stdReq.Context())
+	cfg := GetRequestConfig(stdReq)
 	if cfg != nil && cfg.DisableDictionaryCompression {
 		return resp, nil
 	}

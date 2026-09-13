@@ -14,15 +14,15 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/testutil"
 )
 
 func main() {
 	runtime.GOMAXPROCS(12)
 
 	// 1. In-memory listener
-	ln := h1engine.NewInmemoryListener()
+	ln := testutil.NewInmemoryListener()
 	defer ln.Close()
 
 	respBytes := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 42\r\nConnection: keep-alive\r\n\r\n{\"status\":\"ok\",\"engine\":\"aoni-fast\"}\n")

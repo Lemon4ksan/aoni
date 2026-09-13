@@ -322,7 +322,7 @@ func WithFormBody[T any](payload T) RequestModifier {
 			}
 
 			encoder := values.Encode
-			if cfg := pipeline.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
+			if cfg := pipeline.GetRequestConfig(req); cfg != nil && cfg.QueryEncoder != nil {
 				encoder = cfg.QueryEncoder
 			}
 

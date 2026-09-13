@@ -98,7 +98,7 @@ func applyStreamDecompression(req *http.Request, resp *http.Response, body io.Re
 	if normEnc == dict.ContentEncodingDCZ || normEnc == dict.ContentEncodingDCB {
 		var dictData []byte
 		if req != nil && req.Context() != nil {
-			cfg := GetRequestConfig(req.Context())
+			cfg := GetRequestConfig(req)
 			if cfg != nil && cfg.AvailableDictionary != nil {
 				dictData = cfg.AvailableDictionary.Data
 			}

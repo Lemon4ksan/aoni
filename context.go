@@ -41,7 +41,7 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 		return nil
 	}
 
-	if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil {
+	if cfg := GetRequestConfig(resp.Request); cfg != nil {
 		return cfg.TraceInfo
 	}
 

@@ -10,22 +10,23 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"time"
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/mach/client/h1"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 	return &Request{}
 })
 
-// Request adapts a high-performance [*h1engine.Request] to the unified [aoni.Request] contract.
+// Request adapts a high-performance [*h1.Request] to the unified [aoni.Request] contract.
 //
 // Thread Safety & Memory Lifetime Invariants:
 // Request instances are recycled via sharded [pool.PerPStorage] for zero-lock execution.
@@ -33,21 +34,22 @@ var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
 	_          cpu.CacheLinePad
-	req        *h1engine.Request
+	req        *h1.Request
 	_          cpu.CacheLinePad
 	ctx        context.Context
+	cfg        any
 	getBody    func() (io.ReadCloser, error)
 	isAcquired bool
 	_          cpu.CacheLinePad
 }
 
-// NewRequest acquires a pooled [Request] adapter wrapping an active [*h1engine.Request].
-// If req is nil, a new [*h1engine.Request] is acquired automatically from [h1engine.AcquireRequest].
+// NewRequest acquires a pooled [Request] adapter wrapping an active [*h1.Request].
+// If req is nil, a new [*h1.Request] is acquired automatically from [h1.AcquireRequest].
 // Yields a ready-to-use [Request] adapter bound to the pool. Caller MUST call Release() when finished.
-func NewRequest(req *h1engine.Request) *Request {
+func NewRequest(req *h1.Request) *Request {
 	isAcquired := false
 	if req == nil {
-		req = h1engine.AcquireRequest()
+		req = h1.AcquireRequest()
 		req.Reset()
 
 		isAcquired = true
@@ -69,6 +71,52 @@ func (f *Request) Context() context.Context {
 	}
 
 	return f.ctx
+}
+
+// Config returns the request configuration.
+func (f *Request) Config() any {
+	return f.cfg
+}
+
+// SetConfig sets the request configuration.
+func (f *Request) SetConfig(cfg any) {
+	f.cfg = cfg
+}
+
+// Deadline implements context.Context.
+func (f *Request) Deadline() (deadline time.Time, ok bool) {
+	if f.ctx == nil {
+		return time.Time{}, false
+	}
+
+	return f.ctx.Deadline()
+}
+
+// Done implements context.Context.
+func (f *Request) Done() <-chan struct{} {
+	if f.ctx == nil {
+		return nil
+	}
+
+	return f.ctx.Done()
+}
+
+// Err implements context.Context.
+func (f *Request) Err() error {
+	if f.ctx == nil {
+		return nil
+	}
+
+	return f.ctx.Err()
+}
+
+// Value implements context.Context.
+func (f *Request) Value(key any) any {
+	if f.ctx == nil {
+		return nil
+	}
+
+	return f.ctx.Value(key)
 }
 
 // SetContext assigns the execution context to the request adapter.
@@ -336,12 +384,12 @@ func (f *Request) HTTPRequest() *http.Request {
 	return nil
 }
 
-// FastHTTPRequest yields the underlying [*h1engine.Request] instance.
-func (f *Request) FastHTTPRequest() *h1engine.Request {
+// FastHTTPRequest yields the underlying [*h1.Request] instance.
+func (f *Request) FastHTTPRequest() *h1.Request {
 	return f.req
 }
 
-// EngineRequest yields the underlying [*h1engine.Request] cast to any.
+// EngineRequest yields the underlying [*h1.Request] cast to any.
 func (f *Request) EngineRequest() any {
 	return f.req
 }
@@ -354,6 +402,7 @@ func (f *Request) Release() {
 
 	f.req = nil
 	f.ctx = nil
+	f.cfg = nil
 	f.getBody = nil
 	f.isAcquired = false
 	requestAdapterStorage.Put(f)

@@ -17,8 +17,8 @@ import (
 
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/mach/quic"
 
-	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/netutil/svcb"
 )
 
@@ -254,16 +254,13 @@ func (r *DoQResolver) getOrCreateConn(ctx context.Context) (*quic.Conn, error) {
 	}
 
 	tlsCfg := r.buildTLSConfig()
-	quicCfg := &quic.Config{
-		KeepAlivePeriod: 15 * time.Second,
-	}
 
 	endpoint := r.Endpoint
 	if !hasPort(endpoint) {
 		endpoint = net.JoinHostPort(endpoint, DoQDefaultPort)
 	}
 
-	conn, err := quic.DialAddr(ctx, endpoint, tlsCfg, quicCfg)
+	conn, err := quic.DialAddr(ctx, endpoint, tlsCfg, quic.WithKeepAlivePeriod(15*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDoQHandshakeFailed, err)
 	}

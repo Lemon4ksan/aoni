@@ -21,15 +21,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
-	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	coreh2 "github.com/lemon4ksan/mach/core/h2"
+	coreh3 "github.com/lemon4ksan/mach/core/h3"
 )
 
 func generateBenchTLSCert() (tls.Certificate, error) {
@@ -168,9 +168,9 @@ func BenchmarkH2_NetHTTP(b *testing.B) {
 }
 
 func BenchmarkH3_QPACK_Block_ZeroAlloc(b *testing.B) {
-	codec := h3engine.NewQPACKCodec()
-	req := h1engine.AcquireRequest()
-	defer h1engine.ReleaseRequest(req)
+	codec := coreh3.NewQPACKCodec()
+	req := h1.AcquireRequest()
+	defer h1.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -192,9 +192,9 @@ func BenchmarkH3_QPACK_Block_ZeroAlloc(b *testing.B) {
 }
 
 func BenchmarkH3_QPACK_EncodeDecode(b *testing.B) {
-	codec := h3engine.NewQPACKCodec()
-	req := h1engine.AcquireRequest()
-	defer h1engine.ReleaseRequest(req)
+	codec := coreh3.NewQPACKCodec()
+	req := h1.AcquireRequest()
+	defer h1.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -215,14 +215,14 @@ func BenchmarkH3_QPACK_EncodeDecode(b *testing.B) {
 }
 
 func BenchmarkH2_HPACK_EncodeDecode(b *testing.B) {
-	hpEnc := h2engine.AcquireHPACK()
-	defer h2engine.ReleaseHPACK(hpEnc)
+	hpEnc := coreh2.AcquireHPACK()
+	defer coreh2.ReleaseHPACK(hpEnc)
 
-	hFrame := h2engine.AcquireFrame(h2engine.FrameHeaders).(*h2engine.Headers)
-	defer h2engine.ReleaseFrame(hFrame)
+	hFrame := coreh2.AcquireFrame(coreh2.FrameHeaders).(*coreh2.Headers)
+	defer coreh2.ReleaseFrame(hFrame)
 
-	hf := h2engine.AcquireHeaderField()
-	defer h2engine.ReleaseHeaderField(hf)
+	hf := coreh2.AcquireHeaderField()
+	defer coreh2.ReleaseHeaderField(hf)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -247,9 +247,9 @@ func BenchmarkH2_HPACK_EncodeDecode(b *testing.B) {
 }
 
 func BenchmarkH3_FrameRoundtrip(b *testing.B) {
-	codec := h3engine.NewQPACKCodec()
-	req := h1engine.AcquireRequest()
-	defer h1engine.ReleaseRequest(req)
+	codec := coreh3.NewQPACKCodec()
+	req := h1.AcquireRequest()
+	defer h1.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -257,7 +257,7 @@ func BenchmarkH3_FrameRoundtrip(b *testing.B) {
 	req.Header.Set("x-aoni-version", "2.0.0")
 	req.Header.Set("user-agent", "aoni/2.0")
 
-	var respHeader h1engine.ResponseHeader
+	var respHeader h1.ResponseHeader
 
 	b.ReportAllocs()
 	b.ResetTimer()

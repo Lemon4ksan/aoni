@@ -347,7 +347,7 @@ func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
 
 func extractRequestConfig(resp *http.Response) *pipeline.RequestConfig {
 	if resp != nil && resp.Request != nil {
-		return pipeline.GetRequestConfig(resp.Request.Context())
+		return pipeline.GetRequestConfig(resp.Request)
 	}
 
 	return nil

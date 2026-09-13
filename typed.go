@@ -340,7 +340,7 @@ func FetchTo[T any](
 	c any,
 	method, path string,
 	mods ...RequestModifier,
-) (T, *http.Response, error) {
+) (T, error) {
 	var (
 		target T
 		doer   HTTPRequester
@@ -352,13 +352,13 @@ func FetchTo[T any](
 		doer = DefaultClient
 	}
 
-	resp, err := acquireRequestBuilder(doer).
+	_, err := acquireRequestBuilder(doer).
 		SetContext(ctx).
 		SetResult(&target).
 		Apply(mods...).
 		Execute(method, path)
 
-	return target, resp, err
+	return target, err
 }
 
 // FetchScoped executes a request with method, path, and optional modifiers, passing the decoded response
@@ -425,11 +425,7 @@ func BatchFetchTo[T any](
 
 	for i, path := range paths {
 		go func(idx int, p string) {
-			val, resp, err := FetchTo[T](ctx, c, method, p, mods...)
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-
+			val, err := FetchTo[T](ctx, c, method, p, mods...)
 			if err == nil {
 				results[idx] = val
 			}
@@ -703,7 +699,7 @@ func prepareBodyMods(
 	}
 
 	if payload.HasContentType() {
-		allMods = append(allMods, mod.WithHeader("Content-Type", payload.ContentType))
+		allMods = append(allMods, mod.WithContentType(payload.ContentType))
 	}
 
 	allMods = append(allMods, mods...)

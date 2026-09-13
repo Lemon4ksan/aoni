@@ -12,14 +12,13 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 func (c *Client) executeWithRedirects(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	redirectLimit := generic.Ternary(c.cfg.Engine.RedirectLimit < 0, 10, c.cfg.Engine.RedirectLimit)
 
@@ -35,8 +34,8 @@ func (c *Client) executeWithRedirects(
 		return trailers, err, autoReleased
 	}
 
-	currentURI := h1engine.AcquireURI()
-	defer h1engine.ReleaseURI(currentURI)
+	currentURI := h1.AcquireURI()
+	defer h1.ReleaseURI(currentURI)
 
 	var redirectsFollowed int
 
@@ -69,7 +68,7 @@ func (c *Client) executeWithRedirects(
 
 		applyRedirectMethodAndBody(statusCode, fastReq)
 
-		nextURI := h1engine.AcquireURI()
+		nextURI := h1.AcquireURI()
 		currentURI.CopyTo(nextURI)
 		nextURI.UpdateBytes(location)
 
@@ -102,32 +101,32 @@ func (c *Client) executeWithRedirects(
 			c.referer.LastURL.Set(string(currentURI.FullURI()))
 		}
 
-		h1engine.ReleaseURI(nextURI)
+		h1.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
 }
 
 func isRedirectStatus(code int) bool {
-	return code == h1engine.StatusMovedPermanently ||
-		code == h1engine.StatusFound ||
-		code == h1engine.StatusSeeOther ||
-		code == h1engine.StatusTemporaryRedirect ||
-		code == h1engine.StatusPermanentRedirect
+	return code == h1.StatusMovedPermanently ||
+		code == h1.StatusFound ||
+		code == h1.StatusSeeOther ||
+		code == h1.StatusTemporaryRedirect ||
+		code == h1.StatusPermanentRedirect
 }
 
-func isSameHost(u1, u2 *h1engine.URI) bool {
+func isSameHost(u1, u2 *h1.URI) bool {
 	return bytes.EqualFold(u1.Host(), u2.Host())
 }
 
-func isHTTPSDowngrade(u1, u2 *h1engine.URI) bool {
+func isHTTPSDowngrade(u1, u2 *h1.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 
 // applyRedirectMethodAndBody changes request method to GET and scrubs representation/content headers
 // upon 301, 302, and 303 redirects per RFC 9110 §15.4 and §6.4.2.
-func applyRedirectMethodAndBody(statusCode int, req *h1engine.Request) {
+func applyRedirectMethodAndBody(statusCode int, req *h1.Request) {
 	switch statusCode {
-	case h1engine.StatusMovedPermanently, h1engine.StatusFound, h1engine.StatusSeeOther:
+	case h1.StatusMovedPermanently, h1.StatusFound, h1.StatusSeeOther:
 		method := bytesconv.B2S(req.Header.Method())
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)

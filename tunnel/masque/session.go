@@ -12,8 +12,9 @@ import (
 	"net"
 	"sync/atomic"
 
+	"github.com/lemon4ksan/mach/quic"
+
 	impl "github.com/lemon4ksan/aoni/internal/masque"
-	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
 var netErrClosed = net.ErrClosed

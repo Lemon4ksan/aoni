@@ -20,10 +20,10 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -39,7 +39,7 @@ import (
 // retain or mutate byte slices returned from unsafe body accessors after the request completes.
 type Client struct {
 	// engine provides underlying HTTP/1.1 connection pooling via fasthttp.
-	engine *h1engine.Client
+	engine *h1.Client
 
 	// pipeline coordinates middleware, retry, hedging, and telemetry execution.
 	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
@@ -315,9 +315,9 @@ func (c *Client) requestInternal(
 	)
 }
 
-func acquireFastPair() (*h1engine.Request, *h1engine.Response) {
-	req := h1engine.AcquireRequest()
-	resp := h1engine.AcquireResponse()
+func acquireFastPair() (*h1.Request, *h1.Response) {
+	req := h1.AcquireRequest()
+	resp := h1.AcquireResponse()
 
 	WrapRequest(req)
 	WrapResponse(resp)
@@ -325,7 +325,7 @@ func acquireFastPair() (*h1engine.Request, *h1engine.Response) {
 	return req, resp
 }
 
-func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
+func releaseFastPair(req *h1.Request, resp *h1.Response) {
 	if req != nil {
 		ReleaseRequestSafe(req)
 	}
@@ -337,8 +337,8 @@ func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
 
 func (c *Client) executeFastPath(
 	ctx context.Context,
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 ) (aoni.Response, error) {
 	err := c.doFastHTTPEngine(ctx, fastReq, fastResp)
 	if err != nil {
@@ -360,14 +360,14 @@ type fastNativeDoer struct {
 
 func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 	var (
-		fastReq     *h1engine.Request
+		fastReq     *h1.Request
 		mustRelease bool
 	)
 
-	if fr, ok := req.EngineRequest().(*h1engine.Request); ok && fr != nil {
+	if fr, ok := req.EngineRequest().(*h1.Request); ok && fr != nil {
 		fastReq = fr
 	} else {
-		fastReq = h1engine.AcquireRequest()
+		fastReq = h1.AcquireRequest()
 		WrapRequest(fastReq)
 
 		mustRelease = true
@@ -397,7 +397,7 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 		}()
 	}
 
-	fastResp := h1engine.AcquireResponse()
+	fastResp := h1.AcquireResponse()
 	WrapResponse(fastResp)
 
 	ctx := req.Context()
@@ -450,7 +450,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 // All requests are written continuously to the connection write buffer in a single batch, minimizing round-trips and syscalls.
 // The responses slice must have the same length as reqs.
 //
-// To minimize GC overhead, it uses stack-allocated arrays `[16]*h1engine.Request` for batches of 16 requests or fewer,
+// To minimize GC overhead, it uses stack-allocated arrays `[16]*h1.Request` for batches of 16 requests or fewer,
 // preventing slice allocations on the hot path.
 func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Response) error {
 	if len(reqs) == 0 {
@@ -462,21 +462,21 @@ func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Respo
 	}
 
 	var (
-		staticH1Reqs  [16]*h1engine.Request
-		staticH1Resps [16]*h1engine.Response
+		staticH1Reqs  [16]*h1.Request
+		staticH1Resps [16]*h1.Response
 	)
 
 	var (
-		h1Reqs  []*h1engine.Request
-		h1Resps []*h1engine.Response
+		h1Reqs  []*h1.Request
+		h1Resps []*h1.Response
 	)
 
 	if len(reqs) <= len(staticH1Reqs) {
 		h1Reqs = staticH1Reqs[:len(reqs)]
 		h1Resps = staticH1Resps[:len(resps)]
 	} else {
-		h1Reqs = make([]*h1engine.Request, len(reqs))
-		h1Resps = make([]*h1engine.Response, len(resps))
+		h1Reqs = make([]*h1.Request, len(reqs))
+		h1Resps = make([]*h1.Response, len(resps))
 	}
 
 	for i := range reqs {
@@ -562,21 +562,21 @@ func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response
 	isHTTPS := bytes.EqualFold(uri.Scheme(), []byte("https"))
 
 	var (
-		staticH1Reqs  [16]*h1engine.Request
-		staticH1Resps [16]*h1engine.Response
+		staticH1Reqs  [16]*h1.Request
+		staticH1Resps [16]*h1.Response
 	)
 
 	var (
-		h1Reqs  []*h1engine.Request
-		h1Resps []*h1engine.Response
+		h1Reqs  []*h1.Request
+		h1Resps []*h1.Response
 	)
 
 	if len(reqs) <= len(staticH1Reqs) {
 		h1Reqs = staticH1Reqs[:len(reqs)]
 		h1Resps = staticH1Resps[:len(resps)]
 	} else {
-		h1Reqs = make([]*h1engine.Request, len(reqs))
-		h1Resps = make([]*h1engine.Response, len(resps))
+		h1Reqs = make([]*h1.Request, len(reqs))
+		h1Resps = make([]*h1.Response, len(resps))
 	}
 
 	for i := range reqs {
@@ -805,8 +805,8 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 	}
 }
 
-// Unwrap returns the underlying [*h1engine.Client] engine instance.
-func (c *Client) Unwrap() *h1engine.Client {
+// Unwrap returns the underlying [*h1.Client] engine instance.
+func (c *Client) Unwrap() *h1.Client {
 	return c.engine
 }
 
@@ -849,8 +849,8 @@ func (c *Client) TLSConfig() *tls.Config {
 	return nil
 }
 
-// Engine returns the underlying [*h1engine.Client] engine instance.
-func (c *Client) Engine() *h1engine.Client {
+// Engine returns the underlying [*h1.Client] engine instance.
+func (c *Client) Engine() *h1.Client {
 	return c.engine
 }
 

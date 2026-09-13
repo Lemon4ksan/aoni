@@ -27,11 +27,11 @@ var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {
 	return &RequestConfig{}
 })
 
-type requestConfigKey struct{}
+type RequestConfigKey struct{}
 
 // RequestConfigCtxKey is the exported context key for storing [RequestConfig] in a context.
 // Use this when constructing contexts outside internal/pipeline.
-type RequestConfigCtxKey = requestConfigKey
+type RequestConfigCtxKey = RequestConfigKey
 
 // AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
 // enriched context and the config pointer.
@@ -48,7 +48,7 @@ func AllocRequestConfig(ctx context.Context) (context.Context, *RequestConfig) {
 	cfg := requestConfigStorage.Get()
 	*cfg = RequestConfig{}
 
-	ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+	ctx = context.WithValue(ctx, RequestConfigKey{}, cfg)
 
 	return ctx, cfg
 }
@@ -145,16 +145,38 @@ func (cfg *RequestConfig) LookupDecoder(contentType string) core.ResponseDecoder
 	return nil
 }
 
-// GetRequestConfig retrieves the RequestConfig instance attached to the context.
-// Returns nil if ctx is nil or no RequestConfig is attached.
-func GetRequestConfig(ctx context.Context) *RequestConfig {
-	if ctx == nil {
+// GetRequestConfig retrieves the RequestConfig instance attached to the context or request.
+// Returns nil if no RequestConfig is attached.
+func GetRequestConfig(v any) *RequestConfig {
+	if v == nil {
 		return nil
 	}
 
-	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
+	switch req := v.(type) {
+	case core.Request:
+		if req != nil {
+			if cfg, ok := req.Config().(*RequestConfig); ok && cfg != nil {
+				return cfg
+			}
 
-	return cfg
+			ctx := req.Context()
+			if ctx == nil || any(ctx) == any(req) {
+				return nil
+			}
+
+			return GetRequestConfig(ctx)
+		}
+
+	case *http.Request:
+		if req != nil {
+			return GetRequestConfig(req.Context())
+		}
+	case context.Context:
+		cfg, _ := req.Value(RequestConfigKey{}).(*RequestConfig)
+		return cfg
+	}
+
+	return nil
 }
 
 // GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
@@ -165,12 +187,17 @@ func GetOrInitRequestConfig(v any) *RequestConfig {
 			return &RequestConfig{}
 		}
 
-		cfg := GetRequestConfig(req.Context())
+		if cfg, ok := req.Config().(*RequestConfig); ok && cfg != nil {
+			return cfg
+		}
+
+		cfg := GetRequestConfig(req)
 		if cfg == nil {
 			cfg = requestConfigStorage.Get()
 			*cfg = RequestConfig{}
-			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-			req.SetContext(ctx)
+			req.SetConfig(cfg)
+		} else {
+			req.SetConfig(cfg)
 		}
 
 		return cfg
@@ -180,11 +207,11 @@ func GetOrInitRequestConfig(v any) *RequestConfig {
 			return &RequestConfig{}
 		}
 
-		cfg := GetRequestConfig(req.Context())
+		cfg := GetRequestConfig(req)
 		if cfg == nil {
 			cfg = requestConfigStorage.Get()
 			*cfg = RequestConfig{}
-			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+			ctx := context.WithValue(req.Context(), RequestConfigKey{}, cfg)
 			*req = *req.WithContext(ctx)
 		}
 
@@ -228,7 +255,7 @@ func CloseResponse(resp *http.Response) {
 		return
 	}
 
-	cfg := GetRequestConfig(resp.Request.Context())
+	cfg := GetRequestConfig(resp.Request)
 	if cfg == nil {
 		return
 	}

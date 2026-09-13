@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -30,6 +31,7 @@ var stdRequestStorage = pool.NewPerPStorage(func() *Request {
 // Request adapts a standard net/http [*http.Request] to the unified [core.Request] contract.
 type Request struct {
 	req      *http.Request
+	cfg      any
 	released atomic.Bool
 }
 
@@ -41,6 +43,7 @@ func NewRequest(req *http.Request) *Request {
 
 	r := stdRequestStorage.Get()
 	r.req = req
+	r.cfg = nil
 	r.released.Store(false)
 
 	return r
@@ -63,6 +66,52 @@ func ReleaseRequest(r *Request) {
 // Context returns the request execution context.
 func (s *Request) Context() context.Context {
 	return s.req.Context()
+}
+
+// Config returns the request configuration.
+func (s *Request) Config() any {
+	return s.cfg
+}
+
+// SetConfig sets the request configuration.
+func (s *Request) SetConfig(cfg any) {
+	s.cfg = cfg
+}
+
+// Deadline implements context.Context.
+func (s *Request) Deadline() (deadline time.Time, ok bool) {
+	if s.req == nil {
+		return time.Time{}, false
+	}
+
+	return s.req.Context().Deadline()
+}
+
+// Done implements context.Context.
+func (s *Request) Done() <-chan struct{} {
+	if s.req == nil {
+		return nil
+	}
+
+	return s.req.Context().Done()
+}
+
+// Err implements context.Context.
+func (s *Request) Err() error {
+	if s.req == nil {
+		return nil
+	}
+
+	return s.req.Context().Err()
+}
+
+// Value implements context.Context.
+func (s *Request) Value(key any) any {
+	if s.req == nil {
+		return nil
+	}
+
+	return s.req.Context().Value(key)
 }
 
 // SetContext updates the request execution context in place.

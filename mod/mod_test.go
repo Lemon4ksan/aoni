@@ -30,6 +30,7 @@ type dummyUser struct {
 type dummyRequest struct {
 	httpReq *http.Request
 	ctx     context.Context
+	cfg     any
 	url     string
 	body    []byte
 	bodyRdr io.Reader
@@ -135,7 +136,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		req := newDummyRequest()
 		mod.WithVars("key_without_value").Apply(req)
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 		assert.ErrorIs(t, cfg.BodyError, mod.ErrInvalidPairCount)
 	})
@@ -335,7 +336,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		req1 := newDummyRequest()
 		mod.WithForceHTTP2().Apply(req1)
 
-		cfg1 := aoni.GetRequestConfig(req1.Context())
+		cfg1 := aoni.GetRequestConfig(req1)
 		require.NotNil(t, cfg1)
 		require.NotEmpty(t, cfg1.ALPNOverride)
 		assert.Equal(t, aoni.AlpnH2, cfg1.ALPNOverride[0])
@@ -343,7 +344,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		req2 := newDummyRequest()
 		mod.WithForceHTTP3().Apply(req2)
 
-		cfg2 := aoni.GetRequestConfig(req2.Context())
+		cfg2 := aoni.GetRequestConfig(req2)
 		require.NotNil(t, cfg2)
 		require.NotEmpty(t, cfg2.ALPNOverride)
 		assert.Equal(t, aoni.AlpnH3, cfg2.ALPNOverride[0])
@@ -357,7 +358,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 
 		mod.WithOrderedHeaders(order).Apply(req)
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 		assert.Equal(t, order, cfg.OrderedHeaders)
 	})
@@ -372,7 +373,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		mod.WithInsecureSkipVerify().Apply(req)
 		mod.WithProxyDNS().Apply(req)
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 
 		require.NotNil(t, cfg.ProxyAddr)
@@ -388,14 +389,14 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		req1 := newDummyRequest()
 		mod.WithNetwork(aoni.NetworkUnix).Apply(req1)
 
-		cfg1 := aoni.GetRequestConfig(req1.Context())
+		cfg1 := aoni.GetRequestConfig(req1)
 		require.NotNil(t, cfg1)
 		assert.Equal(t, "unix", cfg1.Network)
 
 		req2 := newDummyRequest()
 		mod.WithNetworkString("tcp4").Apply(req2)
 
-		cfg2 := aoni.GetRequestConfig(req2.Context())
+		cfg2 := aoni.GetRequestConfig(req2)
 		require.NotNil(t, cfg2)
 		assert.Equal(t, "tcp4", cfg2.Network)
 	})
@@ -414,7 +415,7 @@ func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
 
 		assert.Equal(t, "corr_abc123", req.Header("X-Correlation-ID"))
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 		assert.Equal(t, "user-login-route", cfg.Label)
 	})
@@ -427,7 +428,7 @@ func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
 		mod.WithDebug().Apply(req)
 		mod.WithTraceContext().Apply(req)
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 		assert.True(t, cfg.Debug)
 		assert.NotNil(t, cfg.TraceInfo)
@@ -472,7 +473,7 @@ func TestMod_SmartBody_And_Retry(t *testing.T) {
 		mod.WithRetry(3).Apply(req)
 		mod.WithJSON(dummyUser{Name: "Woz"}).Apply(req)
 
-		cfg := aoni.GetRequestConfig(req.Context())
+		cfg := aoni.GetRequestConfig(req)
 		require.NotNil(t, cfg)
 		require.NotNil(t, cfg.RetryPolicy)
 		assert.Equal(t, 3, cfg.RetryPolicy.MaxAttempts)
@@ -527,3 +528,6 @@ func TestMod_WebPush(t *testing.T) {
 	assert.Equal(t, "news-alert", req.Header("Topic"))
 	assert.Equal(t, "vapid t=jwt123, k=pub123", req.Header("Authorization"))
 }
+
+func (r *dummyRequest) Config() any       { return r.cfg }
+func (r *dummyRequest) SetConfig(cfg any) { r.cfg = cfg }

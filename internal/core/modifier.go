@@ -185,10 +185,13 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 
 type stdReqAdapter struct {
 	req *http.Request
+	cfg any
 }
 
 func (s *stdReqAdapter) Context() context.Context       { return s.req.Context() }
 func (s *stdReqAdapter) SetContext(ctx context.Context) { *s.req = *s.req.WithContext(ctx) }
+func (s *stdReqAdapter) Config() any                    { return s.cfg }
+func (s *stdReqAdapter) SetConfig(cfg any)              { s.cfg = cfg }
 func (s *stdReqAdapter) Method() string                 { return s.req.Method }
 func (s *stdReqAdapter) SetMethod(m string)             { s.req.Method = m }
 func (s *stdReqAdapter) URL() string {

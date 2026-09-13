@@ -280,7 +280,7 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 	}
 
 	ttl := cfg.DefaultTTL
-	if reqCfg := GetRequestConfig(req.Context()); reqCfg != nil && reqCfg.CacheTTL > 0 {
+	if reqCfg := GetRequestConfig(req); reqCfg != nil && reqCfg.CacheTTL > 0 {
 		ttl = reqCfg.CacheTTL
 	} else if parsedTTL, ok := parseFreshnessLifetime(resp); ok {
 		ttl = parsedTTL

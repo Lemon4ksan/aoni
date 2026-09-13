@@ -19,12 +19,12 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
+	"github.com/lemon4ksan/mach/client/h1"
+	"github.com/lemon4ksan/mach/client/h2"
+	"github.com/lemon4ksan/mach/client/h3"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
-	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
-	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
@@ -39,8 +39,8 @@ type brokenH3Entry struct {
 }
 
 type protocolState struct {
-	h2Clients map[string]*h2engine.Client
-	h3Client  *h3engine.Client
+	h2Clients map[string]*h2.Client
+	h3Client  *h3.Client
 	altSvc    *altSvcCache
 	h2Mutex   sync.Mutex
 	h3Once    sync.Once
@@ -48,14 +48,14 @@ type protocolState struct {
 
 func newProtocolState() protocolState {
 	return protocolState{
-		h2Clients: make(map[string]*h2engine.Client),
+		h2Clients: make(map[string]*h2.Client),
 		altSvc:    newAltSvcCache(),
 	}
 }
 
 func (s *protocolState) Clone() protocolState {
 	return protocolState{
-		h2Clients: make(map[string]*h2engine.Client),
+		h2Clients: make(map[string]*h2.Client),
 		altSvc:    s.altSvc.Clone(),
 	}
 }
@@ -199,15 +199,15 @@ func parseMaxAge(headerVal string) time.Duration {
 	return maxAge
 }
 
-func (c *Client) resolveALPNMode(ctx context.Context, fastReq *h1engine.Request) string {
+func (c *Client) resolveALPNMode(ctx context.Context, fastReq *h1.Request) string {
 	return resolveALPNMode(ctx, &c.cfg, fastReq, c.protocolState.altSvc)
 }
 
-func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1engine.Request, altSvc *altSvcCache) string {
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1.Request, altSvc *altSvcCache) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
-			dummyFastReq := h1engine.AcquireRequest()
+			dummyFastReq := h1.AcquireRequest()
 			dummyReq := NewRequest(dummyFastReq)
 			dummyReq.SetContext(ctx)
 
@@ -241,32 +241,32 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1engine.Re
 	return aoni.AlpnHTTP
 }
 
-func (c *Client) getH3Client() *h3engine.Client {
+func (c *Client) getH3Client() *h3.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: c.cfg.Engine.InsecureSkipVerify, //nolint:gosec
 
 		}
 
-		c.protocolState.h3Client = h3engine.NewClientFromSettings(tlsCfg)
+		c.protocolState.h3Client = h3.NewClientFromSettings(tlsCfg)
 	})
 
 	return c.protocolState.h3Client
 }
 
-func (c *Client) getH2Client(host string) *h2engine.Client {
+func (c *Client) getH2Client(host string) *h2.Client {
 	c.protocolState.h2Mutex.Lock()
 	defer c.protocolState.h2Mutex.Unlock()
 
 	if c.protocolState.h2Clients == nil {
-		c.protocolState.h2Clients = make(map[string]*h2engine.Client)
+		c.protocolState.h2Clients = make(map[string]*h2.Client)
 	}
 
 	if cl, ok := c.protocolState.h2Clients[host]; ok {
 		return cl
 	}
 
-	dialer := &h2engine.Dialer{
+	dialer := &h2.Dialer{
 		Addr: host,
 		RawDialContext: func(ctx context.Context, addr string) (net.Conn, error) {
 			return c.DialH2(ctx, addr)
@@ -281,14 +281,14 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		}
 	}
 
-	var pushHandler func(pushReq *h1engine.Request, pushResp *h1engine.Response)
+	var pushHandler func(pushReq *h1.Request, pushResp *h1.Response)
 	if cacheCfg := c.cfg.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
-		pushHandler = func(pushReq *h1engine.Request, pushResp *h1engine.Response) {
+		pushHandler = func(pushReq *h1.Request, pushResp *h1.Response) {
 			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
 		}
 	}
 
-	cl := h2engine.NewClient(dialer, h2engine.ClientOpts{
+	cl := h2.NewClient(dialer, h2.ClientOpts{
 		PingInterval:  15 * time.Second,
 		OnRTT:         onRTTCallback,
 		OnPushPromise: pushHandler,
@@ -301,8 +301,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 }
 
 func (c *Client) cachePushedResponse(
-	fastReq *h1engine.Request,
-	fastResp *h1engine.Response,
+	fastReq *h1.Request,
+	fastResp *h1.Response,
 	cacheCfg *aoni.CacheConfig,
 ) {
 	req, err := http.NewRequestWithContext(

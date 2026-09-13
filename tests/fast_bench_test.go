@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/testutil"
 )
 
 type fastBenchUser struct {
@@ -37,8 +38,8 @@ var serverBenchBufPool = sync.Pool{
 	},
 }
 
-func setupFastBenchServer() *h1engine.InmemoryListener {
-	ln := h1engine.NewInmemoryListener()
+func setupFastBenchServer() *testutil.InmemoryListener {
+	ln := testutil.NewInmemoryListener()
 	respBytes := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 58\r\nConnection: keep-alive\r\n\r\n{\"id\":42,\"name\":\"Benchmark User\",\"email\":\"bench@aoni.dev\"}")
 
 	go func() {
@@ -142,14 +143,14 @@ func BenchmarkClient_Get_RawFastHTTP(b *testing.B) {
 	}))
 	defer ts.Close()
 
-	c := &h1engine.Client{}
+	c := &h1.Client{}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	b.RunParallel(func(pb *testing.PB) {
-		req := h1engine.AcquireRequest()
-		resp := h1engine.AcquireResponse()
+		req := h1.AcquireRequest()
+		resp := h1.AcquireResponse()
 
 		req.SetRequestURI(ts.URL)
 
@@ -163,8 +164,8 @@ func BenchmarkClient_Get_RawFastHTTP(b *testing.B) {
 			req.SetRequestURI(ts.URL)
 		}
 
-		h1engine.ReleaseRequest(req)
-		h1engine.ReleaseResponse(resp)
+		h1.ReleaseRequest(req)
+		h1.ReleaseResponse(resp)
 	})
 }
 
@@ -196,8 +197,8 @@ func BenchmarkClient_Get_BridgeStdClient(b *testing.B) {
 }
 
 func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
-	fastReq := h1engine.AcquireRequest()
-	defer h1engine.ReleaseRequest(fastReq)
+	fastReq := h1.AcquireRequest()
+	defer h1.ReleaseRequest(fastReq)
 
 	fastReq.SetRequestURI("http://api.example.com/v1/users")
 
@@ -353,8 +354,8 @@ func BenchmarkPOST_JSON_FastClient(b *testing.B) {
 
 func BenchmarkModifiers_FastVsStd(b *testing.B) {
 	b.Run("FastRequest_Adapter", func(b *testing.B) {
-		fastReq := h1engine.AcquireRequest()
-		defer h1engine.ReleaseRequest(fastReq)
+		fastReq := h1.AcquireRequest()
+		defer h1.ReleaseRequest(fastReq)
 		fastReq.SetRequestURI("http://api.example.com/v1/resource")
 
 		req := fast.NewRequest(fastReq)
@@ -471,7 +472,7 @@ func BenchmarkGET_RawEngine_Parallel(b *testing.B) {
 	ln := setupFastBenchServer()
 	defer ln.Close()
 
-	client := &h1engine.Client{
+	client := &h1.Client{
 		Dial: func(_ string) (net.Conn, error) {
 			return ln.Dial()
 		},
@@ -481,8 +482,8 @@ func BenchmarkGET_RawEngine_Parallel(b *testing.B) {
 	b.ResetTimer()
 
 	b.RunParallel(func(pb *testing.PB) {
-		req := h1engine.AcquireRequest()
-		resp := h1engine.AcquireResponse()
+		req := h1.AcquireRequest()
+		resp := h1.AcquireResponse()
 		req.SetRequestURI("http://inmemory/user")
 
 		for pb.Next() {
@@ -491,8 +492,8 @@ func BenchmarkGET_RawEngine_Parallel(b *testing.B) {
 			}
 		}
 
-		h1engine.ReleaseRequest(req)
-		h1engine.ReleaseResponse(resp)
+		h1.ReleaseRequest(req)
+		h1.ReleaseResponse(resp)
 	})
 }
 
@@ -528,7 +529,7 @@ func BenchmarkPOST_FastClient_Native_Parallel(b *testing.B) {
 	ln := setupFastBenchServer()
 	defer ln.Close()
 
-	engine := &h1engine.HostClient{
+	engine := &h1.HostClient{
 		Addr: "inmemory",
 		Dial: func(_ string) (net.Conn, error) {
 			return ln.Dial()
@@ -541,10 +542,10 @@ func BenchmarkPOST_FastClient_Native_Parallel(b *testing.B) {
 	b.ResetTimer()
 
 	b.RunParallel(func(pb *testing.PB) {
-		req := h1engine.AcquireRequest()
-		resp := h1engine.AcquireResponse()
-		defer h1engine.ReleaseRequest(req)
-		defer h1engine.ReleaseResponse(resp)
+		req := h1.AcquireRequest()
+		resp := h1.AcquireResponse()
+		defer h1.ReleaseRequest(req)
+		defer h1.ReleaseResponse(resp)
 
 		req.Header.SetMethod("POST")
 		req.SetRequestURI("http://inmemory/submit")

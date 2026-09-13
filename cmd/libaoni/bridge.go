@@ -22,9 +22,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/ws"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 // Constants matching include/aoni.h error and profile definitions.
@@ -226,7 +226,7 @@ func DoTask(client *fast.Client, t *Task) int32 {
 		var rawHeaders []byte
 		if fastResp, ok := resp.(*fast.Response); ok && fastResp != nil {
 			rawHeaders = fastResp.RawHeaders()
-		} else if h1Resp, ok := resp.EngineResponse().(*h1engine.Response); ok && h1Resp != nil {
+		} else if h1Resp, ok := resp.EngineResponse().(*h1.Response); ok && h1Resp != nil {
 			rawHeaders = h1Resp.Header.Header()
 		}
 
@@ -337,7 +337,7 @@ var (
 	// returning to prevent memory leaks, and must not be retained by the caller.
 	pipelineReqsPool = sync.Pool{
 		New: func() any {
-			s := make([]*h1engine.Request, 0, 1024)
+			s := make([]*h1.Request, 0, 1024)
 			return &s
 		},
 	}
@@ -347,7 +347,7 @@ var (
 	// to prevent memory leaks and cross-request data corruption.
 	pipelineRespsPool = sync.Pool{
 		New: func() any {
-			s := make([]*h1engine.Response, 0, 512)
+			s := make([]*h1.Response, 0, 512)
 			return &s
 		},
 	}
@@ -363,24 +363,24 @@ func DoPipelineTasks(client *fast.Client, tasks []Task) int32 {
 		return DoTask(client, &tasks[0])
 	}
 
-	reqsPtr := pipelineReqsPool.Get().(*[]*h1engine.Request)
+	reqsPtr := pipelineReqsPool.Get().(*[]*h1.Request)
 	fastReqs := (*reqsPtr)[:0]
 	if cap(fastReqs) < n {
-		fastReqs = make([]*h1engine.Request, 0, n)
+		fastReqs = make([]*h1.Request, 0, n)
 	}
 
-	respsPtr := pipelineRespsPool.Get().(*[]*h1engine.Response)
+	respsPtr := pipelineRespsPool.Get().(*[]*h1.Response)
 	fastResps := (*respsPtr)[:0]
 	if cap(fastResps) < n {
-		fastResps = make([]*h1engine.Response, 0, n)
+		fastResps = make([]*h1.Response, 0, n)
 	}
 
 	for i := 0; i < n; i++ {
 		t := &tasks[i]
-		req := h1engine.AcquireRequest()
+		req := h1.AcquireRequest()
 		req.Reset()
 		fastReqs = append(fastReqs, req)
-		fastResps = append(fastResps, h1engine.AcquireResponse())
+		fastResps = append(fastResps, h1.AcquireResponse())
 
 		// Method
 		if t.Method != nil && t.MethodLen > 0 {
@@ -453,8 +453,8 @@ func DoPipelineTasks(client *fast.Client, tasks []Task) int32 {
 			}
 		}
 
-		h1engine.ReleaseRequest(req)
-		h1engine.ReleaseResponse(resp)
+		h1.ReleaseRequest(req)
+		h1.ReleaseResponse(resp)
 	}
 
 	for i := range fastReqs {
@@ -475,7 +475,7 @@ func DoPipelineTasks(client *fast.Client, tasks []Task) int32 {
 	return AONIOk
 }
 
-func parseRawHeadersToH1(data []byte, req *h1engine.Request) {
+func parseRawHeadersToH1(data []byte, req *h1.Request) {
 	for len(data) > 0 {
 		lineEnd := simd.IndexByteVector(data, '\n')
 		var line []byte

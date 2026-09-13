@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -195,8 +195,8 @@ func TestFastResponseAdapter(t *testing.T) {
 func TestFastRequest_Contract(t *testing.T) {
 	t.Parallel()
 
-	fastReq := h1engine.AcquireRequest()
-	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
+	fastReq := h1.AcquireRequest()
+	t.Cleanup(func() { h1.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	require.NotNil(t, req.FastHTTPRequest())
@@ -252,8 +252,8 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 		mod.WithQuery(map[string]string{"page": "1"}),
 	}
 
-	fastReq := h1engine.AcquireRequest()
-	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
+	fastReq := h1.AcquireRequest()
+	t.Cleanup(func() { h1.ReleaseRequest(fastReq) })
 	fastReq.SetRequestURI("http://localhost/test")
 
 	fReq := fast.NewRequest(fastReq)
@@ -272,8 +272,8 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 func TestFastResponse_Contract(t *testing.T) {
 	t.Parallel()
 
-	fastRespStruct := h1engine.AcquireResponse()
-	t.Cleanup(func() { h1engine.ReleaseResponse(fastRespStruct) })
+	fastRespStruct := h1.AcquireResponse()
+	t.Cleanup(func() { h1.ReleaseResponse(fastRespStruct) })
 
 	fastRespStruct.SetStatusCode(http.StatusAccepted)
 	fastRespStruct.Header.Set("X-Fast-Resp", "fast-val")
@@ -428,7 +428,7 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 		middleware.RateLimit(100, 10),
 	)
 
-	req := fast.NewRequest(h1engine.AcquireRequest())
+	req := fast.NewRequest(h1.AcquireRequest())
 	t.Cleanup(req.Release)
 
 	req.SetURL(ts.URL + "/test")

@@ -776,3 +776,6 @@ func TestRefererAutomaton_PolicyTransitions(t *testing.T) {
 	ref := auto.ComputeReferer(u2)
 	assert.Equal(t, "https://origin.com/page1", ref)
 }
+
+func (m *mockRequest) Config() any       { return nil }
+func (m *mockRequest) SetConfig(cfg any) {}

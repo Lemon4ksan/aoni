@@ -22,6 +22,10 @@ type Request interface {
 	Context() context.Context
 	SetContext(ctx context.Context)
 
+	// Configuration
+	Config() any
+	SetConfig(cfg any)
+
 	// Method and Destination URL
 	Method() string
 	SetMethod(method string)

@@ -19,10 +19,10 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/mach/client/h1"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
@@ -37,8 +37,8 @@ var (
 
 type fastBodyReadCloser struct {
 	io.Reader
-	fastReq  *h1engine.Request
-	fastResp *h1engine.Response
+	fastReq  *h1.Request
+	fastResp *h1.Response
 	once     sync.Once
 }
 
@@ -81,26 +81,26 @@ func newBytesReadCloser(data []byte, volatile bool) io.ReadCloser {
 	}
 }
 
-// Response adapts a high-performance [*h1engine.Response] to the unified [aoni.Response] contract.
+// Response adapts a high-performance [*h1.Response] to the unified [aoni.Response] contract.
 //
 // Memory Lifetime Invariants & Thread Safety:
 // Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
 // when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
 	_            cpu.CacheLinePad
-	resp         *h1engine.Response
+	resp         *h1.Response
 	_            cpu.CacheLinePad
 	trailers     map[string][]string
 	uncompressed bool
 	_            cpu.CacheLinePad
 }
 
-// NewResponse acquires a pooled [Response] adapter wrapping an active [*h1engine.Response].
-// If resp is nil, a new [*h1engine.Response] is acquired automatically from [h1engine.AcquireResponse].
+// NewResponse acquires a pooled [Response] adapter wrapping an active [*h1.Response].
+// If resp is nil, a new [*h1.Response] is acquired automatically from [h1.AcquireResponse].
 // Yields a adapter instance configured for pipeline processing.
-func NewResponse(resp *h1engine.Response) *Response {
+func NewResponse(resp *h1.Response) *Response {
 	if resp == nil {
-		resp = h1engine.AcquireResponse()
+		resp = h1.AcquireResponse()
 	}
 
 	r := responseAdapterStorage.Get()
@@ -360,12 +360,12 @@ func (f *Response) HTTPResponse() *http.Response {
 	}
 }
 
-// FastHTTPResponse yields the underlying [*h1engine.Response] instance.
-func (f *Response) FastHTTPResponse() *h1engine.Response {
+// FastHTTPResponse yields the underlying [*h1.Response] instance.
+func (f *Response) FastHTTPResponse() *h1.Response {
 	return f.resp
 }
 
-// EngineResponse yields the underlying [*h1engine.Response] cast to any.
+// EngineResponse yields the underlying [*h1.Response] cast to any.
 func (f *Response) EngineResponse() any {
 	return f.resp
 }
@@ -483,15 +483,15 @@ type PooledResponse struct {
 	_ cpu.CacheLinePad
 	Response
 	_        cpu.CacheLinePad
-	fastReq  *h1engine.Request
-	fastResp *h1engine.Response
+	fastReq  *h1.Request
+	fastResp *h1.Response
 	closed   atomic.Bool
 	_        cpu.CacheLinePad
 }
 
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
-func NewPooledResponse(fastReq *h1engine.Request, fastResp *h1engine.Response) *PooledResponse {
+func NewPooledResponse(fastReq *h1.Request, fastResp *h1.Response) *PooledResponse {
 	pr := pooledResponseStorage.Get()
 
 	pr.resp = fastResp

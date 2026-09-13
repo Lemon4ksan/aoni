@@ -21,10 +21,10 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -68,7 +68,7 @@ func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 		return req
 	}
 
-	cfg := GetRequestConfig(req.Context())
+	cfg := GetRequestConfig(req)
 	if cfg != nil && cfg.DisableDictionaryCompression {
 		return req
 	}
@@ -141,7 +141,7 @@ func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 }
 
 func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
-	cfg := GetRequestConfig(req.Context())
+	cfg := GetRequestConfig(req)
 	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
 		progressReader := &iokit.ProgressReader{
 			Reader:     req.Body,
@@ -385,7 +385,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 		contentLen int64 = -1
 	)
 
-	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *h1engine.Request })
+	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *h1.Request })
 	if isFast {
 		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
 			if cl := fastReq.Header.ContentLength(); cl > 0 {

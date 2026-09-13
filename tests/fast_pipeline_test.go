@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 func TestFast_Pipeline(t *testing.T) {
@@ -169,26 +169,26 @@ func BenchmarkHTTP1_Pipelining_Batch50(b *testing.B) {
 	}()
 
 	addr := ln.Addr().String()
-	hc := &h1engine.HostClient{
+	hc := &h1.HostClient{
 		Addr: addr,
 	}
 
 	const batchSize = 50
-	reqs := make([]*h1engine.Request, batchSize)
-	resps := make([]*h1engine.Response, batchSize)
+	reqs := make([]*h1.Request, batchSize)
+	resps := make([]*h1.Response, batchSize)
 
 	for i := range batchSize {
-		req := h1engine.AcquireRequest()
+		req := h1.AcquireRequest()
 		req.Header.SetMethod("GET")
 		req.SetRequestURI(fmt.Sprintf("http://%s/test", addr))
 		reqs[i] = req
-		resps[i] = h1engine.AcquireResponse()
+		resps[i] = h1.AcquireResponse()
 	}
 
 	defer func() {
 		for i := range batchSize {
-			h1engine.ReleaseRequest(reqs[i])
-			h1engine.ReleaseResponse(resps[i])
+			h1.ReleaseRequest(reqs[i])
+			h1.ReleaseResponse(resps[i])
 		}
 	}()
 
@@ -209,16 +209,16 @@ func BenchmarkHTTP1_Serial_Batch50(b *testing.B) {
 	}))
 	defer ts.Close()
 
-	hc := &h1engine.HostClient{
+	hc := &h1.HostClient{
 		Addr: ts.Listener.Addr().String(),
 	}
 
-	req := h1engine.AcquireRequest()
+	req := h1.AcquireRequest()
 	req.Header.SetMethod("GET")
 	req.SetRequestURI(ts.URL)
-	resp := h1engine.AcquireResponse()
-	defer h1engine.ReleaseRequest(req)
-	defer h1engine.ReleaseResponse(resp)
+	resp := h1.AcquireResponse()
+	defer h1.ReleaseRequest(req)
+	defer h1.ReleaseResponse(resp)
 
 	b.ResetTimer()
 	b.ReportAllocs()

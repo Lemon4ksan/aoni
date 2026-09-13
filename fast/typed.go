@@ -294,6 +294,7 @@ func (c *Client) executeFast(
 		if err != nil {
 			return nil, err
 		}
+
 		bodyMod = mod.WithBodyBytes(data)
 	}
 

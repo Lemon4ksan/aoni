@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
+	fcompress "github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -200,7 +200,7 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 		case "/br":
 			w.Header().Set("Content-Encoding", "br")
 
-			brData := h1engine.AppendBrotliBytes(nil, []byte("uncompressed-brotli-payload"))
+			brData, _ := fcompress.CompressBrotli([]byte("uncompressed-brotli-payload"), nil)
 			_, _ = w.Write(brData)
 		case "/zstd":
 			w.Header().Set("Content-Encoding", "zstd")

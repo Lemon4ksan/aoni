@@ -14,9 +14,9 @@ import (
 
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
+	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -274,8 +274,8 @@ func TestFastClient_TypedGenerics(t *testing.T) {
 func TestFastResponse_EdgeMethods(t *testing.T) {
 	t.Parallel()
 
-	hResp := h1engine.AcquireResponse()
-	defer h1engine.ReleaseResponse(hResp)
+	hResp := h1.AcquireResponse()
+	defer h1.ReleaseResponse(hResp)
 
 	hResp.SetStatusCode(http.StatusOK)
 	hResp.Header.Set("X-Custom-Echo", "echo-ok")

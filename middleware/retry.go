@@ -274,7 +274,7 @@ func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response
 		return true
 	}
 
-	cfg := aoni.GetRequestConfig(req.Context())
+	cfg := aoni.GetRequestConfig(req)
 	if cfg != nil && cfg.AllowNonReadOnlyHedging {
 		return true
 	}
@@ -337,7 +337,7 @@ func resolveRetryOverrides(
 	baseOpts RetryOptions,
 	baseCond core.RetryCondition,
 ) (RetryOptions, core.RetryCondition) {
-	cfg := aoni.GetRequestConfig(req.Context())
+	cfg := aoni.GetRequestConfig(req)
 	if cfg == nil || cfg.RetryPolicy == nil {
 		return baseOpts, baseCond
 	}

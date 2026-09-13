@@ -235,7 +235,7 @@ func (c *Client) doPipeline(
 		m.ApplyStd(req)
 	}
 
-	if cfg := pipeline.GetRequestConfig(req.Context()); cfg != nil && cfg.BodyError != nil {
+	if cfg := pipeline.GetRequestConfig(req); cfg != nil && cfg.BodyError != nil {
 		return nil, cfg.BodyError
 	}
 
@@ -420,7 +420,7 @@ func (c *Client) Do(req Request) (Response, error) {
 	}
 
 	if httpReq != nil && httpReq.URL != nil {
-		cfg := pipeline.GetOrInitRequestConfig(httpReq.Context())
+		cfg := pipeline.GetOrInitRequestConfig(req)
 		if cfg.BodyError != nil {
 			return nil, cfg.BodyError
 		}
@@ -428,6 +428,10 @@ func (c *Client) Do(req Request) (Response, error) {
 		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
 			cfg.TargetHost = httpReq.URL.Hostname()
 		}
+	}
+
+	if cfg := pipeline.GetOrInitRequestConfig(req); cfg != nil {
+		httpReq = httpReq.WithContext(context.WithValue(httpReq.Context(), pipeline.RequestConfigKey{}, cfg))
 	}
 
 	resp, err := c.execute(httpReq, c.resolvePipeline(httpReq)) //nolint:bodyclose
@@ -615,7 +619,7 @@ func (c *Client) Transport() *http.Transport {
 
 // InitRequestConfig attaches or retrieves a pooled [RequestConfig] on the request context.
 func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
-	cfg := pipeline.GetRequestConfig(req.Context())
+	cfg := pipeline.GetRequestConfig(req)
 	if cfg == nil {
 		var ctx context.Context
 

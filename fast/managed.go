@@ -9,29 +9,29 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/mach/client/h1"
 )
 
 type ManagedRequest struct {
-	req      *h1engine.Request
+	req      *h1.Request
 	released atomic.Bool
 }
 
 func (m *ManagedRequest) Release() {
 	if m.released.CompareAndSwap(false, true) {
-		h1engine.ReleaseRequest(m.req)
+		h1.ReleaseRequest(m.req)
 		mReqPool.Put(m)
 	}
 }
 
 type ManagedResponse struct {
-	resp     *h1engine.Response
+	resp     *h1.Response
 	released atomic.Bool
 }
 
 func (m *ManagedResponse) Release() {
 	if m.released.CompareAndSwap(false, true) {
-		h1engine.ReleaseResponse(m.resp)
+		h1.ReleaseResponse(m.resp)
 		mRespPool.Put(m)
 	}
 }
@@ -48,6 +48,13 @@ var mRespPool = sync.Pool{
 	New: func() any { return new(ManagedResponse) },
 }
 
+type requestMapShard struct {
+	sync.Mutex
+	m map[unsafe.Pointer]*ManagedRequest
+}
+
+var mReqShards [64]requestMapShard
+
 type responseMapShard struct {
 	sync.Mutex
 	m map[unsafe.Pointer]*ManagedResponse
@@ -56,21 +63,31 @@ type responseMapShard struct {
 var mRespShards [64]responseMapShard
 
 func init() {
+	for i := range mReqShards {
+		mReqShards[i].m = make(map[unsafe.Pointer]*ManagedRequest, 256)
+	}
 	for i := range mRespShards {
 		mRespShards[i].m = make(map[unsafe.Pointer]*ManagedResponse, 256)
 	}
 }
 
-func WrapRequest(req *h1engine.Request) *ManagedRequest {
+func WrapRequest(req *h1.Request) *ManagedRequest {
 	mReq := mReqPool.Get().(*ManagedRequest)
 	mReq.req = req
 	mReq.released.Store(false)
-	req.SetUserValue("mReq", mReq)
+
+	ptr := unsafe.Pointer(req)
+	shardIdx := (uintptr(ptr) >> 4) & 63
+	shard := &mReqShards[shardIdx]
+
+	shard.Lock()
+	shard.m[ptr] = mReq
+	shard.Unlock()
 
 	return mReq
 }
 
-func WrapResponse(resp *h1engine.Response) *ManagedResponse {
+func WrapResponse(resp *h1.Response) *ManagedResponse {
 	mResp := mRespPool.Get().(*ManagedResponse)
 	mResp.resp = resp
 	mResp.released.Store(false)
@@ -86,15 +103,26 @@ func WrapResponse(resp *h1engine.Response) *ManagedResponse {
 	return mResp
 }
 
-func ReleaseRequestSafe(req *h1engine.Request) {
-	if mr, ok := req.UserValue("mReq").(*ManagedRequest); ok {
+func ReleaseRequestSafe(req *h1.Request) {
+	ptr := unsafe.Pointer(req)
+	shardIdx := (uintptr(ptr) >> 4) & 63
+	shard := &mReqShards[shardIdx]
+
+	shard.Lock()
+	mr, ok := shard.m[ptr]
+	if ok {
+		delete(shard.m, ptr)
+	}
+	shard.Unlock()
+
+	if ok {
 		mr.Release()
 	} else {
-		h1engine.ReleaseRequest(req)
+		h1.ReleaseRequest(req)
 	}
 }
 
-func ReleaseResponseSafe(resp *h1engine.Response) {
+func ReleaseResponseSafe(resp *h1.Response) {
 	ptr := unsafe.Pointer(resp)
 	shardIdx := (uintptr(ptr) >> 4) & 63
 	shard := &mRespShards[shardIdx]
@@ -111,6 +139,6 @@ func ReleaseResponseSafe(resp *h1engine.Response) {
 	if ok {
 		mr.Release()
 	} else {
-		h1engine.ReleaseResponse(resp)
+		h1.ReleaseResponse(resp)
 	}
 }
