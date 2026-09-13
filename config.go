@@ -1155,7 +1155,7 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 		BeforeRequest:                c.cfg.Defaults.BeforeRequest,
 		AfterResponse:                c.cfg.Defaults.AfterResponse,
 		Inspector:                    c.cfg.Defaults.Inspector,
-		ResponseValidators:            c.cfg.Defaults.ResponseValidators,
+		ResponseValidators:           c.cfg.Defaults.ResponseValidators,
 		SoftErrorDetectors:           c.cfg.Defaults.toInternalSoftErrorDetectors(),
 		RefererState:                 c.referer,
 		MaxResponseSize:              c.cfg.Defaults.MaxResponseSize,

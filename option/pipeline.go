@@ -127,7 +127,7 @@ func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
 
 // WithResponseValidator registers a global response validator executed immediately after receiving headers.
 //
-// WithResponseValidator registers a global response validator executed immediately after receiving headers.
+//nolint:bodyclose // Response validators inspect responses without taking ownership of response lifecycle.
 func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if fn != nil {

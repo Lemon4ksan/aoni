@@ -60,6 +60,8 @@ func WithFallback(f core.FallbackFunc) RequestModifier {
 }
 
 // WithResponseValidator attaches a per-request response validator executed before decoding.
+//
+//nolint:bodyclose // Response validators inspect responses without taking ownership of response lifecycle.
 func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier {
 	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)

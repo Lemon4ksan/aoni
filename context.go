@@ -178,10 +178,10 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	return generic.Some(val)
 }
 
-// GetResponseValidator retrieves the per-request response validation callback from context.
-func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
+// GetResponseValidators retrieves the per-request response validation callbacks from context.
+func GetResponseValidators(ctx context.Context) []func(resp *http.Response) error {
 	if cfg := GetRequestConfig(ctx); cfg != nil {
-		return cfg.ResponseValidator
+		return cfg.ResponseValidators
 	}
 
 	return nil

@@ -1021,12 +1021,11 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 
 func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
-		Headers:           d.Headers,
-		BeforeRequest:     d.BeforeRequest,
-		AfterResponse:     d.AfterResponse,
-		Inspector:         d.Inspector,
-		ResponseValidator: d.ResponseValidator,
-
+		Headers:              d.Headers,
+		BeforeRequest:        d.BeforeRequest,
+		AfterResponse:        d.AfterResponse,
+		Inspector:            d.Inspector,
+		ResponseValidator:    d.ResponseValidator,
 		RefererState:         referer,
 		MaxResponseSize:      d.MaxResponseSize,
 		MultiReadThreshold:   d.MultiReadThreshold,

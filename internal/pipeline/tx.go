@@ -54,7 +54,7 @@ type Tx struct {
 	OrderedHeaders     []string                             // Emulated browser header order
 	ALPNOverride       []string                             // Custom TLS ALPN protocol list
 	Fallback           core.FallbackFunc                    // Failure fallback handler
-	ResponseValidators []func(resp *http.Response) error      // Custom response validation predicate
+	ResponseValidators []func(resp *http.Response) error    // Custom response validation predicate
 	SoftErrorDetectors []func(*http.Response, []byte) error // Custom response soft error detectors
 	RetryPolicy        *core.RetryOverride                  // Per-request retry policy
 	SocketController   netutil.SocketController             // Low-level socket dialer hook

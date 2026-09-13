@@ -122,13 +122,14 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 		if err := uve.EncodeValues(tmp); err != nil {
 			return err
 		}
-		
+
 		first := sb.Len() == 0
 		for k, list := range tmp {
 			for _, item := range list {
 				writeQueryKeyValuePair(sb, k, item, &first)
 			}
 		}
+
 		return nil
 	}
 

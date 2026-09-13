@@ -362,6 +362,7 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 				if resp.Body != nil {
 					_ = resp.Body.Close()
 				}
+
 				return err
 			}
 		}
