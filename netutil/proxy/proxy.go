@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	flog "github.com/lemon4ksan/foundation/async/logkit"
+	"github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/generic"
 	fproxy "github.com/lemon4ksan/foundation/net/proxy"
 	"github.com/lemon4ksan/foundation/silicon/trie"
@@ -200,7 +200,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
 	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
-	cfg.Logger = generic.Ternary[core.Logger](cfg.Logger != nil, cfg.Logger, flog.Discard)
+	cfg.Logger = generic.Ternary[core.Logger](cfg.Logger != nil, cfg.Logger, logkit.Discard)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Rotator{

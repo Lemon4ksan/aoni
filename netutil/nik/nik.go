@@ -15,7 +15,7 @@ import (
 	"net/url"
 	"strings"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/ctxkit"
+	"github.com/lemon4ksan/foundation/async/ctxkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -132,7 +132,7 @@ func (k NetworkIsolationKey) String() string {
 
 // WithNIK binds a [NetworkIsolationKey] to the context.
 func WithNIK(ctx context.Context, key NetworkIsolationKey) context.Context {
-	return asyncctx.WithValue(ctx, nikContextKey{}, key)
+	return ctxkit.WithValue(ctx, nikContextKey{}, key)
 }
 
 // FromContext extracts a [NetworkIsolationKey] from the context.

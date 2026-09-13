@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -64,8 +64,8 @@ type RequestConfig struct {
 	TargetHost           string
 	ForceContentType     string
 	Label                string
-	UploadProgress       fio.ProgressFunc
-	DownloadProgress     fio.ProgressFunc
+	UploadProgress       iokit.ProgressFunc
+	DownloadProgress     iokit.ProgressFunc
 	Capturer             any
 	BodyError            error
 	QueryError           error
@@ -247,7 +247,7 @@ func CloseResponse(resp *http.Response) {
 
 	_ = resp.Body.Close()
 
-	if rb, ok := fio.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
+	if rb, ok := iokit.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
 	}
 

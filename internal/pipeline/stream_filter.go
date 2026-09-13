@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/compress"
-	fio "github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/iokit"
 
 	"github.com/lemon4ksan/aoni/netutil/dict"
 )
@@ -132,13 +132,13 @@ func TranscodeStreamFilter() StreamFilter {
 }
 
 // ProgressStreamFilter returns a StreamFilter that invokes onProgress as response bytes are read.
-func ProgressStreamFilter(progress fio.ProgressFunc) StreamFilter {
+func ProgressStreamFilter(progress iokit.ProgressFunc) StreamFilter {
 	if progress == nil {
 		return nil
 	}
 
 	return func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
-		return &fio.ProgressReader{
+		return &iokit.ProgressReader{
 			Reader:     body,
 			Total:      r.ContentLength,
 			OnProgress: progress,

@@ -7,7 +7,7 @@ package route
 import (
 	"errors"
 
-	icmp "github.com/lemon4ksan/foundation/net/packet/icmp"
+	"github.com/lemon4ksan/foundation/net/packet/icmp"
 )
 
 var ErrUnhandledProtocol = errors.New("aoni/masque: unhandled ip protocol")

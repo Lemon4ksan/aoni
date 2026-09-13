@@ -352,11 +352,14 @@ func FetchTo[T any](
 		doer = DefaultClient
 	}
 
-	_, err := acquireRequestBuilder(doer).
+	resp, err := acquireRequestBuilder(doer).
 		SetContext(ctx).
 		SetResult(&target).
 		Apply(mods...).
 		Execute(method, path)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 
 	return target, err
 }

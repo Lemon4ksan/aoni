@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	fio "github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
@@ -338,7 +338,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 
 		_, err := pipe.Execute(t.Context(), req.HTTPRequest(), doer, pipeCfg)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, fio.ErrResponseTooLarge)
+		assert.ErrorIs(t, err, iokit.ErrResponseTooLarge)
 	})
 
 	t.Run("exceeds_stream_bytes_fails_during_read", func(t *testing.T) {
@@ -363,7 +363,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 
 		_, readErr := io.ReadAll(resp.Body)
 		require.Error(t, readErr)
-		assert.ErrorIs(t, readErr, fio.ErrResponseTooLarge)
+		assert.ErrorIs(t, readErr, iokit.ErrResponseTooLarge)
 	})
 }
 
