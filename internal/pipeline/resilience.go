@@ -23,6 +23,12 @@ import (
 
 var ErrHedgingBodyNonRepeatable = errors.New("aoni: request body is not repeatable for hedging attempt")
 
+// dispatchRequest routes the transaction through the configured pipeline (Failover, Hedging, or standard Doer).
+//
+// It intercepts specific protocol failure status codes to trigger transparent in-flight recovery:
+//   - HTTP 421 (Misdirected Request): Disables Alt-Svc (HTTP/3) routing and re-dials over a fresh connection.
+//   - HTTP 408 (Request Timeout): Enforces 'Connection: close', purging the stale socket from the pool.
+//   - HTTP 425 (Too Early): Strips the 'Early-Data' header, disables 0-RTT, and retries safely over 1-RTT.
 func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *Tx) (*http.Response, error) {
 	var (
 		resp *http.Response

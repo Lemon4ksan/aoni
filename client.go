@@ -49,7 +49,7 @@ type Client struct {
 	// coreEngine maintains shared low-level buffers, header caches, and string builders across requests.
 	coreEngine *pipeline.Engine
 
-	// prepared caches precomputed URL prefixes and default header slices to achieve zero-allocation path resolution.
+	// prepared caches precomputed URL prefixes and default header slices to achieve path resolution.
 	prepared pipeline.PreparedConfig
 
 	// powerWatcher monitors OS sleep/wake cycles to proactively flush stale TCP keep-alive sockets upon wake-up.

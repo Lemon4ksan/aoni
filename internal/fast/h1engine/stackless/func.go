@@ -9,19 +9,20 @@ import (
 	"sync"
 )
 
-// NewFunc returns stackless wrapper for the function f.
+// NewFunc returns a stackless wrapper for the function f.
 //
 // Unlike f, the returned stackless wrapper doesn't use stack space
-// on the goroutine that calls it.
-// The wrapper may save a lot of stack space if the following conditions
-// are met:
+// on the goroutine that calls it. Instead, it dispatches the execution
+// to a fixed pool of background worker goroutines.
 //
-//   - f doesn't contain blocking calls on network, I/O or channels;
-//   - f uses a lot of stack space;
-//   - the wrapper is called from high number of concurrent goroutines.
+// This is critical for high-throughput servers. In Go, deeply nested function calls
+// (such as zlib/gzip compression) cause the calling goroutine's stack to grow (stack split),
+// which permanently allocates memory. If 10,000 concurrent goroutines all trigger
+// a stack growth, memory usage spikes massively. By farming out the heavy work to a fixed pool,
+// the caller's stack remains small, saving memory.
 //
 // The stackless wrapper returns false if the call cannot be processed
-// at the moment due to high load.
+// at the moment due to high load (channel buffer full).
 func NewFunc(f func(ctx any)) func(ctx any) bool {
 	if f == nil {
 		// developer sanity-check

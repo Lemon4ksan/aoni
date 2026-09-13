@@ -17,12 +17,12 @@ import (
 // These core contracts bridge disparate networking paradigms (net/http, fasthttp, and gRPC)
 // into a unified, type-safe, profile-driven architecture conforming strictly to RFC 9110.
 type (
-	// Request represents a unified, zero-allocation HTTP request abstraction conforming to RFC 9110.
+	// Request represents a unified, HTTP request abstraction conforming to RFC 9110.
 	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
 	// high-throughput contract with zero heap allocations on hot paths.
 	Request = core.Request
 
-	// HeaderIterator is implemented by high-performance Request instances to support zero-allocation header traversal.
+	// HeaderIterator is implemented by high-performance Request instances to support header traversal.
 	HeaderIterator = core.HeaderIterator
 
 	// Response represents a unified, high-performance HTTP response abstraction conforming to RFC 9110.
@@ -49,7 +49,7 @@ type (
 	// BaseResponseProvider yields an envelope instance used for structured response unwrapping.
 	BaseResponseProvider = core.BaseResponseProvider
 
-	// RequestFactory facilitates zero-allocation request object pooling across execution pipelines.
+	// RequestFactory facilitates request object pooling across execution pipelines.
 	RequestFactory = core.RequestFactory
 
 	// QueryEncoder marshals custom structs or key-value pairs into standard URL query parameters.
@@ -58,7 +58,7 @@ type (
 	// ProgressFunc reports real-time transfer progress for uploads and streaming downloads.
 	ProgressFunc = core.ProgressFunc
 
-	// RequestModifier is a composable, zero-allocation functional modifier applied to outgoing [Request] pipelines.
+	// RequestModifier is a composable, functional modifier applied to outgoing [Request] pipelines.
 	RequestModifier = core.RequestModifier
 
 	// Phase represents a specific discrete phase of the network request lifecycle.
@@ -132,7 +132,7 @@ type (
 //
 // Onion-Peeling Mechanics:
 // In deeply layered architectures (e.g. RoundTripper -> Telemetry -> Retry -> CookieJar -> Transport),
-// UnwrapAs unwinds layers recursively via zero-allocation type assertions,
+// UnwrapAs unwinds layers recursively via type assertions,
 // returning the inner instance and true if found, or the zero value of T and false.
 func UnwrapAs[T any](target any) (T, bool) {
 	for curr := target; curr != nil; {

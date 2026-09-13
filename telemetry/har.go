@@ -153,6 +153,11 @@ type multiReadCloser struct {
 
 // captureHARResponseBody buffers up to 150 KB of textual response body payload for HAR export
 // without mutating or closing the underlying caller response stream.
+//
+// By using [io.LimitReader] combined with [io.MultiReader], it drains only the first N bytes,
+// caches them in memory for the HAR trace, and seamlessly re-stitches the buffered bytes back
+// onto the remaining unread network stream. This allows the telemetry hook to passively snoop
+// the body without breaking the consumer's ability to read the exact same body payload later.
 func captureHARResponseBody(resp *http.Response) []byte {
 	if resp == nil || resp.Body == nil || resp.Body == http.NoBody {
 		return nil

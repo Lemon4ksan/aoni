@@ -97,7 +97,7 @@ type Response struct {
 
 // NewResponse acquires a pooled [Response] adapter wrapping an active [*h1engine.Response].
 // If resp is nil, a new [*h1engine.Response] is acquired automatically from [h1engine.AcquireResponse].
-// Yields a zero-allocation adapter instance configured for pipeline processing.
+// Yields a adapter instance configured for pipeline processing.
 func NewResponse(resp *h1engine.Response) *Response {
 	if resp == nil {
 		resp = h1engine.AcquireResponse()
@@ -121,7 +121,7 @@ func (f *Response) Status() string {
 	return http.StatusText(f.resp.StatusCode())
 }
 
-// StatusBytes yields status text as a zero-allocation byte slice.
+// StatusBytes yields status text as a byte slice.
 func (f *Response) StatusBytes() []byte {
 	return bytesconv.S2B(f.Status())
 }
@@ -194,9 +194,9 @@ func (f *Response) BodyBytes() []byte {
 	return slices.Clone(f.resp.Body())
 }
 
-// UnsafeBodyBytes provides zero-allocation direct access to internal response buffers.
+// UnsafeBodyBytes provides direct access to internal response buffers.
 //
-// Critical Memory Lifetime Warning:
+// DANGER:
 //   - Points directly into volatile internal buffers managed by [sync.Pool].
 //   - Callers MUST NOT reference, mutate, or retain this byte slice beyond closing or releasing the response.
 func (f *Response) UnsafeBodyBytes() []byte {
@@ -207,7 +207,7 @@ func (f *Response) UnsafeBodyBytes() []byte {
 	return f.resp.Body()
 }
 
-// UnsafeAccess provides explicit, zero-allocation access to volatile response buffers.
+// UnsafeAccess provides explicit, access to volatile response buffers.
 type UnsafeAccess struct {
 	resp *Response
 }
@@ -223,7 +223,7 @@ func (u UnsafeAccess) Bytes() []byte {
 	return u.resp.UnsafeBodyBytes()
 }
 
-// String returns a zero-allocation string view over volatile response body memory.
+// String returns a string view over volatile response body memory.
 func (u UnsafeAccess) String() string {
 	return bytesconv.B2S(u.Bytes())
 }
@@ -287,7 +287,7 @@ func (f *Response) ReadStreamScoped(s *borrow.Scope, fn func(chunk borrow.Bytes)
 	return f.resp.ReadStreamScoped(s, fn)
 }
 
-// String returns a zero-allocation string view over volatile response body memory.
+// String returns a string view over volatile response body memory.
 func (f *Response) String() string {
 	if f == nil || f.resp == nil {
 		return ""

@@ -86,9 +86,10 @@ func acquireRequestBuilder(doer HTTPRequester) *RequestBuilder {
 
 // RequestBuilder provides a chainable API for configuring and executing HTTP requests.
 //
-// Concurrency:
-// RequestBuilder instances are NOT safe for concurrent use across multiple goroutines.
-// They are intended for single-goroutine linear construction and execution before being returned to the pool.
+// DANGER: RequestBuilder instances are acquired from a thread-local object pool ([pool.PerPStorage]).
+// They are NOT safe for concurrent use across multiple goroutines.
+// The instance is automatically recycled upon execution (e.g. Execute) or explicit Release.
+// Do not retain or mutate references to a RequestBuilder after it has been executed or released.
 type RequestBuilder struct {
 	client           HTTPRequester
 	ctx              context.Context
@@ -128,7 +129,7 @@ func (c *Client) NewRequest() *RequestBuilder {
 	return acquireRequestBuilder(c)
 }
 
-// R acquires a pooled, zero-allocation fluent [RequestBuilder] bound to the shared [DefaultClient].
+// R acquires a pooled [RequestBuilder] bound to the shared [DefaultClient].
 //
 // # Example
 //
@@ -744,8 +745,7 @@ func (r *RequestBuilder) ExecuteTo[T any](method, path string) (T, *http.Respons
 	return r.FetchTo[T](method, path)
 }
 
-// ExecuteResult executes the request and returns a functional [generic.Result] wrapping the unmarshaled response or error.
-// Enables Railway-Oriented Programming (ROP) without repetitive if-err checks.
+// ExecuteResult executes the request and returns a [generic.Result] wrapping the unmarshaled response or error.
 func (r *RequestBuilder) ExecuteResult[T any](method, path string) (generic.Result[T], *http.Response) {
 	val, resp, err := r.FetchTo[T](method, path)
 	if err != nil {
@@ -755,7 +755,7 @@ func (r *RequestBuilder) ExecuteResult[T any](method, path string) (generic.Resu
 	return generic.Success(val), resp
 }
 
-// FetchResult executes a request and returns a functional [generic.Result] wrapping the unmarshaled response or error.
+// FetchResult executes a request and returns a [generic.Result] wrapping the unmarshaled response or error.
 // Alias for [RequestBuilder.ExecuteResult].
 func (r *RequestBuilder) FetchResult[T any](method, path string) (generic.Result[T], *http.Response) {
 	return r.ExecuteResult[T](method, path)

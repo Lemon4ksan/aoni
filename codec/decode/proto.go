@@ -18,7 +18,7 @@ import (
 )
 
 // DecodeProto unmarshals binary Protocol Buffer response streams directly into a concrete [proto.Message] target.
-// It bypasses reflection and dynamic type assertions for maximum zero-allocation performance.
+// It bypasses reflection and dynamic type assertions for maximum performance.
 func DecodeProto[T proto.Message](r io.Reader, target T) error {
 	if data, _, ok := InspectBytes(r); ok {
 		if err := proto.Unmarshal(data, target); err != nil {
@@ -103,7 +103,7 @@ func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 	return nil
 }
 
-// copyToBuffer streams r contents into a pooled byte buffer using zero-allocation copying.
+// copyToBuffer streams r contents into a pooled byte buffer using buffer copying.
 func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
 	buf := pipeline.GlobalBufferPool.Get()
 

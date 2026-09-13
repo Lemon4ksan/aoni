@@ -57,7 +57,7 @@ func main() {
 	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://api.example.com"),
 		option.WithTimeout(10*time.Second),
-		option.WithChrome(), // Chrome TLS/JA4 and HTTP/2 profile emulation
+		option.WithMaxConnsPerHost(100),
 	)
 
 	// 2. Direct generic GET request
@@ -142,17 +142,17 @@ import "github.com/lemon4ksan/aoni/fast"
 
 fastClient := fast.NewClient(
 	option.WithBaseURL("https://api.example.com"),
-	option.WithChrome(),
+	option.WithTimeout(5*time.Second),
 )
 
-user, err := fastClient.Get[User](ctx, "/users/42")
+user, err := fastClient.GetTo[User](ctx, "/users/42")
 ```
 
 ## ⚡ Performance Profile
 
 Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 
-| HTTP Client / Engine | RPS (12 Cores) | Allocations | Memory / op | HTTP/2 & HTTP/3 | Post-Quantum TLS 1.3 | Chromium JA4 Profile |
+| HTTP Client / Engine | RPS (12 Cores) | Allocations | Memory / op | HTTP/2 & HTTP/3 | Post-Quantum TLS 1.3 | Zero-Alloc Pipeline |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **`aoni/fast` (`io_uring`)** | **2,480,000+** | **0 allocs/op** | **0 B/op** | **✓ (H2/H3/QUIC)** | **✓ (ML-KEM 768)** | **✓** |
 | **`aoni/fast` (PGO / Sockets)** | **2,126,000+** | **0 allocs/op** | **0 B/op** | **✓ (H2/H3/QUIC)** | **✓ (ML-KEM 768)** | **✓** |
@@ -166,17 +166,17 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 ### 1. Public API & Transport
 * **Stable Public Surface:** RFC 9110 methods (`client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, `option.With...`, `mod.With...`) are maintained across v1.x releases.
 * **Transport:** Handles protocol negotiation (HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3 with ML-KEM, MASQUE), Happy Eyeballs connection racing, and buffer management.
-* **Extensions in `aoni/x/...`:** Third-party integrations and protocol adapters (e.g. Socket.IO v5, GeoIP MMDB) reside in separate packages.
+* **Ecosystem Modularization:** Third-party integrations live in [`aoni-x`](https://github.com/lemon4ksan/aoni-x), while browser evasion and TLS fingerprinting live in [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser).
 
 ### 2. Memory Safety & Static Verification
-When pooling buffers (`sync.Pool`), escaping borrowed slices can lead to data races. The built-in `vortex check` static analyzer provides verification:
-* Verifies borrowed buffers do not escape into unsynchronized goroutines.
+When pooling buffers (`sync.Pool`), escaping borrowed slices can lead to data races. The companion [**`vortex`**](https://github.com/lemon4ksan/vortex) static analyzer provides compile-time verification:
+* Verifies borrowed buffers do not escape into unsynchronized goroutines (`vortex borrow`).
 * Checks non-overlapping slice mutations.
 * Enforces explicit resource acquisition and release lifecycles.
 
 ```bash
-# Verify invariants in CI/CD:
-vortex check --strict ./...
+# Verify invariants in CI/CD via vortex:
+vortex borrow ./...
 ```
 
 ### 3. CPU & Memory Optimizations
@@ -189,7 +189,7 @@ vortex check --strict ./...
 
 ## Vortex Toolchain
 
-`aoni` includes **`vortex`**, a CLI tool for generating API clients and mock servers from OpenAPI 3.1, AsyncAPI 2.x/3.x, and Protobuf schemas:
+The `aoni` ecosystem relies on [**`vortex`**](https://github.com/lemon4ksan/vortex), a standalone static analysis CLI tool and schema-driven code generator for OpenAPI 3.1, AsyncAPI 2.x/3.x, and Protobuf schemas:
 
 ```go
 package userapi
@@ -212,17 +212,17 @@ type UserAPI interface {
 ```
 
 ```bash
-# Generate client code
+# Verify zero-allocation borrowing and memory safety in CI/CD:
+vortex borrow ./...
+
+# Generate client code from schemas:
 vortex gen
 
-# Generate in-memory mock servers for test suites
+# Generate in-memory mock servers for test suites:
 vortex mock
-
-# Run static contract verification
-vortex check --strict ./...
 ```
 
-See the [**Vortex Toolchain Guide**](docs/VORTEX.md) and [**Vortex Specification**](docs/SPEC.md).
+See the [**Vortex Repository**](https://github.com/lemon4ksan/vortex), [**Toolchain Guide**](docs/VORTEX.md), and [**Specification**](docs/SPEC.md).
 
 ## Protocols & Features
 
@@ -265,7 +265,6 @@ _ = conn.WriteText("{\"type\":\"subscribe\"}")
 client := aoni.NewClient(nil,
 	option.WithPostQuantumKyber(),        // Hybrid key exchange X25519MLKEM768
 	option.WithECH(option.ECHModeStrict), // Encrypted Client Hello via DoH/DoQ
-	option.WithChrome(),                  // JA4 / p0f profile emulation
 )
 ```
 
@@ -359,36 +358,39 @@ client := aoni.NewClient(nil,
 | **Active Circuit Breaking** | ✗ | ✗ | **✓ (EWMA & Error Ratio Tripping)** |
 | **`Retry-After` Parsing** | ✗ | ✗ | **✓ (Delta-sec & RFC 1123 datetime)** |
 | **Non-UTF8 Charset Decoding** | ✗ | ✗ | **✓ (WhatWG Encoding Engine)** |
-| **TLS Evasion (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (Chrome, Firefox, Safari Profiles)** |
+| **TLS Evasion (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (via [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser))** |
 | **Unix Domain Socket Support** | ⚠️ (Manual) | ✗ | **✓ (Native `unix://`)** |
 | **L3/L4 & MASQUE Tunnels** | ✗ | ✗ | **✓ (Wintun, utun, /dev/net/tun, MASQUE RFC 9298)** |
-| **OpenTelemetry & W3C Tracing** | ✗ | ✗ | **✓ (`aoni/x/otel` without external deps)** |
-| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (`aoni/x/socketio`)** |
+| **OpenTelemetry & W3C Tracing** | ✗ | ✗ | **✓ (via [`aoni-x/otel`](https://github.com/lemon4ksan/aoni-x))** |
+| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (via [`aoni-x/socketio`](https://github.com/lemon4ksan/aoni-x))** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
 ## 📦 Repository Layout
 
 ```
 aoni/
-├── option/       // Client initialization options (option.With...)
-├── mod/          // Per-request modifiers (mod.With...)
-├── fast/         // High-performance fasthttp engine adapters
-├── tunnel/       // L3/L4 tunneling: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
+├── option/       // Client initialization options (option.WithBaseURL, option.WithH2...)
+├── mod/          // Per-request modifiers (mod.WithVar, mod.WithHeader, mod.WithJSON...)
+├── fast/         // High-performance fasthttp engine (2.12M+ RPS zero-alloc pipeline)
+├── middleware/   // Composable request/response interceptors (Retry, RateLimit, Recover...)
+├── tunnel/       // L3/L4 tunneling: SSH Jump Hosts & MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
-├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
-├── netutil/      // Proxy rotators, DoH/DoT DNS resolvers, PAC engine, NIK, Priority, Early Hints
+├── netutil/      // Proxy rotators, DoH/DoT/DoQ resolvers, PAC engine, NIK, Early Hints
 ├── codec/        // Response decoders (JSON, Proto, gRPC-Web, XML) and url.Values encoders
 ├── realtime/     // WebSocket over H2 CONNECT (RFC 8441), SSE & NDJSON streams
-├── resiliency/   // Local HTTP response caching, WAF challenge detectors & solvers, load balancers
-├── telemetry/    // HAR generators, EWMA latency trackers, tracing hooks & cURL exporters
-└── x/            // Extensions & supplementary protocols (x/otel, x/socketio, x/geoip)
+├── resiliency/   // Response caching, Circuit Breakers, Load Balancers, Backoff
+└── telemetry/    // HAR generators, EWMA latency trackers, tracing hooks & cURL exporters
 ```
 
-## Case Studies & Integrations
+## 🪐 Ecosystem & Satellite Projects
 
-- [ao](https://github.com/Lemon4ksan/ao): High-performance fork of `curl` with its HTTP/HTTPS/WS transport engine completely replaced by `libaoni` (`lib/aoni_bridge.c`).
-  - Replacing the networking core accelerated the original C codebase: `ao` delivers **9,145+ RPS** across 100 concurrent POSIX threads (3–5x faster than standard multi-threaded `curl`), adding bit-exact Chromium uTLS (JA4) fingerprints and hybrid Post-Quantum TLS 1.3 (ML-KEM-768) with 0 memory leaks.
-- [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): Fork of `discordgo` with network transport powered by `aoni` and `aoni/realtime/ws`, optimized for reduced allocations during REST and WebSocket processing.
+The `aoni` project follows a micro-kernel philosophy: the core engine is permanently locked to IETF RFC and W3C standards with zero business logic, while specialized domain layers reside in companion repositories:
+
+- **[`aoni-browser`](https://github.com/lemon4ksan/aoni-browser)**: The Stealth Shield — pure-Go uTLS ClientHello spoofing, JA3/JA4/JA4H fingerprinting, p0f TCP/IP stack emulation, CDN padding, and full browser impersonation (Chrome, Firefox, Safari).
+- **[`aoni-x`](https://github.com/lemon4ksan/aoni-x)**: Ecosystem Extensions — specialized protocol adapters including OpenTelemetry (`aoni-x/otel`), Socket.IO v5 / Engine.IO v4 (`aoni-x/socketio`), OAuth2/PKCE/DPoP, and GeoIP MMDB.
+- **[`vortex`](https://github.com/lemon4ksan/vortex)**: Static Analysis & Code Generator — AST borrow checking, memory safety verifier, and schema-driven client generation for OpenAPI 3.1, AsyncAPI, and Protobuf schemas.
+- **[`ao`](https://github.com/lemon4ksan/ao)**: High-performance `curl` fork powered by `libaoni` (`lib/aoni_bridge.c`), delivering 9,145+ RPS across 100 concurrent threads.
+- **[`discordgo-aoni`](https://github.com/lemon4ksan/discordgo-aoni)**: High-efficiency fork of `discordgo` with network transport replaced by `aoni` and `aoni/realtime/ws`.
 
 ## 📚 Technical Documentation
 

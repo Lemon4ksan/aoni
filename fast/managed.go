@@ -36,10 +36,14 @@ func (m *ManagedResponse) Release() {
 	}
 }
 
+// mReqPool caches ManagedRequest instances to minimize heap allocations.
+// DANGER: Instances must be fully drained and dereferenced before returning.
 var mReqPool = sync.Pool{
 	New: func() any { return new(ManagedRequest) },
 }
 
+// mRespPool caches ManagedResponse instances to minimize heap allocations.
+// DANGER: Instances must be fully drained and dereferenced before returning.
 var mRespPool = sync.Pool{
 	New: func() any { return new(ManagedResponse) },
 }

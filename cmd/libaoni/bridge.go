@@ -48,6 +48,13 @@ const (
 )
 
 // Task represents the memory layout of C aoni_task_t in pure Go.
+//
+// DANGER: This structure heavily relies on raw memory pointers ([unsafe.Pointer]).
+// Memory pointed to by Request fields must remain valid and pinned by the caller
+// for the duration of the request execution.
+// The caller is strictly responsible for managing the lifecycle of these external pointers.
+// Similarly, the returned buffers point to dynamically allocated C memory
+// or a custom Arena, and must not be accessed after the Arena is freed or the Task is recycled.
 type Task struct {
 	TaskID          uint64
 	Method          *byte
@@ -325,12 +332,19 @@ func DoBatchTasks(client *fast.Client, tasks []Task) {
 }
 
 var (
+	// pipelineReqsPool caches slices of engine requests to avoid heap allocations in hot paths.
+	// DANGER: slices retrieved from this pool must have their elements zeroed or cleared before
+	// returning to prevent memory leaks, and must not be retained by the caller.
 	pipelineReqsPool = sync.Pool{
 		New: func() any {
-			s := make([]*h1engine.Request, 0, 512)
+			s := make([]*h1engine.Request, 0, 1024)
 			return &s
 		},
 	}
+
+	// pipelineRespsPool caches slices of engine responses.
+	// DANGER: slices retrieved from this pool must be properly cleared before returning
+	// to prevent memory leaks and cross-request data corruption.
 	pipelineRespsPool = sync.Pool{
 		New: func() any {
 			s := make([]*h1engine.Response, 0, 512)

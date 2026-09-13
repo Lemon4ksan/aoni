@@ -171,7 +171,7 @@ func GetInto[T any](ctx context.Context, path string, target *T, mods ...Request
 
 // PostInto executes a typed POST request carrying body using [DefaultClient] and decodes the response directly into target.
 //
-// See [PostTo] for body serialization rules and [GetInto] for zero-allocation target decoding.
+// See [PostTo] for body serialization rules and [GetInto] for target decoding.
 func PostInto[T any](ctx context.Context, path string, body any, target *T, mods ...RequestModifier) error {
 	return DefaultClient.PostInto(ctx, path, body, target, mods...)
 }
@@ -260,7 +260,7 @@ func FetchEx[T any](
 
 // Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.
 //
-// Enables Railway-Oriented Programming (ROP) and functional error handling without repetitive if-err checks.
+// Returns a generic Result wrapping the unmarshaled response or error.
 //
 // # Example
 //

@@ -101,7 +101,7 @@ func (c *Client) Fetch(
 
 // --- Generic Typed HTTP Methods on *Client ---
 
-// GetTo executes a zero-allocation HTTP GET request on the fast engine and decodes the response into *Resp.
+// GetTo executes a HTTP GET request on the fast engine and decodes the response into *Resp.
 //
 // Automatically releases pooled buffers upon completion.
 //

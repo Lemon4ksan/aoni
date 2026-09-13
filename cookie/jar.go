@@ -40,8 +40,11 @@ func GetProxyAddress(ctx context.Context) string {
 
 // WithPartitionKey returns a Context carrying a CHIPS (RFC 6265bis) top-level site partition key.
 //
-// Specification Adherence:
-// Conforms to RFC 6265bis CHIPS (Cookies Having Independent Partitioned State) specification.
+// Browsers block third-party cookies to prevent cross-site tracking. CHIPS (Cookies Having Independent Partitioned State)
+// solves this by partitioning third-party cookies by the top-level site context.
+// When an embedded iframe (e.g. `tracker.com`) sets a cookie with `Partitioned`, the browser stores it under
+// a double key: the cookie's host (`tracker.com`) AND the top-level site (`news.com`).
+// When the iframe is later loaded on `shop.com`, it will NOT have access to the `news.com` partitioned cookie.
 func WithPartitionKey(ctx context.Context, key string) context.Context {
 	return ctxkit.WithValue(ctx, partitionCtxKey{}, key)
 }

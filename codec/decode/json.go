@@ -76,8 +76,16 @@ func (jsonDecoder) Decode(reader io.Reader, target any) error {
 	return json.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
-// JSONArena parses JSON response payload into a type T allocated within the specified arena.
-// Employs NoCopy: true parsing to avoid string allocations for fields referencing the underlying buffer.
+// JSONArena performs JSON deserialization into an arena-allocated struct.
+//
+// To completely bypass Go's garbage collector when parsing API responses, it:
+//  1. Allocates the target struct `T` inside the provided [arena.Arena] (a pre-allocated byte slice).
+//  2. Uses [json.UnmarshalNoCopy] when unmarshaling, forcing all string fields (e.g. `Name string`)
+//     to point directly into the raw JSON payload bytes using `unsafe.String` rather than allocating new strings.
+//
+// DANGER: DO NOT RETAIN POINTERS OR STRINGS
+// The returned pointer AND all strings inside the struct reference ephemeral pool memory.
+// They will cause memory corruption if accessed after the Arena is released.
 func JSONArena[T any](reader io.Reader, a *arena.Arena) (*T, error) {
 	target := arena.Alloc[T](a)
 
@@ -87,7 +95,7 @@ func JSONArena[T any](reader io.Reader, a *arena.Arena) (*T, error) {
 			return target, nil
 		}
 
-		err := json.UnmarshalWithConfig(data, target, json.DecoderConfig{NoCopy: true})
+		err := json.UnmarshalNoCopy(data, target)
 		if err != nil {
 			return nil, err
 		}

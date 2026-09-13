@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package cookie provides Chromium-grade, proxy-isolated cookie jars, persistence backends,
+// Package cookie provides proxy-isolated cookie jars, persistence backends,
 // Netscape HTTP cookie file exports, and RFC 6265bis CHIPS partitioned state management.
 //
 // # Specification Adherence

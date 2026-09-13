@@ -4,8 +4,8 @@
 
 // Package aoni provides a unified, high-performance Internet Protocol engine for Go.
 //
-// It consolidates IETF RFC standards, W3C specifications, and Chromium-grade network resilience
-// mechanisms into a single, profile-driven zero-allocation architecture.
+// It consolidates IETF RFC standards, W3C specifications, and robust network resilience
+// mechanisms into a single, profile-driven architecture.
 //
 // # Dual Engines under a Single Architecture
 //
@@ -62,7 +62,7 @@
 //     user, err := client.GetTo[User](ctx, "/users/123")
 //
 //  3. Extreme RPS Engine (High-Throughput 2.48M+ RPS):
-//     Use [github.com/lemon4ksan/aoni/fast.Client] for zero-allocation performance:
+//     Use [github.com/lemon4ksan/aoni/fast.Client] for performance:
 //
 //     fastClient := fast.NewClient(option.WithBaseURL("https://api.github.com"))
 //     user, err := fastClient.GetTo[User](ctx, "/users/123")

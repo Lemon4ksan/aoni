@@ -281,6 +281,10 @@ func UnmarshalYAML(data []byte, target any) error {
 	return YAMLDecoder.Decode(bytes.NewReader(data), target)
 }
 
+// limitReaderPool caches io.LimitedReader instances to minimize heap allocations during streaming deserialization.
+//
+// DANGER: io.LimitedReader instances retrieved from this pool must be correctly drained and their
+// internal pointers cleared before recycling. Failure to do so leads to memory leaks.
 var limitReaderPool = sync.Pool{
 	New: func() any {
 		return new(io.LimitedReader)

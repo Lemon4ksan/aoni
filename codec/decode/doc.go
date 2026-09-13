@@ -24,6 +24,16 @@
 // [ByContentType] automatically inspects the MIME-type from a response header (e.g. "application/grpc-web+proto")
 // and delegates stream decoding to the appropriate registered decoder, falling back to [RawDecoder] if unrecognized.
 //
+// # Memory Architecture (BytesReader Bridge)
+//
+// To achieve 0 allocation performance, the decode package provides a seamless bridge between
+// generic [io.Reader] streams and the memory-pooled responses of the `aoni/fast` engine.
+//
+// Decoders internally invoke `InspectBytes` to perform a type assertion for the `BytesReader` interface.
+// If the underlying stream implements `BytesReader` (as `fast` streams do), the decoder bypasses `io.ReadAll`
+// entirely and gains direct, direct access to the raw socket buffer memory (`volatile: true`).
+// This allows decoders to parse payloads at C-like speeds without triggering Garbage Collector allocations.
+//
 // # Type-Safe Generic Helpers
 //
 // Convenience generic functions are provided to instantiate and decode streams into a newly allocated T in a single call:

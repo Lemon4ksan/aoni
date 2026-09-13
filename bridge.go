@@ -20,15 +20,14 @@ type TransportCloner interface {
 	CloneTransport(next http.RoundTripper) http.RoundTripper
 }
 
-// CloneHTTPClient produces a deep, memory-isolated copy of an [*http.Client] and its nested transport layers.
+// CloneHTTPClient returns a deep copy of an [*http.Client] and its transport layers.
 //
-// In standard Go, performing `*c = *parent` leaves the underlying [http.Transport] and TLS configurations
-// shared, resulting in socket pool collisions and race hazards when modifying options concurrently.
+// It recursively clones [http.RoundTripper] decorators implementing [TransportCloner] and [TransportUnwrapper].
+// The base [*http.Transport] is duplicated via Clone() to allocate independent connection pools,
+// idle socket caches, and TLS configurations, preventing race conditions on concurrent modifications.
 //
-// CloneHTTPClient recursively traverses nested decorator layers (via [TransportCloner] and [TransportUnwrapper]),
-// cloning base [*http.Transport] instances ([http.Transport.Clone]) and TLS configurations to ensure
-// that the cloned client is completely decoupled from the original.
-// If c is nil, returns nil.
+// DANGER: If a decorator implements neither [TransportCloner] nor [TransportUnwrapper], it is copied by reference.
+// This leads to shared mutable state and connection pool collisions across client instances.
 func CloneHTTPClient(c *http.Client) *http.Client {
 	if c == nil {
 		return nil
@@ -89,18 +88,18 @@ func NewTransport(c *Client) *Transport {
 	return &Transport{client: c}
 }
 
-// Transport implements the standard [http.RoundTripper] interface, intercepting
-// outbound requests from standard library consumers (e.g. cloud SDKs, third-party clients)
-// and executing them through an active aoni [Client] pipeline.
+// Transport implements the standard [http.RoundTripper] interface.
+// It intercepts outbound requests from standard library clients and routes them through
+// the provided [Client] pipeline.
 //
-// Automatic URL & Scheme Correction:
-// If a request specifies a host without a scheme (e.g. `req.URL.Host != "" && req.URL.Scheme == ""`),
-// Transport automatically normalizes the scheme to "https" to prevent routing failures.
+// DANGER: If a request specifies a host without a scheme (req.URL.Host != "" && req.URL.Scheme == ""),
+// Transport automatically normalizes the scheme to "https" in accordance with RFC 7230 Section 2.7.2
+// to prevent routing failures. This allocates a cloned request.
 type Transport struct {
 	client *Client
 
-	// BeforeRoundTrip is an optional interceptor hook invoked immediately before a request
-	// enters the aoni pipeline, allowing dynamic per-request client cloning and modifier injection.
+	// BeforeRoundTrip is invoked before a request enters the pipeline.
+	// It allows dynamic per-request client cloning and modifier injection.
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 

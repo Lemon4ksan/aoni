@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package codec provides a unified, zero-allocation serialization and deserialization engine for Go.
+// Package codec provides a unified, serialization and deserialization engine for Go.
 //
 // It provides a high-performance facade for serializing outbound request payloads and deserializing
 // incoming response streams across JSON, Protocol Buffers, 5-byte framed gRPC-Web, XML, YAML,
@@ -10,7 +10,7 @@
 //
 // # Architectural Pillars
 //
-//  1. Zero-Allocation Fast Paths: Decoders detect in-memory buffers ([fio.BytesReader]) and avoid
+//  1. Fast Paths: Decoders detect in-memory buffers ([fio.BytesReader]) and avoid
 //     intermediate copies, decoding directly from contiguous memory via SIMD and zero-copy string views.
 //  2. Swift/Rust Generic Ergonomics: Both classical (T, error) and monadic [generic.Result] paradigms
 //     are supported via [DecodeTo] and [DecodeToResult].

@@ -31,7 +31,7 @@
 //
 // # Key Capabilities
 //
-//   - [Client]: High-level facade multiplexing H1, H2, and H3 with zero-allocation fast paths.
+//   - [Client]: High-level facade multiplexing H1, H2, and H3 with fast paths.
 //   - Happy Eyeballs v3: Parallel protocol racing across H3 (QUIC) and H2/H1 with staggered fallback timers.
 //   - Proxy-Isolated Cookie Jars: Seamless integration with [github.com/lemon4ksan/aoni/cookie.ProxyIsolatedJar].
 //   - Pure-Go Memory Safety: Internal object pooling with Per-P sharded buffers ([Request], [Response]).

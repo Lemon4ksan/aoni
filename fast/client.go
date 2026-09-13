@@ -436,6 +436,9 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 //
 // All requests are written continuously to the connection write buffer in a single batch, minimizing round-trips and syscalls.
 // The responses slice must have the same length as reqs.
+//
+// To minimize GC overhead, it uses stack-allocated arrays `[16]*h1engine.Request` for batches of 16 requests or fewer,
+// preventing slice allocations on the hot path.
 func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Response) error {
 	if len(reqs) == 0 {
 		return nil
@@ -479,7 +482,7 @@ func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Respo
 	return c.engine.DoPipeline(h1Reqs, h1Resps)
 }
 
-// DoScoped executes request req within a zero-allocation borrow scope, passing the response to fn.
+// DoScoped executes request req within a borrow scope, passing the response to fn.
 // Memory backing the response is safely recycled when fn returns.
 func (c *Client) DoScoped(
 	ctx context.Context,
@@ -505,7 +508,13 @@ func (c *Client) DoScoped(
 	return fn(scope, resp)
 }
 
-// DoBatch executes a batch of requests across the optimal protocol channel (H1 Pipelining, H2 multiplexed streams, or H3 QUIC streams).
+// DoBatch executes a batch of requests across the optimal available protocol (H3, H2, or H1).
+//
+// Protocol selection is based on the current [protocolState] (Alt-Svc cache). If H3 is supported by the host,
+// it routes the batch over QUIC. Otherwise, it falls back to H2 multiplexing or HTTP/1.1 pipelining.
+//
+// To minimize GC overhead, it uses stack-allocated arrays for batches of 16 requests or fewer, avoiding
+// slice allocations on the hot path.
 func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response) error {
 	if len(reqs) == 0 {
 		return nil

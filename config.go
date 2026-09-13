@@ -855,7 +855,7 @@ type PipelineConfig struct {
 	//
 	// Multi-Codec Acceleration:
 	// Automatically negotiates and decompresses "gzip", "deflate", "br" (Brotli), and "zstd" (Zstandard)
-	// payload streams using zero-allocation streaming decoders.
+	// payload streams using streaming decoders.
 	Decompress bool
 
 	// Validate enforces application-level status code and header integrity checks before body unmarshaling.

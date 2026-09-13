@@ -290,7 +290,19 @@ func (s *Request) SetBodyBytes(body []byte) {
 	}
 }
 
-// BodyBytes returns the request payload bytes.
+// BodyBytes yields the request payload bytes in a fully idempotent, non-destructive manner.
+//
+// In the standard library's `net/http`, reading from an [io.Reader] body permanently drains it,
+// breaking subsequent middleware decorators or automatic retries on HTTP 421/408/425.
+//
+// To prevent developers from having to write boilerplate `extractAndPreserveBody` logic in every middleware,
+// BodyBytes automatically:
+//  1. Drains the original stream.
+//  2. Stores the data into an in-memory byte slice.
+//  3. Immediately rewrites `s.req.Body` to point to a fresh [bytes.Reader] backed by the slice.
+//  4. Crucially, sets `s.req.GetBody` so that the transport layer can seamlessly rewind the stream during network failures or redirects.
+//
+// Calling this function 100 times incurs a memory allocation only on the first call.
 func (s *Request) BodyBytes() []byte {
 	if s.req.Body == nil {
 		return nil

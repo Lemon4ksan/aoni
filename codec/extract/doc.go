@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package extract provides ultra-high-speed, zero-allocation byte scraping and HTML tokenization primitives.
+// Package extract provides byte scraping and HTML tokenization primitives.
 //
 // It enables instant token, attribute, and payload boundary extraction directly from raw in-memory byte slices
 // without parsing full DOM trees or allocating intermediate strings.

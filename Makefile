@@ -1,13 +1,3 @@
-export GOPRIVATE ?= github.com/vlhltf/*
-
-ifneq ($(wildcard /mnt/c/Users/senya/go),)
-export GOPATH ?= /mnt/c/Users/senya/go
-endif
-
-ifneq ($(wildcard /mnt/d/CodingProjects/go.work),)
-export GOWORK ?= /mnt/d/CodingProjects/go.work
-endif
-
 # Discover library packages, excluding examples, scripts, cmd, and vendor
 PKG       := $(shell go list ./... 2>/dev/null | grep -v /examples | grep -v /scripts | grep -v /cmd/ | grep -v /vendor/)
 COVER_PKG := $(shell go list ./... 2>/dev/null | grep -v /examples | grep -v /scripts | grep -v /vendor/)
@@ -83,18 +73,6 @@ clean: ## Delete temporary files, binaries, and coverage profiles
 	@printf "$(CYAN)Cleaning up temporary artifacts...$(RESET)\n"
 	rm -rf $(BIN_DIR)/ $(TMP_DIR)/
 	rm -f $(COVER_OUT) coverage.out profile.cov *.out *.test *.exe
-
-check-tls-spec: ## Compare project TLS specs against utls.HelloChrome_Auto / HelloFirefox_Auto
-	@printf "$(CYAN)Comparing TLS ClientHello specs...$(RESET)\n"
-	go run ./scripts/compare-tls-spec/
-
-update-browsers: ## Dry-run the browser version update script (no files changed)
-	@printf "$(CYAN)Updating browser versions (dry-run)...$(RESET)\n"
-	go run ./scripts/update-browsers/ -dry-run
-
-update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, Safari, iOS, Android, utls)
-	@printf "$(CYAN)Updating browser versions...$(RESET)\n"
-	go run ./scripts/update-browsers/
 
 help: ## Show this help message
 	@printf "Usage: make [target]\n\nTargets:\n"
