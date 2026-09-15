@@ -74,6 +74,11 @@ func TestBadSSLDocker(t *testing.T) {
 
 		t.Run(url, func(t *testing.T) {
 			resp, err := client.Get(context.Background(), url)
+			if err != nil && os.Getenv("BADSSL_DOCKER") == "" && (strings.Contains(err.Error(), "i/o timeout") || strings.Contains(err.Error(), "connection reset by peer")) {
+				t.Skipf("skipping live badssl test due to network flakiness: %v", err)
+				return
+			}
+
 			if tc.expectError {
 				if err == nil {
 					t.Fatalf("Expected error for %s, got status %d", url, resp.StatusCode)

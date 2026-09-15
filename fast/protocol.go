@@ -5,7 +5,6 @@
 package fast
 
 import (
-	coreh2 "github.com/lemon4ksan/mach/core/h2"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -23,6 +22,7 @@ import (
 	"github.com/lemon4ksan/mach/client/h1"
 	"github.com/lemon4ksan/mach/client/h2"
 	"github.com/lemon4ksan/mach/client/h3"
+	coreh2 "github.com/lemon4ksan/mach/core/h2"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -288,7 +288,6 @@ func (c *Client) getH2Client(host string) *h2.Client {
 			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
 		}
 	}
-
 
 	var settings *coreh2.Settings
 	if len(c.cfg.Ext.OverrideH2Settings) > 0 {

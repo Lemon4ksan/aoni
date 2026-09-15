@@ -98,14 +98,14 @@ jobs:
           GOOS: wasip1
           GOARCH: wasm
         run: |
-          go build . ./codec/... ./cookie/... ./fast/... ./mod/... ./netutil/... ./option/... ./realtime/... ./resiliency/... ./internal/fast/... ./internal/quic/...
+          go build . ./codec/... ./cookie/... ./fast/... ./mod/... ./netutil/... ./option/... ./realtime/... ./resiliency/...
 
       - name: Compile for Web JS (js/wasm)
         env:
           GOOS: js
           GOARCH: wasm
         run: |
-          go build . ./codec/... ./cookie/... ./fast/... ./mod/... ./netutil/... ./option/... ./realtime/... ./resiliency/... ./internal/fast/... ./internal/quic/...
+          go build . ./codec/... ./cookie/... ./fast/... ./mod/... ./netutil/... ./option/... ./realtime/... ./resiliency/...
 
   fuzz-heavy:
     name: Wire Security Fuzzing

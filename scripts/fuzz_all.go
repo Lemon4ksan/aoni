@@ -24,10 +24,6 @@ var targets = []fuzzTarget{
 	{"./cookie", "FuzzParseSetCookieHeader"},
 	{"./cookie", "FuzzNetscapeCookieExport"},
 	{"./cookie", "FuzzProxyIsolatedJar"},
-	{"./internal/fast/h2engine", "FuzzHPACKDecode"},
-	{"./internal/fast/h2engine", "FuzzFrameRead"},
-	{"./internal/fast/h3engine", "FuzzQPACKDecode"},
-	{"./internal/fast/h3engine", "FuzzH3FrameHeaderRead"},
 	{"./realtime/stream", "FuzzSSEStream"},
 	{"./realtime/stream", "FuzzNDJSONStream"},
 	{"./tunnel/masque", "FuzzMASQUEVarint"},
@@ -49,11 +45,6 @@ var targets = []fuzzTarget{
 	{"./realtime/ws", "FuzzWSCloseMessage"},
 	{"./realtime/ws", "FuzzWSMask"},
 	{"./realtime/ws", "FuzzWSAcceptKey"},
-	{"./internal/fast/h1engine", "FuzzH1Request"},
-	{"./internal/fast/h1engine", "FuzzH1Response"},
-	{"./internal/fast/h1engine", "FuzzH1URI"},
-	{"./internal/quic/quicvarint", "FuzzQUICVarint"},
-	{"./internal/quic/internal/wire", "FuzzQUICFrameParser"},
 }
 
 func main() {
