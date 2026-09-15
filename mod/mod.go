@@ -9,7 +9,7 @@ import (
 	"errors"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 type (

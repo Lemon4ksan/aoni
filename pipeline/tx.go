@@ -23,7 +23,8 @@ var txStorage = pool.NewPerPStorage(func() *Tx {
 })
 
 // UnsafeHook defines a phase interception hook function executed within custom phase orders.
-type UnsafeHook func(tx *Tx, req *http.Request, resp *http.Response) error
+// UnsafeHook defines a generic interception hook function executed within custom phase orders.
+type UnsafeHook any
 
 // Tx is a pooled transaction state container holding all execution parameters for a single HTTP transaction.
 //
@@ -89,45 +90,4 @@ func ReleaseTx(tx *Tx) {
 
 	*tx = Tx{}
 	txStorage.Put(tx)
-}
-
-func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {
-	tx.ProxyFailover = pipe.ProxyFailover
-	tx.Hedging = pipe.Hedging
-	tx.Cache = pipe.Cache
-	tx.HAR = pipe.HAR
-	tx.Redact = pipe.Redact
-	tx.SizeLimit = pipe.SizeLimit
-
-	flags := pipe.PrecomputedFlags
-	if flags == 0 {
-		flags = pipe.BuildFlags()
-	}
-
-	if p.defaults.Inspector != nil {
-		flags |= FlagInspect
-	}
-
-	if pipe.HAR != nil {
-		flags |= FlagHAR
-	}
-
-	if reqCfg := GetRequestConfig(tx.Ctx); reqCfg != nil {
-		tx.TimeoutOverride = reqCfg.TimeoutOverride
-		tx.MultiReadThreshold = reqCfg.MultiReadThreshold
-		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk
-		tx.ProxyURL = reqCfg.ProxyAddr
-		tx.TraceInfo = reqCfg.TraceInfo
-		tx.ResponseValidators = reqCfg.ResponseValidators
-		tx.SoftErrorDetectors = reqCfg.SoftErrorDetectors
-		tx.UnsafePhaseOrder = reqCfg.UnsafePhaseOrder
-
-		if reqCfg.DisabledFlags != 0 {
-			flags &^= reqCfg.DisabledFlags
-		}
-
-		tx.UnsafeHooks = reqCfg.UnsafeHooks
-	}
-
-	tx.Flags = flags
 }

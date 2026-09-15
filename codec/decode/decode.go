@@ -17,7 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // BytesReader is an alias for [iokit.BytesReader].

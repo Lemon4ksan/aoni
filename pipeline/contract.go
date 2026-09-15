@@ -51,16 +51,19 @@ const (
 	PostProcessMask = FlagDecompress | FlagValidate | FlagCache | FlagMultiRead
 )
 
+// Doer represents an abstraction for executing an HTTP request.
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
 type DoerFunc func(req *http.Request) (*http.Response, error)
 
+// Do calls f(req).
 func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+// PipelineConfig holds execution parameters for a single pipeline run.
 type PipelineConfig struct {
 	DPIJitter          *DPIJitterConfig
 	ProxyFailover      *ProxyFailoverConfig
@@ -78,6 +81,7 @@ type PipelineConfig struct {
 	Challenge          bool
 }
 
+// BuildFlags computes the combined optimization bitmask for this configuration.
 func (p *PipelineConfig) BuildFlags() uint32 {
 	var flags uint32
 
@@ -122,16 +126,19 @@ func (p *PipelineConfig) BuildFlags() uint32 {
 	return flags
 }
 
+// DPIJitterConfig controls Deep Packet Inspection evasion strategies.
 type DPIJitterConfig struct {
 	MinDelay time.Duration
 	MaxDelay time.Duration
 }
 
+// ProxyFailoverConfig specifies fallback proxies and retry behavior.
 type ProxyFailoverConfig struct {
 	Proxies    []string
 	RetryLimit int
 }
 
+// HedgingConfig defines parameters for dynamic request hedging (racing).
 type HedgingConfig struct {
 	DynamicHedging       *telemetry.DynamicHedgingConfig
 	DefaultDelay         time.Duration
@@ -139,18 +146,21 @@ type HedgingConfig struct {
 	AllowNonReadOnly     bool
 }
 
+// HARConfig controls HTTP Archive (HAR) telemetry tracking.
 type HARConfig struct {
 	Tracker interface {
 		Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
 	}
 }
 
+// RedactConfig defines rules for redacting sensitive telemetry data.
 type RedactConfig struct {
 	Headers          map[string]struct{}
 	HeadersToRedact  []string
 	JSONKeysToRedact []string
 }
 
+// CacheConfig controls the behavior of RFC 9111 HTTP caching.
 type CacheConfig struct {
 	Store interface {
 		Get(ctx context.Context, key any) ([]byte, error)
@@ -161,12 +171,14 @@ type CacheConfig struct {
 	CookieIndices []string
 }
 
+// CacheKey uniquely identifies a cached response.
 type CacheKey struct {
 	Method     string
 	URL        string
 	CookieHash string
 }
 
+// String returns a string representation of the cache key.
 func (k CacheKey) String() string {
 	totalLen := len(k.Method) + len(k.URL) + 1
 	if totalLen <= 128 {
@@ -182,6 +194,7 @@ func (k CacheKey) String() string {
 	return k.Method + ":" + k.URL
 }
 
+// CachedResponse represents a serialized HTTP response in cache.
 type CachedResponse struct {
 	Header      map[string][]string `json:"header"`
 	VaryHeaders map[string]string   `json:"vary_headers,omitempty"`
@@ -190,6 +203,7 @@ type CachedResponse struct {
 	CachedAt    time.Time           `json:"cached_at"`
 }
 
+// ClientDefaults holds the default configurations for a Pipeline.
 type ClientDefaults struct {
 	Headers                      http.Header
 	BeforeRequest                []func(req *http.Request)
@@ -207,11 +221,13 @@ type ClientDefaults struct {
 	DisableDictionaryCompression bool
 }
 
+// BrowserProfile represents an evasive browser fingerprinting configuration.
 type BrowserProfile struct {
 	UserAgent   string
 	ClientHints map[string]string
 }
 
+// RefererState maintains the state for automatic Referer header injection.
 type RefererState struct {
 	LastURL generic.Safe[string]
 }

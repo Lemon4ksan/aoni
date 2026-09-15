@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/digest"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // DefaultEngine normalizes arbitrary execution targets (RequestDoer, *http.Client, HTTPDoer, or nil)

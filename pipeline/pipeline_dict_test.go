@@ -13,8 +13,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/dict"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 func TestPipeline_CompressionDictionaryLifecycle(t *testing.T) {

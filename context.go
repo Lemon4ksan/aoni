@@ -20,9 +20,9 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 

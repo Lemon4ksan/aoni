@@ -27,6 +27,7 @@ var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {
 	return &RequestConfig{}
 })
 
+// RequestConfigKey is the internal context key type for RequestConfig.
 type RequestConfigKey struct{}
 
 // RequestConfigCtxKey is the exported context key for storing [RequestConfig] in a context.

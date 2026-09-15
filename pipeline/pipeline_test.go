@@ -385,7 +385,7 @@ func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader(gzBuf.Bytes())),
 	}
 
-	respDecompressed := pipeEngine.handleDecompressionAndTranscoding(reqAuto, respAuto)
+	respDecompressed := pipeEngine.handler.(*StdHandler).handleDecompressionAndTranscoding(reqAuto, respAuto)
 	bodyBytes, err := io.ReadAll(respDecompressed.Body)
 	require.NoError(t, err)
 	assert.Equal(t, "decompressed_data", string(bodyBytes))
@@ -401,7 +401,7 @@ func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader(gzBuf.Bytes())),
 	}
 
-	respRaw := pipeEngine.handleDecompressionAndTranscoding(reqExplicit, respExplicit)
+	respRaw := pipeEngine.handler.(*StdHandler).handleDecompressionAndTranscoding(reqExplicit, respExplicit)
 	rawBytes, err := io.ReadAll(respRaw.Body)
 	require.NoError(t, err)
 	assert.Equal(t, gzBuf.Bytes(), rawBytes, "Explicit Accept-Encoding should preserve compressed raw bytes")
@@ -416,7 +416,13 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	pipeEngine := New(ClientDefaults{})
 	txConflict := AcquireTx(t.Context())
 	txConflict.Flags = FlagValidate
-	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, txConflict)
+	_, errConflict := pipeEngine.handler.(*StdHandler).PostProcess(
+		&http.Request{},
+		respConflict,
+		txConflict,
+		nil,
+		time.Now(),
+	)
 	assert.ErrorIs(t, errConflict, ErrConflictingContentLength)
 
 	respTooLarge := &http.Response{
@@ -426,7 +432,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	txSize := AcquireTx(t.Context())
 	txSize.SizeLimit = 1000
 
-	_, errSize := pipeEngine.postProcessResponse(&http.Request{}, respTooLarge, txSize)
+	_, errSize := pipeEngine.handler.(*StdHandler).PostProcess(&http.Request{}, respTooLarge, txSize, nil, time.Now())
 	assert.Error(t, errSize)
 
 	txWAF := AcquireTx(t.Context())
@@ -468,7 +474,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 		},
 	}
 
-	resp, err := pipeEngine.executeWithHedging(postReq, doerPost, pipeCfg.Hedging)
+	resp, err := pipeEngine.handler.(*StdHandler).executeWithHedging(postReq, doerPost, pipeCfg.Hedging)
 	require.NoError(t, err)
 
 	_ = resp.Body.Close()
@@ -484,7 +490,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 	}
 
 	delay := 1 * time.Millisecond
-	_, errHedge := pipeEngine.dispatchHedgingAttempts(postReqWithBody, doerPost, delay)
+	_, errHedge := pipeEngine.handler.(*StdHandler).dispatchHedgingAttempts(postReqWithBody, doerPost, delay)
 	assert.ErrorIs(t, errHedge, ErrHedgingBodyNonRepeatable)
 }
 
@@ -521,7 +527,7 @@ func TestPipeline_ProxyFailover_And_Hedging(t *testing.T) {
 	}
 
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://target.com", nil)
-	resp1, err1 := pipeEngine.executeWithProxyFailover(req, doerFailover, failoverCfg, nil)
+	resp1, err1 := pipeEngine.handler.(*StdHandler).executeWithProxyFailover(req, doerFailover, failoverCfg, nil)
 	require.NoError(t, err1)
 	assert.Equal(t, http.StatusOK, resp1.StatusCode)
 	_ = resp1.Body.Close()
@@ -550,9 +556,9 @@ func TestPipeline_Caching_Full(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader("cached payload data")),
 	}
 
-	pipeEngine.saveToCache(req, respOriginal, cacheCfg)
+	saveToCache(req, respOriginal, cacheCfg)
 
-	cachedResp := pipeEngine.tryGetFromCache(req, cacheCfg)
+	cachedResp, _ := pipeEngine.handler.(*StdHandler).GetCache(req, cacheCfg)
 	require.NotNil(t, cachedResp)
 	assert.Equal(t, http.StatusOK, cachedResp.StatusCode)
 	cachedBody, _ := io.ReadAll(cachedResp.Body)
@@ -560,13 +566,15 @@ func TestPipeline_Caching_Full(t *testing.T) {
 
 	reqMismatch, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/cached-route", nil)
 	reqMismatch.Header.Set("Accept-Language", "en-US")
-	assert.Nil(t, pipeEngine.tryGetFromCache(reqMismatch, cacheCfg))
+	cachedRespMismatch, _ := pipeEngine.handler.(*StdHandler).GetCache(reqMismatch, cacheCfg)
+	assert.Nil(t, cachedRespMismatch)
 
 	reqPOST, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/cached-route", nil)
 	respPOST := &http.Response{StatusCode: http.StatusOK}
-	pipeEngine.invalidateCache(reqPOST, respPOST, cacheCfg)
+	pipeEngine.handler.(*StdHandler).invalidateCache(reqPOST, respPOST, cacheCfg)
 
-	assert.Nil(t, pipeEngine.tryGetFromCache(req, cacheCfg))
+	cachedRespAfterInvalidate, _ := pipeEngine.handler.(*StdHandler).GetCache(req, cacheCfg)
+	assert.Nil(t, cachedRespAfterInvalidate)
 
 	respFresh1 := &http.Response{Header: http.Header{"Cache-Control": []string{"s-maxage=120"}}}
 	dur1, ok1 := parseFreshnessLifetime(respFresh1)
@@ -590,7 +598,7 @@ func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 	tx := AcquireTx(t.Context())
 	tx.TraceInfo = traceInfo
 
-	reqWithTrace, info, traceEnd := pipeEngine.traceRequest(stdReq, tx)
+	reqWithTrace, info, traceEnd := pipeEngine.handler.(*StdHandler).TraceRequest(stdReq, tx)
 	require.NotNil(t, info)
 	require.NotNil(t, traceEnd)
 

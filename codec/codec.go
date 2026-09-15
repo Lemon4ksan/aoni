@@ -13,8 +13,8 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 var errNotProtoMessage = errors.New("aoni/codec: body does not implement proto.Message")

@@ -13,7 +13,9 @@ import (
 )
 
 // ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.
-var ErrInmemoryListenerClosed = errors.New("fasthttputil: inmemorylistener is already closed: use of closed network connection")
+var ErrInmemoryListenerClosed = errors.New(
+	"fasthttputil: inmemorylistener is already closed: use of closed network connection",
+)
 
 // InmemoryListener provides in-memory dialer<->net.Listener implementation.
 //
@@ -65,8 +67,11 @@ func (ln *InmemoryListener) Accept() (net.Conn, error) {
 			return nil, ErrInmemoryListenerClosed
 		default:
 		}
+
 		close(c.accepted)
+
 		return c.conn, nil
+
 	case <-ln.done:
 		return nil, ErrInmemoryListenerClosed
 	}
@@ -83,10 +88,13 @@ func (ln *InmemoryListener) Close() error {
 	} else {
 		err = ErrInmemoryListenerClosed
 	}
+
 	ln.lock.Unlock()
+
 	if err == nil {
 		ln.closePendingConns()
 	}
+
 	return err
 }
 
@@ -136,17 +144,22 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 
 	cConn := pc.Conn1()
 	sConn := pc.Conn2()
+
 	ln.lock.Lock()
 	if ln.closed {
 		ln.lock.Unlock()
+
 		_ = sConn.Close()
 		_ = cConn.Close()
+
 		return nil, ErrInmemoryListenerClosed
 	}
+
 	done := ln.done
 	ln.lock.Unlock()
 
 	accepted := make(chan struct{})
+
 	select {
 	case <-done:
 		_ = sConn.Close()
@@ -168,6 +181,7 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 		return cConn, nil
 	default:
 	}
+
 	select {
 	case <-accepted:
 	case <-done:
@@ -176,8 +190,10 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 			return cConn, nil
 		default:
 		}
+
 		_ = sConn.Close()
 		_ = cConn.Close()
+
 		return nil, ErrInmemoryListenerClosed
 	}
 

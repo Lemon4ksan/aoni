@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // WithBody replaces the request body with the provided [io.Reader] stream.

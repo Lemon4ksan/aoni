@@ -24,9 +24,9 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/pipeline"
 	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
 	"github.com/lemon4ksan/aoni/testutil"
 )

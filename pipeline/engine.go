@@ -54,6 +54,7 @@ func (e *Engine) NewCycle(
 func (e *Engine) Close() {
 }
 
+// ConnectionPoolConfigDTO defines parameters for connection pooling.
 type ConnectionPoolConfigDTO struct {
 	MaxIdleConns          int
 	MaxIdleConnsPerHost   int
@@ -64,6 +65,7 @@ type ConnectionPoolConfigDTO struct {
 	WriteBufferSize       int
 }
 
+// HTTP2ConfigDTO configures HTTP/2 specific transport settings.
 type HTTP2ConfigDTO struct {
 	ReadIdleTimeout time.Duration
 	PingTimeout     time.Duration

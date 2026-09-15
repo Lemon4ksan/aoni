@@ -12,7 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // WithVar replaces a single URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).

@@ -24,8 +24,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -96,7 +96,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.prepared.FastPathCapable = (c.cfg.Engine.CookieJar == nil && c.cfg.Defaults.Inspector == nil)
 
 	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(c.cfg.Defaults, c.referer),
+		&FastHandler{defaults: toPipelineDefaults(c.cfg.Defaults, c.referer)},
 	)
 
 	c.nativeDoer.client = c
@@ -146,7 +146,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	cloned.prepared.FastPathCapable = (cloned.cfg.Engine.CookieJar == nil && cloned.cfg.Defaults.Inspector == nil)
 
 	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(cloned.cfg.Defaults, cloned.referer),
+		&FastHandler{defaults: toPipelineDefaults(cloned.cfg.Defaults, cloned.referer)},
 	)
 
 	return cloned

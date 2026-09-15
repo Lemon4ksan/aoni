@@ -19,7 +19,7 @@ import (
 	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),

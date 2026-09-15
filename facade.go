@@ -14,8 +14,8 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.

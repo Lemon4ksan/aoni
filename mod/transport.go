@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/nik"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // WithNIK constructs an [RequestModifier] binding a Chromium-grade [nik.NetworkIsolationKey] to the request context.

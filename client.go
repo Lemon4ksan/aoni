@@ -23,9 +23,9 @@ import (
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 

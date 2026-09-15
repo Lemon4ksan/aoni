@@ -14,7 +14,7 @@ import (
 	"github.com/lemon4ksan/foundation/testkit/assert"
 	"github.com/lemon4ksan/foundation/testkit/require"
 
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 func TestStreamPipeline_Execution(t *testing.T) {

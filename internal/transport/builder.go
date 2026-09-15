@@ -5,7 +5,7 @@
 package transport
 
 import (
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 // ApplyRequestOverrides merges request-scoped pipeline overrides ([pipeline.RequestConfig])

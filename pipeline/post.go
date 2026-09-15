@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/generic"
@@ -34,49 +35,55 @@ var (
 	ErrHeaderInjectionDetected = errors.New("aoni: CRLF control characters detected in response headers")
 )
 
-func (p *Pipeline[Req, Resp]) postProcessResponse(
+func (h *StdHandler) PostProcess(
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
+	inErr error,
+	startTime time.Time,
 ) (*http.Response, error) {
+	if inErr != nil {
+		return nil, h.enrichError(stdReq, inErr, nil, time.Since(startTime))
+	}
+
 	var err error
 
-	resp, err = stageValidateSmuggling(p, stdReq, resp, tx)
+	resp, err = stageValidateSmuggling(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageDecompressAndTranscode(p, stdReq, resp, tx)
+	resp, err = stageDecompressAndTranscode(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageDictionaryCapture(p, stdReq, resp, tx)
+	resp, err = stageDictionaryCapture(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageCacheStorage(p, stdReq, resp, tx)
+	resp, err = stageCacheStorage(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageSizeLimit(p, stdReq, resp, tx)
+	resp, err = stageSizeLimit(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageValidateResponse(p, stdReq, resp, tx)
+	resp, err = stageValidateResponse(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageRefererStateUpdate(p, stdReq, resp, tx)
+	resp, err = stageRefererStateUpdate(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err = stageMultiReadBuffering(p, stdReq, resp, tx)
+	resp, err = stageMultiReadBuffering(h, stdReq, resp, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +91,8 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 	return resp, nil
 }
 
-func stageValidateSmuggling[Req, Resp any](
-	_ *Pipeline[Req, Resp],
+func stageValidateSmuggling(
+	h *StdHandler,
 	_ *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -105,14 +112,14 @@ func stageValidateSmuggling[Req, Resp any](
 	return resp, nil
 }
 
-func stageDecompressAndTranscode[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageDecompressAndTranscode(
+	h *StdHandler,
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
 	if tx.Flags&FlagDecompress != 0 {
-		return p.handleDecompressionAndTranscoding(stdReq, resp), nil
+		return h.handleDecompressionAndTranscoding(stdReq, resp), nil
 	}
 
 	if resp != nil && resp.Body != nil {
@@ -122,8 +129,8 @@ func stageDecompressAndTranscode[Req, Resp any](
 	return resp, nil
 }
 
-func stageCacheStorage[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageCacheStorage(
+	h *StdHandler,
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -133,16 +140,16 @@ func stageCacheStorage[Req, Resp any](
 	}
 
 	if stdReq.Method == http.MethodGet {
-		p.saveToCache(stdReq, resp, tx.Cache)
+		saveToCache(stdReq, resp, tx.Cache)
 	} else {
-		p.invalidateCache(stdReq, resp, tx.Cache)
+		h.invalidateCache(stdReq, resp, tx.Cache)
 	}
 
 	return resp, nil
 }
 
-func stageSizeLimit[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageSizeLimit(
+	h *StdHandler,
 	_ *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -151,15 +158,15 @@ func stageSizeLimit[Req, Resp any](
 		return resp, nil
 	}
 
-	if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
+	if limitErr := h.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
 		return nil, limitErr
 	}
 
 	return resp, nil
 }
 
-func stageValidateResponse[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageValidateResponse(
+	h *StdHandler,
 	_ *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -168,28 +175,28 @@ func stageValidateResponse[Req, Resp any](
 		return resp, nil
 	}
 
-	if valErr := p.validateResponse(resp, tx); valErr != nil {
+	if valErr := h.validateResponse(resp, tx); valErr != nil {
 		return nil, valErr
 	}
 
 	return resp, nil
 }
 
-func stageRefererStateUpdate[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageRefererStateUpdate(
+	h *StdHandler,
 	stdReq *http.Request,
 	resp *http.Response,
 	_ *Tx,
 ) (*http.Response, error) {
-	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
-		p.defaults.RefererState.LastURL.Set(stdReq.URL.String())
+	if h.defaults.RefererAutomaton && h.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
+		h.defaults.RefererState.LastURL.Set(stdReq.URL.String())
 	}
 
 	return resp, nil
 }
 
-func stageMultiReadBuffering[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageMultiReadBuffering(
+	h *StdHandler,
 	_ *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -198,7 +205,7 @@ func stageMultiReadBuffering[Req, Resp any](
 		return resp, nil
 	}
 
-	if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
+	if bufErr := h.applyMultiReadBuffering(resp, tx); bufErr != nil {
 		return nil, bufErr
 	}
 
@@ -305,7 +312,7 @@ func containsControlChars(s string) bool {
 	return false
 }
 
-func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int64) error {
+func (h *StdHandler) limitResponseSize(resp *http.Response, maxSize int64) error {
 	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
 	}
@@ -346,14 +353,14 @@ func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int
 	return nil
 }
 
-func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) error {
+func (h *StdHandler) validateResponse(resp *http.Response, tx *Tx) error {
 	if resp == nil {
 		return nil
 	}
 
 	validators := tx.ResponseValidators
 	if len(validators) == 0 {
-		validators = p.defaults.ResponseValidators
+		validators = h.defaults.ResponseValidators
 	}
 
 	for _, validator := range validators {
@@ -370,7 +377,7 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 
 	detectors := tx.SoftErrorDetectors
 	if len(detectors) == 0 {
-		detectors = p.defaults.SoftErrorDetectors
+		detectors = h.defaults.SoftErrorDetectors
 	}
 
 	if len(detectors) > 0 && resp.Body != nil {
@@ -416,9 +423,9 @@ func PeekResponseBody(resp *http.Response, n int) ([]byte, error) {
 	return peekable.Peek(n)
 }
 
-func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
-	threshold := p.defaults.MultiReadThreshold
-	disableDisk := p.defaults.MultiReadDisableDisk
+func (h *StdHandler) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
+	threshold := h.defaults.MultiReadThreshold
+	disableDisk := h.defaults.MultiReadDisableDisk
 
 	if tx.MultiReadThreshold > 0 {
 		threshold = tx.MultiReadThreshold
@@ -445,7 +452,7 @@ func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *T
 	return nil
 }
 
-func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
+func (h *StdHandler) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
 	if resp == nil || resp.Body == nil {
 		return resp
 	}
@@ -454,7 +461,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 
 	if !hasExplicitAcceptEncoding(req) {
 		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
-			decompressedBody, decompressed := p.applyContentDecompression(req, r, body)
+			decompressedBody, decompressed := h.applyContentDecompression(req, r, body)
 			if decompressed {
 				r.Uncompressed = true
 			}
@@ -494,7 +501,7 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
-func (p *Pipeline[Req, Resp]) applyContentDecompression(
+func (h *StdHandler) applyContentDecompression(
 	req *http.Request,
 	resp *http.Response,
 	body io.ReadCloser,
@@ -511,9 +518,9 @@ func (p *Pipeline[Req, Resp]) applyContentDecompression(
 			cfg := GetRequestConfig(req)
 			if cfg != nil && cfg.AvailableDictionary != nil {
 				dictData = cfg.AvailableDictionary.Data
-			} else if p.defaults.DictionaryStore != nil && req.URL != nil {
+			} else if h.defaults.DictionaryStore != nil && req.URL != nil {
 				dest := req.Header.Get("Sec-Fetch-Dest")
-				if d, ok := p.defaults.DictionaryStore.Match(req.URL, dest); ok && d != nil {
+				if d, ok := h.defaults.DictionaryStore.Match(req.URL, dest); ok && d != nil {
 					dictData = d.Data
 				}
 			}
@@ -538,8 +545,8 @@ func (p *Pipeline[Req, Resp]) applyContentDecompression(
 	return reader, true
 }
 
-func stageDictionaryCapture[Req, Resp any](
-	p *Pipeline[Req, Resp],
+func stageDictionaryCapture(
+	h *StdHandler,
 	stdReq *http.Request,
 	resp *http.Response,
 	_ *Tx,
@@ -563,11 +570,11 @@ func stageDictionaryCapture[Req, Resp any](
 		return resp, nil
 	}
 
-	if p.defaults.DisableDictionaryCompression {
+	if h.defaults.DisableDictionaryCompression {
 		return resp, nil
 	}
 
-	store := p.defaults.DictionaryStore
+	store := h.defaults.DictionaryStore
 	if cfg != nil && cfg.DictionaryStore != nil {
 		store = cfg.DictionaryStore
 	}

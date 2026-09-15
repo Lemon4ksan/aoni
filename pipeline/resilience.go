@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -29,7 +30,20 @@ var ErrHedgingBodyNonRepeatable = errors.New("aoni: request body is not repeatab
 //   - HTTP 421 (Misdirected Request): Disables Alt-Svc (HTTP/3) routing and re-dials over a fresh connection.
 //   - HTTP 408 (Request Timeout): Enforces 'Connection: close', purging the stale socket from the pool.
 //   - HTTP 425 (Too Early): Strips the 'Early-Data' header, disables 0-RTT, and retries safely over 1-RTT.
-func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *Tx) (*http.Response, error) {
+//
+// DispatchRequest executes the HTTP request handling retries, hedging, and proxy failovers.
+func (h *StdHandler) DispatchRequest(
+	req *http.Request,
+	genericDoer core.GenericDoer[*http.Request, *http.Response],
+	tx *Tx,
+) (*http.Response, error) {
+	doer, _ := genericDoer.(Doer)
+	if doer == nil {
+		doer = DoerFunc(func(r *http.Request) (*http.Response, error) {
+			return genericDoer.Do(r)
+		})
+	}
+
 	var (
 		resp *http.Response
 		err  error
@@ -37,9 +51,9 @@ func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *
 
 	switch {
 	case tx.Flags&FlagProxyFailover != 0 && tx.ProxyFailover != nil:
-		resp, err = p.executeWithProxyFailover(req, doer, tx.ProxyFailover, tx.Hedging)
+		resp, err = h.executeWithProxyFailover(req, doer, tx.ProxyFailover, tx.Hedging)
 	case tx.Flags&FlagHedging != 0 && tx.Hedging != nil:
-		resp, err = p.executeWithHedging(req, doer, tx.Hedging)
+		resp, err = h.executeWithHedging(req, doer, tx.Hedging)
 	default:
 		resp, err = doer.Do(req)
 	}
@@ -50,11 +64,11 @@ func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *
 
 	switch resp.StatusCode {
 	case http.StatusMisdirectedRequest:
-		return p.handle421Recovery(req, doer, resp)
+		return h.handle421Recovery(req, doer, resp)
 	case http.StatusRequestTimeout:
-		return p.handle408Recovery(req, doer, resp)
+		return h.handle408Recovery(req, doer, resp)
 	case http.StatusTooEarly:
-		return p.handle425Recovery(req, doer, resp)
+		return h.handle425Recovery(req, doer, resp)
 	}
 
 	if resp.Request == nil {
@@ -64,7 +78,7 @@ func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *
 	return resp, err
 }
 
-func (p *Pipeline[Req, Resp]) retryWithMutation(
+func (h *StdHandler) retryWithMutation(
 	req *http.Request,
 	doer Doer,
 	origResp *http.Response,
@@ -78,7 +92,7 @@ func (p *Pipeline[Req, Resp]) retryWithMutation(
 		httpClient.CloseIdleConnections()
 	}
 
-	clonedReq, err := p.cloneRequest(req, req.Context())
+	clonedReq, err := h.cloneRequest(req, req.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -96,41 +110,41 @@ func (p *Pipeline[Req, Resp]) retryWithMutation(
 	return retryResp, retryErr
 }
 
-func (p *Pipeline[Req, Resp]) handle425Recovery(
+func (h *StdHandler) handle425Recovery(
 	req *http.Request,
 	doer Doer,
 	origResp *http.Response,
 ) (*http.Response, error) {
-	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
+	return h.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
 		cfg.Disable0RTT = true
 
 		r.Header.Del("Early-Data")
 	})
 }
 
-func (p *Pipeline[Req, Resp]) handle408Recovery(
+func (h *StdHandler) handle408Recovery(
 	req *http.Request,
 	doer Doer,
 	origResp *http.Response,
 ) (*http.Response, error) {
-	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, _ *RequestConfig) {
+	return h.retryWithMutation(req, doer, origResp, func(r *http.Request, _ *RequestConfig) {
 		r.Close = true
 	})
 }
 
-func (p *Pipeline[Req, Resp]) handle421Recovery(
+func (h *StdHandler) handle421Recovery(
 	req *http.Request,
 	doer Doer,
 	origResp *http.Response,
 ) (*http.Response, error) {
-	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
+	return h.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
 		cfg.DisableAltSvc = true
 
 		r.Header.Del("Alt-Svc")
 	})
 }
 
-func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
+func (h *StdHandler) executeWithProxyFailover(
 	req *http.Request,
 	doer Doer,
 	failover *ProxyFailoverConfig,
@@ -138,22 +152,22 @@ func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
 ) (*http.Response, error) {
 	proxies := parseProxyURLs(failover.Proxies)
 	if len(proxies) == 0 {
-		return p.dispatchProxyAttempt(req, doer, hedging)
+		return h.dispatchProxyAttempt(req, doer, hedging)
 	}
 
 	retryLimit := generic.Coalesce(failover.RetryLimit, len(proxies))
 
 	var lastErr error
 	for attempt := 0; attempt <= retryLimit; attempt++ {
-		proxyURL := p.selectNextProxy(proxies, attempt > 0)
+		proxyURL := h.selectNextProxy(proxies, attempt > 0)
 
-		proxyReq, prepErr := p.prepareRequestForProxy(req, proxyURL)
+		proxyReq, prepErr := h.prepareRequestForProxy(req, proxyURL)
 		if prepErr != nil {
 			lastErr = prepErr
 			continue
 		}
 
-		resp, err := p.dispatchProxyAttempt(proxyReq, doer, hedging)
+		resp, err := h.dispatchProxyAttempt(proxyReq, doer, hedging)
 		if err != nil {
 			lastErr = err
 			continue
@@ -175,13 +189,13 @@ func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
 	return nil, lastErr
 }
 
-func (p *Pipeline[Req, Resp]) dispatchProxyAttempt(
+func (h *StdHandler) dispatchProxyAttempt(
 	req *http.Request,
 	doer Doer,
 	hedging *HedgingConfig,
 ) (*http.Response, error) {
 	if hedging != nil {
-		return p.executeWithHedging(req, doer, hedging)
+		return h.executeWithHedging(req, doer, hedging)
 	}
 
 	return doer.Do(req)
@@ -198,18 +212,18 @@ func parseProxyURLs(proxies []string) []*url.URL {
 	return parsed
 }
 
-func (p *Pipeline[Req, Resp]) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
+func (h *StdHandler) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
 	var idx uint32
 	if isRetry {
-		idx = atomic.AddUint32(&p.counter, 1)
+		idx = atomic.AddUint32(&h.counter, 1)
 	} else {
-		idx = atomic.LoadUint32(&p.counter)
+		idx = atomic.LoadUint32(&h.counter)
 	}
 
 	return proxies[idx%uint32(len(proxies))] //nolint:gosec
 }
 
-func (p *Pipeline[Req, Resp]) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*http.Request, error) {
+func (h *StdHandler) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*http.Request, error) {
 	newReq := req
 
 	cfg := GetRequestConfig(req)
@@ -239,7 +253,7 @@ func isIdempotentMethod(method string) bool {
 	}
 }
 
-func (p *Pipeline[Req, Resp]) executeWithHedging(
+func (h *StdHandler) executeWithHedging(
 	req *http.Request,
 	doer Doer,
 	pipeHedging *HedgingConfig,
@@ -254,7 +268,7 @@ func (p *Pipeline[Req, Resp]) executeWithHedging(
 	}
 
 	requestStart := time.Now()
-	delay := p.resolveHedgingDelay(cfg, pipeHedging)
+	delay := h.resolveHedgingDelay(cfg, pipeHedging)
 
 	var (
 		resp *http.Response
@@ -262,12 +276,12 @@ func (p *Pipeline[Req, Resp]) executeWithHedging(
 	)
 
 	if delay > 0 {
-		resp, err = p.dispatchHedgingAttempts(req, doer, delay)
+		resp, err = h.dispatchHedgingAttempts(req, doer, delay)
 	} else {
 		resp, err = doer.Do(req)
 	}
 
-	tracker := p.resolveRTTTracker(pipeHedging)
+	tracker := h.resolveRTTTracker(pipeHedging)
 	if tracker != nil && err == nil {
 		tracker.Record(time.Since(requestStart))
 	}
@@ -275,7 +289,7 @@ func (p *Pipeline[Req, Resp]) executeWithHedging(
 	return resp, err
 }
 
-func (p *Pipeline[Req, Resp]) resolveHedgingDelay(cfg *RequestConfig, pipeHedging *HedgingConfig) time.Duration {
+func (h *StdHandler) resolveHedgingDelay(cfg *RequestConfig, pipeHedging *HedgingConfig) time.Duration {
 	switch {
 	case cfg != nil && cfg.HedgingDelayOverride != nil:
 		return *cfg.HedgingDelayOverride
@@ -288,7 +302,7 @@ func (p *Pipeline[Req, Resp]) resolveHedgingDelay(cfg *RequestConfig, pipeHedgin
 	}
 }
 
-func (p *Pipeline[Req, Resp]) resolveRTTTracker(pipeHedging *HedgingConfig) *telemetry.RTTTracker {
+func (h *StdHandler) resolveRTTTracker(pipeHedging *HedgingConfig) *telemetry.RTTTracker {
 	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
 		return pipeHedging.DynamicHedging.Tracker
 	}
@@ -301,17 +315,17 @@ type hedgeResult struct {
 	err  error
 }
 
-func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
+func (h *StdHandler) dispatchHedgingAttempts(
 	req *http.Request,
 	doer Doer,
 	delay time.Duration,
 ) (*http.Response, error) {
 	resultsCh := make(chan hedgeResult, 2)
 
-	ctx1, ctx2, cancel1, cancel2, cleanup := p.buildHedgeContext(req)
+	ctx1, ctx2, cancel1, cancel2, cleanup := h.buildHedgeContext(req)
 	defer func() { cleanup(0) }()
 
-	p.launchHedgeAttempt(ctx1, req, doer, resultsCh)
+	h.launchHedgeAttempt(ctx1, req, doer, resultsCh)
 
 	timer := pool.AcquireTimer(delay)
 	defer pool.ReleaseTimer(timer)
@@ -349,7 +363,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 				req2Started = true
 				activeCount++
 
-				p.launchHedgeAttempt(ctx2, req, doer, resultsCh)
+				h.launchHedgeAttempt(ctx2, req, doer, resultsCh)
 			}
 
 		case res := <-resultsCh:
@@ -357,7 +371,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 
 			if res.err == nil {
 				drainRemainder(activeCount)
-				return p.handleHedgeWinner(res, ctx2, cancel1, cancel2, cleanup), nil
+				return h.handleHedgeWinner(res, ctx2, cancel1, cancel2, cleanup), nil
 			}
 
 			if firstErr == nil {
@@ -370,7 +384,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 				req2Started = true
 				activeCount++
 
-				p.launchHedgeAttempt(ctx2, req, doer, resultsCh)
+				h.launchHedgeAttempt(ctx2, req, doer, resultsCh)
 			}
 		}
 	}
@@ -378,7 +392,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 	return nil, firstErr
 }
 
-func (p *Pipeline[Req, Resp]) handleHedgeWinner(
+func (h *StdHandler) handleHedgeWinner(
 	res hedgeResult,
 	ctx2 context.Context,
 	cancel1, cancel2 context.CancelFunc,
@@ -402,13 +416,13 @@ func (p *Pipeline[Req, Resp]) handleHedgeWinner(
 	return res.resp
 }
 
-func (p *Pipeline[Req, Resp]) launchHedgeAttempt(
+func (h *StdHandler) launchHedgeAttempt(
 	ctx context.Context,
 	req *http.Request,
 	doer Doer,
 	resultsCh chan<- hedgeResult,
 ) {
-	cloned, err := p.cloneRequest(req, ctx)
+	cloned, err := h.cloneRequest(req, ctx)
 	if err != nil {
 		resultsCh <- hedgeResult{err: err}
 		return
@@ -420,7 +434,7 @@ func (p *Pipeline[Req, Resp]) launchHedgeAttempt(
 	}()
 }
 
-func (p *Pipeline[Req, Resp]) buildHedgeContext(
+func (h *StdHandler) buildHedgeContext(
 	req *http.Request,
 ) (context.Context, context.Context, context.CancelFunc, context.CancelFunc, func(winner int)) {
 	ctx := req.Context()
@@ -448,7 +462,7 @@ func (p *Pipeline[Req, Resp]) buildHedgeContext(
 	return ctx1, ctx2, cancel1, cancel2, cleanup
 }
 
-func (p *Pipeline[Req, Resp]) cloneRequest(orig *http.Request, reqCtx context.Context) (*http.Request, error) {
+func (h *StdHandler) cloneRequest(orig *http.Request, reqCtx context.Context) (*http.Request, error) {
 	cloned := orig.Clone(reqCtx)
 	if orig.Body == nil || orig.Body == http.NoBody {
 		return cloned, nil

@@ -66,6 +66,7 @@ func init() {
 	for i := range mReqShards {
 		mReqShards[i].m = make(map[unsafe.Pointer]*ManagedRequest, 256)
 	}
+
 	for i := range mRespShards {
 		mRespShards[i].m = make(map[unsafe.Pointer]*ManagedResponse, 256)
 	}
@@ -109,10 +110,12 @@ func ReleaseRequestSafe(req *h1.Request) {
 	shard := &mReqShards[shardIdx]
 
 	shard.Lock()
+
 	mr, ok := shard.m[ptr]
 	if ok {
 		delete(shard.m, ptr)
 	}
+
 	shard.Unlock()
 
 	if ok {

@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/pipeline"
 )
 
 const (
@@ -339,7 +339,7 @@ func (c *Client) cachePushedResponse(
 			}
 		}
 
-		c.pipeline.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
+		pipeline.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
 			Store:         cacheCfg.Store,
 			DefaultTTL:    cacheCfg.DefaultTTL,
 			NoVarySearch:  nvs,

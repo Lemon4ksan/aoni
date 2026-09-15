@@ -23,8 +23,8 @@ import (
 )
 
 // SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.
-func (p *Pipeline[Req, Resp]) SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
-	p.saveToCache(req, resp, cfg)
+func SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+	saveToCache(req, resp, cfg)
 }
 
 // DefaultIgnoredTrackingParams lists standard marketing and tracking parameters ignored by No-Vary-Search.
@@ -155,14 +155,14 @@ func shouldIgnoreQueryParam(key string, cfg *NoVarySearchConfig) bool {
 }
 
 // tryGetFromCache retrieves a cached response if valid, matching Vary headers and computing the Age header (RFC 9111 §4).
-func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
+func (h *StdHandler) GetCache(req *http.Request, cfg *CacheConfig) (*http.Response, bool) {
 	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
-		return nil
+		return nil, false
 	}
 
 	cc := req.Header.Get("Cache-Control")
 	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") {
-		return nil
+		return nil, false
 	}
 
 	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{
@@ -171,17 +171,17 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 		CookieHash: ComputeCookieIndicesHash(req, cfg.CookieIndices),
 	})
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	var cached CachedResponse
 	if decodeErr := json.Unmarshal(cachedData, &cached); decodeErr != nil {
-		return nil
+		return nil, false
 	}
 
 	// Validate Vary header field constraints per RFC 9111 §4.1.
 	if !matchVaryHeaders(req, cached.VaryHeaders) {
-		return nil
+		return nil, false
 	}
 
 	bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
@@ -199,7 +199,7 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 		Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
 		ContentLength: int64(len(bodyBytes)),
 		Request:       req,
-	}
+	}, true
 }
 
 // matchVaryHeaders verifies that incoming request headers match stored Vary headers (RFC 9111 §4.1).
@@ -242,7 +242,7 @@ func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
 }
 
 // saveToCache stores an eligible HTTP response in the cache store per RFC 9111 §3.
-func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+func saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
 		return
@@ -373,7 +373,7 @@ func parseHeaderParamsList(paramsStr string) []string {
 }
 
 // invalidateCache purges stored GET responses upon successful execution of unsafe HTTP methods (RFC 9111 §4.4).
-func (p *Pipeline[Req, Resp]) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+func (h *StdHandler) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if cfg == nil || cfg.Store == nil || resp == nil || resp.StatusCode >= 400 {
 		return
 	}

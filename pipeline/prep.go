@@ -30,39 +30,28 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
-	var stdReq *http.Request
+func (h *StdHandler) Prepare(stdReq *http.Request, tx *Tx) *http.Request {
+	stdReq = h.prepareRequestContext(stdReq, stdReq)
 
-	switch r := req.(type) {
-	case *http.Request:
-		stdReq = r
-	case core.Request:
-		stdReq = convertRequestToStd(r)
-	default:
-		return &http.Request{}
+	if len(h.defaults.BeforeRequest) > 0 {
+		stdReq = stageBeforeRequestHooks(h, stdReq, tx)
 	}
 
-	stdReq = p.prepareRequestContext(req, stdReq)
-
-	if len(p.defaults.BeforeRequest) > 0 {
-		stdReq = stageBeforeRequestHooks(p, stdReq, tx)
-	}
-
-	if p.defaults.RefererAutomaton {
-		stdReq = stageRefererHeader(p, stdReq, tx)
+	if h.defaults.RefererAutomaton {
+		stdReq = stageRefererHeader(h, stdReq, tx)
 	}
 
 	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
-		stdReq = stageRedactSensitiveData(p, stdReq, tx)
+		stdReq = stageRedactSensitiveData(h, stdReq, tx)
 	}
 
-	stdReq = stageUploadProgress(p, stdReq, tx)
-	stdReq = stageAvailableDictionary(p, stdReq, tx)
+	stdReq = stageUploadProgress(h, stdReq, tx)
+	stdReq = stageAvailableDictionary(h, stdReq, tx)
 
 	return stdReq
 }
 
-func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
+func stageAvailableDictionary(h *StdHandler, req *http.Request, _ *Tx) *http.Request {
 	if req == nil || req.URL == nil || !strings.EqualFold(req.URL.Scheme, "https") {
 		// RFC 9842 §8: Compression Dictionary Transport MUST only be used in secure contexts (HTTPS).
 		return req
@@ -73,11 +62,11 @@ func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 		return req
 	}
 
-	if p.defaults.DisableDictionaryCompression {
+	if h.defaults.DisableDictionaryCompression {
 		return req
 	}
 
-	store := p.defaults.DictionaryStore
+	store := h.defaults.DictionaryStore
 	if cfg != nil && cfg.DictionaryStore != nil {
 		store = cfg.DictionaryStore
 	}
@@ -116,31 +105,31 @@ func stageAvailableDictionary[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 	return req
 }
 
-func stageBeforeRequestHooks[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
-	for _, hook := range p.defaults.BeforeRequest {
+func stageBeforeRequestHooks(h *StdHandler, req *http.Request, _ *Tx) *http.Request {
+	for _, hook := range h.defaults.BeforeRequest {
 		hook(req)
 	}
 
 	return req
 }
 
-func stageRefererHeader[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
-	if p.defaults.RefererAutomaton {
-		p.applyRefererHeader(req)
+func stageRefererHeader(h *StdHandler, req *http.Request, _ *Tx) *http.Request {
+	if h.defaults.RefererAutomaton {
+		h.applyRefererHeader(req)
 	}
 
 	return req
 }
 
-func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
+func stageRedactSensitiveData(h *StdHandler, req *http.Request, tx *Tx) *http.Request {
 	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
-		return p.redactSensitiveData(req, tx.Redact)
+		return h.redactSensitiveData(req, tx.Redact)
 	}
 
 	return req
 }
 
-func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
+func stageUploadProgress(h *StdHandler, req *http.Request, _ *Tx) *http.Request {
 	cfg := GetRequestConfig(req)
 	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
 		progressReader := &iokit.ProgressReader{
@@ -170,7 +159,7 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 	return req
 }
 
-func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Request) *http.Request {
+func (h *StdHandler) prepareRequestContext(req any, stdReq *http.Request) *http.Request {
 	ctx := stdReq.Context()
 
 	cfg := GetRequestConfig(ctx)
@@ -212,7 +201,7 @@ func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Reques
 	return stdReq
 }
 
-func (p *Pipeline[Req, Resp]) traceRequest(
+func (h *StdHandler) TraceRequest(
 	stdReq *http.Request,
 	tx *Tx,
 ) (*http.Request, *telemetry.TraceInfo, func(resp *http.Response)) {
@@ -222,7 +211,7 @@ func (p *Pipeline[Req, Resp]) traceRequest(
 	case tx.TraceInfo != nil:
 		traceInfo = tx.TraceInfo
 
-	case tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil:
+	case tx.Flags&FlagInspect != 0 && h.defaults.Inspector != nil:
 		traceInfo = &telemetry.TraceInfo{}
 	}
 
@@ -255,7 +244,7 @@ func (p *Pipeline[Req, Resp]) traceRequest(
 		GotFirstResponseByte: func() { traceInfo.ServerProcessing = time.Since(traceInfo.GotConn) },
 		Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
 			if code == 103 {
-				ProcessEarlyHints(stdReq.Context(), http.Header(header), p.prewarmTargetOrigin)
+				ProcessEarlyHints(stdReq.Context(), http.Header(header), h.prewarmTargetOrigin)
 			}
 
 			return nil
@@ -267,7 +256,7 @@ func (p *Pipeline[Req, Resp]) traceRequest(
 	return stdReq, traceInfo, traceInfo.Start() //nolint:bodyclose
 }
 
-func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL string) {
+func (h *StdHandler) prewarmTargetOrigin(ctx context.Context, targetURL string) {
 	if targetURL == "" {
 		return
 	}
@@ -326,7 +315,7 @@ var defaultRedactHeaders = map[string]struct{}{
 	"x-api-key":           {},
 }
 
-func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
+func (h *StdHandler) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
 	var headers map[string]struct{}
 	if len(redact.HeadersToRedact) > 0 {
 		if redact.Headers != nil && len(redact.Headers) == len(redact.HeadersToRedact) {
@@ -361,16 +350,16 @@ func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *Red
 	return req.WithContext(ctx)
 }
 
-func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
+func (h *StdHandler) applyRefererHeader(req *http.Request) {
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
 
-	if req.Header.Get(header.Referer) != "" || p.defaults.RefererState == nil {
+	if req.Header.Get(header.Referer) != "" || h.defaults.RefererState == nil {
 		return
 	}
 
-	if lastURL := p.defaults.RefererState.LastURL.Get(); lastURL != "" {
+	if lastURL := h.defaults.RefererState.LastURL.Get(); lastURL != "" {
 		req.Header.Set(header.Referer, lastURL)
 	}
 }
