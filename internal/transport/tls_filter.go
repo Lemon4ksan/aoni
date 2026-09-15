@@ -16,6 +16,9 @@ func TLSHandshakeFilter(ctx context.Context, conn net.Conn, targetHost string, c
 		return conn, nil
 	}
 
+	if cfg.WrapTLSClient != nil {
+		return cfg.WrapTLSClient(ctx, conn, cfg.BaseTLSConfig, targetHost)
+	}
 	return handshakeStandardTLS(ctx, conn, targetHost, cfg)
 }
 

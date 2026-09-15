@@ -5,6 +5,7 @@
 package fast
 
 import (
+	coreh2 "github.com/lemon4ksan/mach/core/h2"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -288,12 +289,38 @@ func (c *Client) getH2Client(host string) *h2.Client {
 		}
 	}
 
+
+	var settings *coreh2.Settings
+	if len(c.cfg.Ext.OverrideH2Settings) > 0 {
+		settings = &coreh2.Settings{}
+		for k, v := range c.cfg.Ext.OverrideH2Settings {
+			switch k {
+			case 1:
+				settings.SetHeaderTableSize(v)
+			case 2:
+				settings.SetPush(v != 0)
+			case 3:
+				settings.SetMaxConcurrentStreams(v)
+			case 4:
+				settings.SetMaxWindowSize(v)
+			case 5:
+				settings.SetMaxFrameSize(v)
+			case 6:
+				settings.SetMaxHeaderListSize(v)
+			}
+		}
+	}
+
 	cl := h2.NewClient(dialer, h2.ClientOpts{
 		PingInterval:  15 * time.Second,
 		OnRTT:         onRTTCallback,
 		OnPushPromise: pushHandler,
-		Settings:      nil,
+		Settings:      settings,
 	})
+
+	if len(c.cfg.Ext.HeaderOrder) > 0 {
+		cl.SetOrderedHeaders(c.cfg.Ext.HeaderOrder)
+	}
 
 	c.protocolState.h2Clients[host] = cl
 

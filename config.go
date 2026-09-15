@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"crypto/tls"
 	"context"
 	"maps"
 	"net"
@@ -257,6 +258,7 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 	return transport.DialConfig{
 		Network:            netProto,
 		DialTLSContext:     c.Ext.DialTLSContext,
+		WrapTLSClient:      c.Ext.WrapTLSClient,
 		DNSResolver:        c.Network.DNSResolver,
 		StackDriver:        c.Network.StackDriver,
 		L2Device:           c.Network.L2Device,
@@ -1410,6 +1412,10 @@ type ExtensionConfig struct {
 	// DialTLSContext allows fully overriding the TLS handshake process (e.g., injecting uTLS).
 	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
+	// WrapTLSClient allows wrapping an already-dialed TCP connection with a custom TLS handshake (e.g., uTLS).
+	// If provided, the engine will dial the underlying connection (handling proxies) and then delegate the TLS handshake to this function.
+	WrapTLSClient func(ctx context.Context, conn net.Conn, cfg *tls.Config, addr string) (net.Conn, error)
+
 	// HeaderOrder defines strict HTTP/1 and HTTP/2 header serialization order.
 	HeaderOrder []string
 
@@ -1436,9 +1442,7 @@ func (e ExtensionConfig) Clone() ExtensionConfig {
 
 	if e.OverrideH2Settings != nil {
 		cloned.OverrideH2Settings = make(map[uint16]uint32, len(e.OverrideH2Settings))
-		for k, v := range e.OverrideH2Settings {
-			cloned.OverrideH2Settings[k] = v
-		}
+		maps.Copy(cloned.OverrideH2Settings, e.OverrideH2Settings)
 	}
 
 	return cloned

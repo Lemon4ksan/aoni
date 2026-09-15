@@ -55,6 +55,7 @@ type DialConfig struct {
 	// TLS Options
 	BaseTLSConfig  *tls.Config
 	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	WrapTLSClient  func(ctx context.Context, conn net.Conn, cfg *tls.Config, addr string) (net.Conn, error)
 	ServerName     string
 	ConnFilters    []ConnFilter
 }
