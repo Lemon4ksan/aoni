@@ -94,9 +94,7 @@ func (h *StdHandler) enrichError(
 		}
 	}
 
-	op := ""
-
-	urlStr := ""
+	var op, urlStr string
 	if req != nil {
 		op = req.Method
 		if req.URL != nil {

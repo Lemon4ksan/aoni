@@ -5,7 +5,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
@@ -20,8 +19,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/http/header"
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -362,60 +359,4 @@ func (h *StdHandler) applyRefererHeader(req *http.Request) {
 	if lastURL := h.defaults.RefererState.LastURL.Get(); lastURL != "" {
 		req.Header.Set(header.Referer, lastURL)
 	}
-}
-
-func convertRequestToStd(r core.Request) *http.Request {
-	if stdReq := r.HTTPRequest(); stdReq != nil {
-		return stdReq
-	}
-
-	var (
-		bodyReader io.Reader
-		contentLen int64 = -1
-	)
-
-	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *h1.Request })
-	if isFast {
-		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
-			if cl := fastReq.Header.ContentLength(); cl > 0 {
-				contentLen = int64(cl)
-			}
-		}
-	}
-
-	if bs := r.BodyStream(); bs != nil {
-		bodyReader = bs
-	} else if bb := r.BodyBytes(); len(bb) > 0 {
-		bodyReader = bytes.NewReader(bb)
-		if contentLen <= 0 {
-			contentLen = int64(len(bb))
-		}
-	}
-
-	stdReq, err := http.NewRequestWithContext(r.Context(), r.Method(), r.URL(), bodyReader) //nolint:gosec
-	if err != nil {
-		return &http.Request{}
-	}
-
-	if contentLen > 0 {
-		stdReq.ContentLength = contentLen
-	}
-
-	if isFast {
-		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
-			for k, v := range fastReq.Header.All() {
-				stdReq.Header.Add(string(k), string(v))
-			}
-
-			if host := bytesconv.B2S(fastReq.Header.Peek(header.Host)); host != "" {
-				stdReq.Host = host
-			}
-		}
-	} else if r.Headers() != nil {
-		for k, v := range r.Headers() {
-			stdReq.Header.Add(string(k), string(v))
-		}
-	}
-
-	return stdReq
 }
