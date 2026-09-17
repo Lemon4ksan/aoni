@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
-	github.com/lemon4ksan/foundation v0.0.0-20260915134602-7c37a42d3504
-	github.com/lemon4ksan/mach v0.0.0-20260915141613-be96d3b6aa6e
+	github.com/lemon4ksan/foundation v0.0.0-20260917063434-bc01e9d4c4c5
+	github.com/lemon4ksan/mach v0.0.0-20260917063743-e7e9fc69c11e
 	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/protobuf v1.36.12
@@ -17,6 +17,5 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/time v0.16.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

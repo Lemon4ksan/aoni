@@ -13,7 +13,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testing/assert"
 )
 
 // Adapted from Chromium net/http/http_util_unittest.cc and http_stream_parser_unittest.cc

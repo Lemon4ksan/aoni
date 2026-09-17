@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/testkit/assert"
-	"github.com/lemon4ksan/foundation/testkit/require"
+	"github.com/lemon4ksan/foundation/testing/assert"
+	"github.com/lemon4ksan/foundation/testing/require"
 
 	"github.com/lemon4ksan/aoni/pipeline"
 )
