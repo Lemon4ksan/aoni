@@ -19,7 +19,7 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	coreh2 "github.com/lemon4ksan/mach/core/h2"
 	coreh3 "github.com/lemon4ksan/mach/core/h3"
-	"github.com/lemon4ksan/mach/quic/quicvarint"
+	"github.com/lemon4ksan/foundation/encoding/varint"
 )
 
 func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
@@ -169,8 +169,8 @@ func TestH2_SettingsAckAndFlowControl(t *testing.T) {
 func TestH3_FramesParsing(t *testing.T) {
 	var buf []byte
 
-	buf = quicvarint.Append(buf, coreh3.FrameTypeHeaders)
-	buf = quicvarint.Append(buf, 1024)
+	buf = varint.Append(buf, coreh3.FrameTypeHeaders)
+	buf = varint.Append(buf, 1024)
 
 	r := bytes.NewReader(buf)
 	frType, frLen, err := coreh3.ReadFrameHeader(r)
