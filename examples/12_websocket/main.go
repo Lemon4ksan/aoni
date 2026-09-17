@@ -61,7 +61,7 @@ func main() {
 	fmt.Printf("Received: %s\n", string(buf[:n]))
 
 	// Send and receive multiple messages
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		text := fmt.Sprintf("Message %d", i)
 
 		_, err = conn.Write([]byte(text))

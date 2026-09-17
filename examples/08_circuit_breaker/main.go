@@ -49,7 +49,7 @@ func main() {
 
 	// Make requests; once the failure ratio exceeds the threshold, the circuit opens
 	// and all subsequent requests fail fast with a circuit-open error
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		res, err := client.GetTo[StatusResponse](ctx, "/status/200")
 		if err != nil {
 			fmt.Printf("Request %d failed: %v\n", i, err)

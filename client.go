@@ -685,8 +685,7 @@ func (c *Client) Preconnect(ctx context.Context, targetURL string) error {
 	}
 
 	// HTTP-level error (4xx/5xx): TCP+TLS succeeded, connection pool is warmed.
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*APIError](err); ok {
 		return nil
 	}
 

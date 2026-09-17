@@ -172,8 +172,8 @@ func (w customWriterTo) WriteTo(out io.Writer) (int64, error) {
 func TestValidateAndMarshal_CapabilityProtocols(t *testing.T) {
 	t.Run("BodyProvider and ContentTyper", func(t *testing.T) {
 		payload := customCompositePayload{
-			customBodyProvider: customBodyProvider{content: "custom xml content"},
-			customContentTyper: customContentTyper{mime: "application/xml"},
+			content: "custom xml content",
+			mime:    "application/xml",
 		}
 
 		p, err := body.ValidateAndMarshal(payload)

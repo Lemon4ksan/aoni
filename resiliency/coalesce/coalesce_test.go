@@ -162,10 +162,8 @@ func TestTypedGroup(t *testing.T) {
 		)
 
 		for range numGoroutines {
-			wg.Add(1)
 
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				entered.Add(1)
 
@@ -182,7 +180,7 @@ func TestTypedGroup(t *testing.T) {
 				})
 				require.NoError(t, err)
 				require.Equal(t, 42, val)
-			}()
+			})
 		}
 
 		wg.Wait()

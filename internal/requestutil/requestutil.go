@@ -80,7 +80,7 @@ func FindFirstNonWhitespaceByte(b []byte) byte {
 
 	_ = b[n-1]
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ch := b[i]
 		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
 			return ch
@@ -271,7 +271,7 @@ func CanonicalHeaderKeyBytes(src []byte) []byte {
 	_ = src[n-1]
 	_ = out[n-1]
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		c := src[i]
 		if upper && 'a' <= c && c <= 'z' {
 			c -= 'a' - 'A'

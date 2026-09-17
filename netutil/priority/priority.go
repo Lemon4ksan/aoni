@@ -96,9 +96,9 @@ func Parse(s string) (Priority, error) {
 	}
 
 	p := Priority{Urgency: 3, Incremental: false}
-	parts := strings.Split(s, ",")
+	parts := strings.SplitSeq(s, ",")
 
-	for _, part := range parts {
+	for part := range parts {
 		item := strings.TrimSpace(part)
 		if item == "i" || item == "i=?1" {
 			p.Incremental = true
@@ -110,8 +110,8 @@ func Parse(s string) (Priority, error) {
 			continue
 		}
 
-		if strings.HasPrefix(item, "u=") {
-			valStr := strings.TrimPrefix(item, "u=")
+		if after, ok := strings.CutPrefix(item, "u="); ok {
+			valStr := after
 
 			val, err := strconv.Atoi(strings.TrimSpace(valStr))
 			if err == nil && val >= 0 && val <= 7 {

@@ -70,7 +70,7 @@ func TestWS_MaskPayload_StressAndDifferential(t *testing.T) {
 	buffer := make([]byte, 2048)
 	_, _ = rand.Read(buffer)
 
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		start := i % 1024
 		end := start + (i % 1000)
 		sub := buffer[start:end]

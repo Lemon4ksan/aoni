@@ -418,10 +418,7 @@ func WithHeadersIf(condition bool, headers map[string]string) RequestModifier {
 
 // WithWebPushTTL sets the RFC 8030 WebPush message time-to-live retention duration header.
 func WithWebPushTTL(d time.Duration) RequestModifier {
-	seconds := int64(d.Seconds())
-	if seconds < 0 {
-		seconds = 0
-	}
+	seconds := max(int64(d.Seconds()), 0)
 
 	return WithHeader("TTL", strconv.FormatInt(seconds, 10))
 }

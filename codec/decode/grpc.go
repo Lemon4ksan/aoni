@@ -193,12 +193,12 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 
 // parseTrailerKeyValue splits a raw trailer line by ':' and trims leading/trailing whitespace without allocations.
 func parseTrailerKeyValue(line []byte) (k, v []byte, ok bool) {
-	idx := bytes.IndexByte(line, ':')
-	if idx < 0 {
+	before, after, ok := bytes.Cut(line, []byte{':'})
+	if !ok {
 		return nil, nil, false
 	}
 
-	return bytes.TrimSpace(line[:idx]), bytes.TrimSpace(line[idx+1:]), true
+	return bytes.TrimSpace(before), bytes.TrimSpace(after), true
 }
 
 //go:noinline

@@ -21,7 +21,7 @@ type sampleUser struct {
 }
 
 func TestSchemaCache(t *testing.T) {
-	typ := reflect.TypeOf(sampleUser{})
+	typ := reflect.TypeFor[sampleUser]()
 
 	s1 := mapper.DefaultSchemaCache.GetSchema(typ)
 	require.NotNil(t, s1)

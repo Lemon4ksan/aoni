@@ -215,9 +215,9 @@ func parseProxyURLs(proxies []string) []*url.URL {
 func (h *StdHandler) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
 	var idx uint32
 	if isRetry {
-		idx = atomic.AddUint32(&h.counter, 1)
+		idx = h.counter.Add(1)
 	} else {
-		idx = atomic.LoadUint32(&h.counter)
+		idx = h.counter.Load()
 	}
 
 	return proxies[idx%uint32(len(proxies))] //nolint:gosec
@@ -341,7 +341,7 @@ func (h *StdHandler) dispatchHedgingAttempts(
 		}
 
 		go func(count int) {
-			for i := 0; i < count; i++ {
+			for range count {
 				r := <-resultsCh
 				if r.resp != nil && r.resp.Body != nil {
 					_ = r.resp.Body.Close()

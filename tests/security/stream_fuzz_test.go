@@ -50,7 +50,7 @@ func TestSecurity_NDJSON_OOM(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		for i := 0; i < 20*1024; i++ {
+		for range 20 * 1024 {
 			w.Write(bytes.Repeat([]byte{65}, 1024))
 		}
 	}))

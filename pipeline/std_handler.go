@@ -7,6 +7,7 @@ package pipeline
 import (
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -16,7 +17,7 @@ import (
 // StdHandler implements [PipelineHandler] for standard HTTP requests and responses.
 type StdHandler struct {
 	defaults ClientDefaults
-	counter  uint32
+	counter  atomic.Uint32
 }
 
 // NewStdHandler constructs a new [StdHandler] with the provided defaults.

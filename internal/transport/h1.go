@@ -111,7 +111,7 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	var writtenBits uint64
 
 	for _, targetKey := range order {
-		for i := 0; i < numHeaders; i++ {
+		for i := range numHeaders {
 			if (writtenBits&(1<<i)) == 0 && (bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), targetKey) ||
 				(targetKey == ":authority" && bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), "host"))) {
 				newHeader.Write(parsed[i].line)
@@ -124,7 +124,7 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 		}
 	}
 
-	for i := 0; i < numHeaders; i++ {
+	for i := range numHeaders {
 		if (writtenBits & (1 << i)) == 0 {
 			newHeader.Write(parsed[i].line)
 			newHeader.WriteString(lineTerminator)

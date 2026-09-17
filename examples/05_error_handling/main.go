@@ -37,8 +37,7 @@ func main() {
 		mod.WithErrorModel(&NotFoundResponse{}),
 	)
 	if err != nil {
-		var apiErr *aoni.APIError
-		if errors.As(err, &apiErr) {
+		if apiErr, ok := errors.AsType[*aoni.APIError](err); ok {
 			fmt.Printf("API Error: status=%d body=%s\n", apiErr.StatusCode, string(apiErr.Body))
 
 			if nf, ok := apiErr.Model.(*NotFoundResponse); ok {

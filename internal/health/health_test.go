@@ -17,15 +17,15 @@ func TestHealthTracker_Transitions(t *testing.T) {
 	t.Parallel()
 
 	var (
-		unhealthyCount int32
-		recoveredCount int32
+		unhealthyCount atomic.Int32
+		recoveredCount atomic.Int32
 	)
 
 	onUnhealthy := func(_ string, _ uint32, _ time.Duration) {
-		atomic.AddInt32(&unhealthyCount, 1)
+		unhealthyCount.Add(1)
 	}
 	onRecovered := func(_ string) {
-		atomic.AddInt32(&recoveredCount, 1)
+		recoveredCount.Add(1)
 	}
 
 	tracker := NewTracker("test-endpoint", 3, 50*time.Millisecond, onUnhealthy, onRecovered)
@@ -58,7 +58,7 @@ func TestHealthTracker_Transitions(t *testing.T) {
 	assert.False(t, tracker.IsAvailable())
 	assert.Equal(t, uint32(3), tracker.FailCount())
 	assert.Greater(t, tracker.CooldownRemaining(), time.Duration(0))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&unhealthyCount))
+	assert.Equal(t, int32(1), unhealthyCount.Load())
 
 	// 5. Cooldown elapses: Recovering
 	time.Sleep(70 * time.Millisecond)
@@ -72,16 +72,16 @@ func TestHealthTracker_Transitions(t *testing.T) {
 	assert.Equal(t, StatusHealthy, tracker.Status())
 	assert.True(t, tracker.IsAvailable())
 	assert.Equal(t, uint32(0), tracker.FailCount())
-	assert.Equal(t, int32(1), atomic.LoadInt32(&recoveredCount))
+	assert.Equal(t, int32(1), recoveredCount.Load())
 }
 
 func TestHealthTracker_Reset(t *testing.T) {
 	t.Parallel()
 
-	var recoveredCount int32
+	var recoveredCount atomic.Int32
 
 	onRecovered := func(_ string) {
-		atomic.AddInt32(&recoveredCount, 1)
+		recoveredCount.Add(1)
 	}
 
 	tracker := NewTracker("test-endpoint", 2, time.Hour, nil, onRecovered)
@@ -93,7 +93,7 @@ func TestHealthTracker_Reset(t *testing.T) {
 	// Reset from Degraded
 	tracker.Reset()
 	assert.Equal(t, StatusHealthy, tracker.Status())
-	assert.Equal(t, int32(0), atomic.LoadInt32(&recoveredCount))
+	assert.Equal(t, int32(0), recoveredCount.Load())
 
 	// Go to Unhealthy
 	tracker.MarkFailed()
@@ -103,7 +103,7 @@ func TestHealthTracker_Reset(t *testing.T) {
 	// Reset from Unhealthy
 	tracker.Reset()
 	assert.Equal(t, StatusHealthy, tracker.Status())
-	assert.Equal(t, int32(1), atomic.LoadInt32(&recoveredCount))
+	assert.Equal(t, int32(1), recoveredCount.Load())
 }
 
 func TestHealthStatus_StringUnknown(t *testing.T) {

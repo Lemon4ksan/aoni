@@ -38,11 +38,11 @@ type HARTracker interface {
 	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
 }
 
-var correlationCounter uint64
+var correlationCounter atomic.Uint64
 
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
-	seq := atomic.AddUint64(&correlationCounter, 1)
+	seq := correlationCounter.Add(1)
 	timestamp := (uint64(timekit.CoarseUnixNano()/1000) << 16) | (seq & 0xffff)
 
 	var buf [32]byte

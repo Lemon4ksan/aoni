@@ -25,10 +25,10 @@ import (
 // setupToxiTest creates a local server and toxiproxy proxy for stress testing.
 func setupToxiTest(t *testing.T, proxyName, listenAddr string) (*httptest.Server, *toxiproxy.Proxy, *toxiproxy.Client, string) {
 	t.Helper()
-	var requestCount int32
+	var requestCount atomic.Int32
 
 	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&requestCount, 1)
+		count := requestCount.Add(1)
 
 		if r.URL.Path == "/421" {
 			if count%2 != 0 {

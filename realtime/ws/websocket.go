@@ -131,7 +131,7 @@ func ValidateSubprotocol(requested []string, selected string) bool {
 }
 
 var validTokenTable = func() (tbl [256]bool) {
-	for b := 0; b < 256; b++ {
+	for b := range 256 {
 		if b > 32 && b < 127 && strings.IndexByte("()<>@,;:\\\"/[]?={} \t", byte(b)) < 0 {
 			tbl[b] = true
 		}
@@ -150,7 +150,7 @@ func IsValidSubprotocolToken(token string) bool {
 	_ = token[n-1]
 	_ = validTokenTable[255]
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if !validTokenTable[token[i]] {
 			return false
 		}
