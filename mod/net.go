@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 // WithNetwork overrides the default L4 network protocol for this specific request (e.g. "tcp4", "tcp6", "unix").

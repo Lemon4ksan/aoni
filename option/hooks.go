@@ -11,9 +11,9 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/x/codec/decode"
 	"github.com/lemon4ksan/aoni/x/telemetry"
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // WithBeforeRequest registers a diagnostic or tracing hook executed immediately before dispatching an HTTP request.

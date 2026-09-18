@@ -10,7 +10,8 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/tls/cert")
+	"github.com/lemon4ksan/foundation/net/tls/cert"
+)
 
 // CertChainInfo holds detailed diagnostic metadata for an inspected TLS certificate chain.
 type CertChainInfo struct {

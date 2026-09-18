@@ -17,6 +17,9 @@ import (
 // These core contracts bridge disparate networking paradigms (net/http, fasthttp, and gRPC)
 // into a unified, type-safe, profile-driven architecture conforming strictly to RFC 9110.
 type (
+	// CookieJar defines a context-aware HTTP cookie storage interface supporting RFC 6265bis CHIPS.
+	CookieJar = core.CookieJar
+
 	// Request represents a unified, HTTP request abstraction conforming to RFC 9110.
 	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
 	// high-throughput contract with zero heap allocations on hot paths.

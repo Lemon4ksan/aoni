@@ -133,7 +133,7 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 	applyTransportOverrides(c, eng)
 }
 
-func applyCookieJar(httpClient *http.Client, jar cookie.Jar) {
+func applyCookieJar(httpClient *http.Client, jar CookieJar) {
 	if jar == nil {
 		return
 	}

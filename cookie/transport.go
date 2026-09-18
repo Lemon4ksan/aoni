@@ -3,6 +3,7 @@ package cookie
 import (
 	"net/http"
 
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
@@ -12,7 +13,7 @@ import (
 // Designed to sit below telemetry and retry layers, but above raw connection pooling.
 type Transport struct {
 	Next      http.RoundTripper
-	CookieJar Jar
+	CookieJar core.CookieJar
 }
 
 // RoundTrip executes a single HTTP transaction, applying and harvesting cookies.

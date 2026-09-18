@@ -33,8 +33,6 @@ func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
 		return
 	}
 
-	
-
 	u := uriToURL(req.URI())
 
 	cookies := jar.Cookies(ctx, u)
@@ -74,8 +72,6 @@ func (c *Client) captureCookies(ctx context.Context, req *machhttp.Request, resp
 	if jar == nil {
 		return
 	}
-
-	
 
 	if jar == nil {
 		return

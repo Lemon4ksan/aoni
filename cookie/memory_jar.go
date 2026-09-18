@@ -12,7 +12,7 @@ import (
 )
 
 // MemoryJar is a fully RFC 6265 and RFC 6265bis (CHIPS) compliant in-memory cookie jar.
-// It implements the context-aware [cookie.Jar] interface to natively support Partitioned cookies.
+// It implements the context-aware [cookie.core.CookieJar] interface to natively support Partitioned cookies.
 type MemoryJar struct {
 	cookies generic.Safe[map[cookieKey]Cookie]
 }
@@ -36,7 +36,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 				domain = u.Hostname()
 			}
 			domain = strings.ToLower(domain)
-			
+
 			// If cookie explicitly specified a domain, check public suffix
 			if c.Domain != "" {
 				if suffix := psl.List.PublicSuffix(domain); suffix == domain {
@@ -48,7 +48,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 			}
 
 			path := generic.Coalesce(c.Path, "/")
-			
+
 			// CHIPS: If not partitioned, store under empty partition key so it's shared.
 			pk := generic.Ternary(c.Partitioned, partitionKey, "")
 
@@ -63,7 +63,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 			parsed.PartitionKey = pk
 			(*m)[key] = parsed
 		}
-		
+
 		purgeExpiredCookies(*m, now)
 	})
 }

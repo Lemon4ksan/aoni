@@ -1,4 +1,4 @@
-package cookie
+package core
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"net/url"
 )
 
-// Jar defines a context-aware HTTP cookie storage interface supporting RFC 6265bis CHIPS.
+// CookieJar defines a context-aware HTTP cookie storage interface supporting RFC 6265bis CHIPS.
 //
 // Unlike the standard [net/http/cookiejar.Jar], this interface accepts a [context.Context]
 // to extract proxy and partition keys for strict cookie isolation.
-type Jar interface {
+type CookieJar interface {
 	// SetCookies handles the receipt of the cookies in a reply for the
 	// given URL. It may or may not choose to save the cookies, depending
 	// on the jar's policy and implementation.

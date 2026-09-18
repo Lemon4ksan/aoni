@@ -12,14 +12,14 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/foundation/net/fragment"
-	"github.com/lemon4ksan/foundation/net/ipc"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/pipeline"
+	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/foundation/net/fragment"
+	"github.com/lemon4ksan/foundation/net/ipc"
 )
 
 // WithNetwork sets the default L4 transport or IPC protocol for socket dialing.

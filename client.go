@@ -22,11 +22,11 @@ import (
 	"github.com/lemon4ksan/foundation/net/urlkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil/dict"
-	"github.com/lemon4ksan/foundation/system/power"
 	"github.com/lemon4ksan/aoni/pipeline"
+	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/foundation/system/power"
 )
 
 // Client is a thread-safe HTTP client supporting custom transports, TLS fingerprinting,
@@ -501,7 +501,7 @@ func (c *Client) Network() NetworkConfig {
 }
 
 // Jar returns the active [http.CookieJar] configured on the client, or nil if none is set.
-func (c *Client) Jar() cookie.Jar {
+func (c *Client) Jar() CookieJar {
 	return c.cfg.Engine.CookieJar
 }
 

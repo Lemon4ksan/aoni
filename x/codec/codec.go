@@ -10,11 +10,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/x/codec/decode"
-	"github.com/lemon4ksan/aoni/x/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/pipeline"
+	"github.com/lemon4ksan/aoni/x/codec/decode"
+	"github.com/lemon4ksan/aoni/x/codec/values"
 )
 
 var errNotProtoMessage = errors.New("aoni/codec: body does not implement proto.Message")

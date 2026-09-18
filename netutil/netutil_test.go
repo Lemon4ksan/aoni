@@ -17,12 +17,6 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
-
-
-
-
-
-
 func TestWriteTrackingConn(t *testing.T) {
 	t.Parallel()
 

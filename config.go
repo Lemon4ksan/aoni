@@ -5,8 +5,6 @@
 package aoni
 
 import (
-	"github.com/lemon4ksan/aoni/cookie"
-
 	"context"
 	"crypto/tls"
 	"maps"
@@ -294,7 +292,7 @@ type EngineConfig struct {
 	// If nil, cookies received in Set-Cookie response headers are discarded immediately.
 	// For multi-tenant or rotating proxy architectures, use [cookie.ProxyIsolatedJar] to prevent
 	// session identification and cross-proxy cookie leakage.
-	CookieJar cookie.Jar
+	CookieJar CookieJar
 
 	// CustomEngine overrides default engine instantiation with a custom [HTTPDoer] execution handler.
 	// Useful for dependency injection, recorded replay fixtures, or specialized in-memory engines.
@@ -683,7 +681,7 @@ type ClientDefaults struct {
 	Inspector telemetry.TrafficInspector
 
 	// HeadersCookieJar provides a fallback cookie jar implementation.
-	HeadersCookieJar cookie.Jar
+	HeadersCookieJar CookieJar
 
 	// QueryEncoder marshals structs or maps into URL query parameters.
 	QueryEncoder QueryEncoder

@@ -12,11 +12,11 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/resiliency"
+	"github.com/lemon4ksan/aoni/x/telemetry"
 )
 
 // WithRetry attaches an automated retry and backoff middleware constructed via [resiliency.RetryBuilder].
@@ -153,7 +153,7 @@ func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.ClientOptio
 //	client := aoni.NewClient(nil,
 //	    option.WithCookieJar(cookie.NewProxyIsolatedJar()),
 //	)
-func WithCookieJar(jar cookie.Jar) aoni.ClientOption {
+func WithCookieJar(jar core.CookieJar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CookieJar = jar
 	}

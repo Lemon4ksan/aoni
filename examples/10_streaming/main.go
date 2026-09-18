@@ -14,8 +14,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/x/realtime/stream"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/x/realtime/stream"
 
 	"github.com/lemon4ksan/aoni"
 )

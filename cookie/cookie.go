@@ -5,6 +5,8 @@
 package cookie
 
 import (
+	"github.com/lemon4ksan/aoni/internal/core"
+
 	"strconv"
 
 	"context"
@@ -114,7 +116,7 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 }
 
 // Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
-func Mirror(ctx context.Context, jar Jar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
+func Mirror(ctx context.Context, jar core.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
 	}
@@ -148,7 +150,7 @@ func Mirror(ctx context.Context, jar Jar, sourceURL *url.URL, targetURLs []*url.
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.
-func Export(ctx context.Context, jar Jar, u *url.URL) []Cookie {
+func Export(ctx context.Context, jar core.CookieJar, u *url.URL) []Cookie {
 	if jar == nil || u == nil {
 		return nil
 	}
@@ -185,7 +187,7 @@ func Export(ctx context.Context, jar Jar, u *url.URL) []Cookie {
 }
 
 // ExportJSON serializes exported cookies for u into a JSON string.
-func ExportJSON(ctx context.Context, jar Jar, u *url.URL) (string, error) {
+func ExportJSON(ctx context.Context, jar core.CookieJar, u *url.URL) (string, error) {
 	exported := Export(ctx, jar, u)
 	if len(exported) == 0 {
 		return "[]", nil
@@ -200,7 +202,7 @@ func ExportJSON(ctx context.Context, jar Jar, u *url.URL) (string, error) {
 }
 
 // Import injects a slice of exported [Cookie] structs into jar for destination u.
-func Import(ctx context.Context, jar Jar, u *url.URL, cookies []Cookie) {
+func Import(ctx context.Context, jar core.CookieJar, u *url.URL, cookies []Cookie) {
 	if jar == nil || u == nil || len(cookies) == 0 {
 		return
 	}
@@ -235,7 +237,7 @@ func Import(ctx context.Context, jar Jar, u *url.URL, cookies []Cookie) {
 }
 
 // ImportJSON deserializes a JSON cookie payload and imports it into jar for target u.
-func ImportJSON(ctx context.Context, jar Jar, u *url.URL, jsonStr string) error {
+func ImportJSON(ctx context.Context, jar core.CookieJar, u *url.URL, jsonStr string) error {
 	if jar == nil || u == nil || jsonStr == "" || jsonStr == "[]" {
 		return nil
 	}
@@ -299,7 +301,7 @@ func BuildCookieHeader(cookies []*http.Cookie) string {
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
-func ExportNetscape(ctx context.Context, jar Jar, u *url.URL) string {
+func ExportNetscape(ctx context.Context, jar core.CookieJar, u *url.URL) string {
 	if jar == nil || u == nil {
 		return ""
 	}

@@ -16,8 +16,8 @@ import (
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 
-	"github.com/lemon4ksan/aoni/x/tunnel/masque"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/x/tunnel/masque"
 )
 
 func TestBuildUDPProxyURI(t *testing.T) {
