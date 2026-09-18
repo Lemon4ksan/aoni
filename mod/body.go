@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
-	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/ext/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/pipeline"
 )

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // Chain composes an execution engine with an ordered sequence of [aoni.Middleware] layers.

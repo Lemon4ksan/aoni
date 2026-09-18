@@ -21,7 +21,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/ext/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/proxy"

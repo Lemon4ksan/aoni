@@ -20,7 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {

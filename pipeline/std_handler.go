@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // StdHandler implements [PipelineHandler] for standard HTTP requests and responses.

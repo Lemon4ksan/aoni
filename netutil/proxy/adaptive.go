@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // AdaptiveTimeoutConfig configures dynamic proxy connection timeouts

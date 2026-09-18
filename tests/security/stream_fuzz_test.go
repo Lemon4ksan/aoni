@@ -15,7 +15,7 @@ import (
 	"github.com/lemon4ksan/foundation/testing/assert"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/realtime/stream"
+	"github.com/lemon4ksan/aoni/ext/realtime/stream"
 )
 
 func TestSecurity_GRPCWeb_OOM(t *testing.T) {

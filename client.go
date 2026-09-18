@@ -26,7 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/pipeline"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // Client is a thread-safe HTTP client supporting custom transports, TLS fingerprinting,

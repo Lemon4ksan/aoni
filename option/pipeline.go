@@ -16,7 +16,7 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/resiliency"
-	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // WithRetry attaches an automated retry and backoff middleware constructed via [resiliency.RetryBuilder].

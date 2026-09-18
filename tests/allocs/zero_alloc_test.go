@@ -11,7 +11,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/testing/assert"
 
-	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/ext/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
