@@ -5,6 +5,8 @@
 package aoni
 
 import (
+	"github.com/lemon4ksan/aoni/cookie"
+
 	"context"
 	"crypto/tls"
 	"maps"
@@ -19,15 +21,15 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 
-	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/dict"
-	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
+	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 // ============================================================================
@@ -292,7 +294,7 @@ type EngineConfig struct {
 	// If nil, cookies received in Set-Cookie response headers are discarded immediately.
 	// For multi-tenant or rotating proxy architectures, use [cookie.ProxyIsolatedJar] to prevent
 	// session identification and cross-proxy cookie leakage.
-	CookieJar http.CookieJar
+	CookieJar cookie.Jar
 
 	// CustomEngine overrides default engine instantiation with a custom [HTTPDoer] execution handler.
 	// Useful for dependency injection, recorded replay fixtures, or specialized in-memory engines.
@@ -681,7 +683,7 @@ type ClientDefaults struct {
 	Inspector telemetry.TrafficInspector
 
 	// HeadersCookieJar provides a fallback cookie jar implementation.
-	HeadersCookieJar http.CookieJar
+	HeadersCookieJar cookie.Jar
 
 	// QueryEncoder marshals structs or maps into URL query parameters.
 	QueryEncoder QueryEncoder

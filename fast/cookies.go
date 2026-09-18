@@ -33,13 +33,11 @@ func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
 		return
 	}
 
-	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
-		jar = pJar.GetJar(ctx)
-	}
+	
 
 	u := uriToURL(req.URI())
 
-	cookies := jar.Cookies(u)
+	cookies := jar.Cookies(ctx, u)
 	if len(cookies) == 0 {
 		return
 	}
@@ -77,9 +75,7 @@ func (c *Client) captureCookies(ctx context.Context, req *machhttp.Request, resp
 		return
 	}
 
-	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
-		jar = pJar.GetJar(ctx)
-	}
+	
 
 	if jar == nil {
 		return
@@ -95,7 +91,7 @@ func (c *Client) captureCookies(ctx context.Context, req *machhttp.Request, resp
 	}
 
 	if len(cookies) > 0 {
-		jar.SetCookies(u, cookies)
+		jar.SetCookies(ctx, u, cookies)
 	}
 }
 

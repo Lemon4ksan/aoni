@@ -133,12 +133,10 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 	applyTransportOverrides(c, eng)
 }
 
-func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
+func applyCookieJar(httpClient *http.Client, jar cookie.Jar) {
 	if jar == nil {
 		return
 	}
-
-	httpClient.Jar = jar
 
 	pJar, ok := jar.(*cookie.ProxyIsolatedJar)
 	if !ok {
@@ -151,7 +149,7 @@ func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
 	}
 
 	if cjTrans, ok := baseTr.(*cookie.Transport); ok {
-		baseTr = cjTrans.Unwrap()
+		baseTr = cjTrans.Next
 	}
 
 	httpClient.Transport = &cookie.Transport{Next: baseTr, CookieJar: pJar}

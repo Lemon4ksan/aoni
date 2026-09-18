@@ -1,7 +1,3 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package cookie
 
 import (
@@ -10,83 +6,60 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 )
 
-// Transport intercepts HTTP transactions to manage proxy-isolated cookies.
+// Transport intercepts HTTP responses to extract and store Set-Cookie headers,
+// and injects active cookies from the CookieJar into outbound requests.
+//
+// Designed to sit below telemetry and retry layers, but above raw connection pooling.
 type Transport struct {
 	Next      http.RoundTripper
-	CookieJar *ProxyIsolatedJar
+	CookieJar Jar
 }
 
-// RoundTrip injects isolated proxy cookies into outbound headers and captures response set-cookie headers.
-// Safe for concurrent execution across multiple goroutines. Clones outbound request before header mutation to comply with [http.RoundTripper] contracts.
+// RoundTrip executes a single HTTP transaction, applying and harvesting cookies.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	next := t.Next
-	if next == nil {
-		next = http.DefaultTransport
+	if t.CookieJar != nil && req.URL != nil {
+		jar := t.CookieJar
+		if jar != nil {
+			cookies := jar.Cookies(req.Context(), req.URL)
+			if len(cookies) > 0 {
+				cookieHeader := BuildCookieHeader(cookies)
+				if cookieHeader != "" {
+					if existing := req.Header.Get(header.Cookie); existing != "" {
+						req.Header.Set(header.Cookie, existing+"; "+cookieHeader)
+					} else {
+						req.Header.Set(header.Cookie, cookieHeader)
+					}
+				}
+			}
+		}
 	}
 
-	reqToPass := t.setCookies(req)
+	resp, err := t.Next.RoundTrip(req)
 
-	resp, err := next.RoundTrip(reqToPass)
+	reqToPass := req
+	if resp != nil && resp.Request != nil {
+		reqToPass = resp.Request
+	}
+
 	if err != nil || resp == nil || t.CookieJar == nil || reqToPass.URL == nil {
 		return resp, err
 	}
 
-	setCookies := resp.Cookies()
-	if len(setCookies) == 0 {
-		return resp, nil
+	jar := t.CookieJar
+	if jar != nil {
+		cookies := resp.Cookies()
+		if len(cookies) > 0 {
+			jar.SetCookies(reqToPass.Context(), reqToPass.URL, cookies)
+		}
 	}
 
-	if jar := t.CookieJar.GetJar(reqToPass.Context()); jar != nil {
-		jar.SetCookies(reqToPass.URL, setCookies)
-	}
-
-	return resp, nil
+	return resp, err
 }
 
-// Unwrap returns the next wrapped [http.RoundTripper] layer.
-func (t *Transport) Unwrap() http.RoundTripper {
-	return t.Next
-}
-
-// CloneTransport creates a copy of [Transport] wrapping next.
-func (t *Transport) CloneTransport(next http.RoundTripper) http.RoundTripper {
+// Clone creates a shallow copy of the transport.
+func (t *Transport) Clone() *Transport {
 	return &Transport{
-		Next:      next,
+		Next:      t.Next,
 		CookieJar: t.CookieJar,
 	}
-}
-
-// setCookies inspects target URL in req, retrieves matching cookies from the active jar,
-// and returns a cloned request with populated 'Cookie' headers without mutating the input request.
-func (t *Transport) setCookies(req *http.Request) *http.Request {
-	if t.CookieJar == nil || req.URL == nil {
-		return req
-	}
-
-	jar := t.CookieJar.GetJar(req.Context())
-	if jar == nil {
-		return req
-	}
-
-	cookies := jar.Cookies(req.URL)
-	if len(cookies) == 0 {
-		return req
-	}
-
-	cookieHeader := BuildCookieHeader(cookies)
-	if cookieHeader == "" {
-		return req
-	}
-
-	reqClone := req.Clone(req.Context())
-
-	existing := reqClone.Header.Get(header.Cookie)
-	if existing == "" {
-		reqClone.Header.Set(header.Cookie, cookieHeader)
-		return reqClone
-	}
-
-	reqClone.Header.Set(header.Cookie, existing+"; "+cookieHeader)
-
-	return reqClone
 }

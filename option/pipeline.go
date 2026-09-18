@@ -153,7 +153,7 @@ func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.ClientOptio
 //	client := aoni.NewClient(nil,
 //	    option.WithCookieJar(cookie.NewProxyIsolatedJar()),
 //	)
-func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
+func WithCookieJar(jar cookie.Jar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CookieJar = jar
 	}

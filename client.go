@@ -501,7 +501,7 @@ func (c *Client) Network() NetworkConfig {
 }
 
 // Jar returns the active [http.CookieJar] configured on the client, or nil if none is set.
-func (c *Client) Jar() http.CookieJar {
+func (c *Client) Jar() cookie.Jar {
 	return c.cfg.Engine.CookieJar
 }
 
@@ -512,14 +512,14 @@ func (c *Client) Cookies(u *url.URL) []*http.Cookie {
 		return nil
 	}
 
-	return jar.Cookies(u)
+	return jar.Cookies(context.Background(), u)
 }
 
 // SetCookies injects cookies into the active cookie jar bound to destination u.
 func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	jar := c.cfg.Engine.CookieJar
 	if jar != nil && u != nil && len(cookies) > 0 {
-		jar.SetCookies(u, cookies)
+		jar.SetCookies(context.Background(), u, cookies)
 	}
 }
 
@@ -530,7 +530,7 @@ func (c *Client) HasCookies(u *url.URL) bool {
 		return false
 	}
 
-	return len(jar.Cookies(u)) > 0
+	return len(jar.Cookies(context.Background(), u)) > 0
 }
 
 // FindCookie searches for a cookie by name for a given URL and reports whether it was found.
@@ -541,10 +541,10 @@ func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
 	}
 
 	if finder, ok := jar.(cookie.Finder); ok {
-		return finder.FindCookie(u, name)
+		return finder.FindCookie(context.Background(), u, name)
 	}
 
-	return generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
+	return generic.Find(jar.Cookies(context.Background(), u), func(ck *http.Cookie) bool {
 		return ck != nil && ck.Name == name
 	})
 }

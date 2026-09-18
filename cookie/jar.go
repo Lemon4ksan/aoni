@@ -1,23 +1,16 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package cookie
 
 import (
 	"context"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/ctxkit"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-
 	"github.com/lemon4ksan/foundation/net/http/nik"
 )
 
@@ -27,24 +20,16 @@ type (
 )
 
 // WithProxyAddress returns a new Context carrying the active proxy URL string for cookie jar partitioning.
-// Yields a child context containing proxyCtxKey with value addr.
 func WithProxyAddress(ctx context.Context, addr string) context.Context {
 	return ctxkit.WithValue(ctx, proxyCtxKey{}, addr)
 }
 
 // GetProxyAddress retrieves the active proxy URL string stored in the context.
-// Returns the proxy URL string if present; otherwise returns an empty string.
 func GetProxyAddress(ctx context.Context) string {
 	return ctxkit.GetOr(ctx, proxyCtxKey{}, "")
 }
 
 // WithPartitionKey returns a Context carrying a CHIPS (RFC 6265bis) top-level site partition key.
-//
-// Browsers block third-party cookies to prevent cross-site tracking. CHIPS (Cookies Having Independent Partitioned State)
-// solves this by partitioning third-party cookies by the top-level site context.
-// When an embedded iframe (e.g. `tracker.com`) sets a cookie with `Partitioned`, the browser stores it under
-// a double key: the cookie's host (`tracker.com`) AND the top-level site (`news.com`).
-// When the iframe is later loaded on `shop.com`, it will NOT have access to the `news.com` partitioned cookie.
 func WithPartitionKey(ctx context.Context, key string) context.Context {
 	return ctxkit.WithValue(ctx, partitionCtxKey{}, key)
 }
@@ -70,68 +55,40 @@ type cookieKey struct {
 }
 
 // ProxyIsolatedJar provides thread-safe, per-proxy and CHIPS partitioned cookie storage isolation.
-//
-// Automatically manages separate cookie jars per upstream proxy address to prevent cross-account
-// session contamination and cross-tenant data leaks. Supports RFC 6265bis CHIPS (Partitioned) cookies.
-//
-// # Specification Adherence
-//
-// Conforms to RFC 6265 (HTTP State Management Mechanism) and RFC 6265bis (CHIPS Partitioning).
-//
-// # Thread Safety
-//
-// 100% thread-safe for concurrent read and write operations via atomic [generic.ConcurrentMap].
-//
-// # Example
-//
-//	jar := cookie.NewProxyIsolatedJar()
-//	client := aoni.New(option.WithCookieJar(jar))
 type ProxyIsolatedJar struct {
-	jars    generic.ConcurrentMap[string, http.CookieJar]
+	jars    generic.ConcurrentMap[string, Jar]
 	backend generic.Safe[Storage]
 }
 
-// NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar] ready for concurrent request execution.
+// NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar].
 func NewProxyIsolatedJar() *ProxyIsolatedJar {
 	return &ProxyIsolatedJar{}
 }
 
-// SetCookies satisfies the standard [http.CookieJar] interface.
-//
-// Delegates to the default (unproxied) internal jar when invoked without a proxy-aware context.
-func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	if jar := p.GetJarForProxy(""); jar != nil {
-		jar.SetCookies(u, cookies)
+// SetCookies satisfies the context-aware [cookie.Jar] interface.
+func (p *ProxyIsolatedJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http.Cookie) {
+	if jar := p.GetJar(ctx); jar != nil {
+		jar.SetCookies(ctx, u, cookies)
 	}
 }
 
-// Cookies satisfies the standard [http.CookieJar] interface.
-//
-// Returns cookies matching destination u from the default (unproxied) internal jar when context is absent.
-func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
-	if jar := p.GetJarForProxy(""); jar != nil {
-		return jar.Cookies(u)
+// Cookies satisfies the context-aware [cookie.Jar] interface.
+func (p *ProxyIsolatedJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie {
+	if jar := p.GetJar(ctx); jar != nil {
+		return jar.Cookies(ctx, u)
 	}
-
 	return nil
 }
 
-// GetJarForProxy retrieves or lazily initializes an isolated [http.CookieJar] bound to the specified proxyURL.
-//
-// Thread-safe and lock-free on cache hits via atomic [generic.ConcurrentMap].
-func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
+// GetJarForProxy retrieves or lazily initializes an isolated [Jar] bound to the specified proxyURL.
+func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) Jar {
 	if jar, ok := p.jars.Load(proxyURL); ok {
 		return jar
 	}
 
-	baseJar, err := cookiejar.New(&cookiejar.Options{
-		PublicSuffixList: psl.List,
-	})
-	if err != nil {
-		return nil
-	}
+	baseJar := NewMemoryJar()
 
-	var jar http.CookieJar = baseJar
+	var jar Jar = baseJar
 
 	backend := p.backend.Get()
 
@@ -144,30 +101,14 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	return actual
 }
 
-// WithStorageBackend configures a persistent storage backend (e.g. [JSONFileStorage]) for cookie persistence across restarts.
+// WithStorageBackend configures a persistent storage backend.
 func (p *ProxyIsolatedJar) WithStorageBackend(backend Storage) *ProxyIsolatedJar {
 	p.backend.Set(backend)
 	return p
 }
 
-// CookiesForProxy retrieves cookies associated with a specific proxy URL and target URL.
-func (p *ProxyIsolatedJar) CookiesForProxy(proxyURL string, u *url.URL) []*http.Cookie {
-	if jar := p.GetJarForProxy(proxyURL); jar != nil {
-		return jar.Cookies(u)
-	}
-
-	return nil
-}
-
-// SetCookiesForProxy manually stores cookies for a specific proxy URL and target URL.
-func (p *ProxyIsolatedJar) SetCookiesForProxy(proxyURL string, u *url.URL, cookies []*http.Cookie) {
-	if jar := p.GetJarForProxy(proxyURL); jar != nil {
-		jar.SetCookies(u, cookies)
-	}
-}
-
 // GetJar extracts the active proxy URL from context and yields the corresponding isolated jar.
-func (p *ProxyIsolatedJar) GetJar(ctx context.Context) http.CookieJar {
+func (p *ProxyIsolatedJar) GetJar(ctx context.Context) Jar {
 	return p.GetJarForProxy(GetProxyAddress(ctx))
 }
 
@@ -192,21 +133,20 @@ func (p *ProxyIsolatedJar) StartJanitor(ctx context.Context, interval time.Durat
 	}()
 }
 
-// PurgeExpired removes all expired cookies across all active proxy jars without holding global locks during backend I/O.
+// PurgeExpired removes all expired cookies.
 func (p *ProxyIsolatedJar) PurgeExpired() {
-	p.jars.Range(func(_ string, jar http.CookieJar) bool {
+	p.jars.Range(func(_ string, jar Jar) bool {
 		if pJar, ok := jar.(*PersistentJar); ok {
 			pJar.purgeExpired()
 		}
-
 		return true
 	})
 }
 
-func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.CookieJar, backend Storage) http.CookieJar {
+func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar Jar, backend Storage) Jar {
 	initialMap := make(map[cookieKey]Cookie)
 	pJar := &PersistentJar{
-		CookieJar: baseJar,
+		Inner:     baseJar,
 		proxyURL:  proxyURL,
 		backend:   backend,
 		cookies:   *generic.NewSafe(initialMap),
@@ -227,17 +167,20 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.Cooki
 
 			u, parseErr := url.Parse(scheme + "://" + domain + c.Path)
 			if parseErr == nil {
-				baseJar.SetCookies(u, []*http.Cookie{
-					{ //nolint:gosec
-						Name:     c.Name,
-						Value:    c.Value,
-						Domain:   c.Domain,
-						Path:     c.Path,
-						Expires:  c.Expires,
-						HttpOnly: c.HTTPOnly,
-						Secure:   c.Secure,
-					},
-				})
+				// Initialize inner jar without overwriting partition keys
+				stdCookie := &http.Cookie{ //nolint:gosec
+					Name:     c.Name,
+					Value:    c.Value,
+					Domain:   c.Domain,
+					Path:     c.Path,
+					Expires:  c.Expires,
+					HttpOnly: c.HTTPOnly,
+					Secure:   c.Secure,
+					Partitioned: c.Partitioned,
+				}
+				// We need a context with the specific partition key to feed the inner jar
+				ctx := WithPartitionKey(context.Background(), c.PartitionKey)
+				baseJar.SetCookies(ctx, u, []*http.Cookie{stdCookie})
 			}
 		}
 	})
@@ -245,9 +188,9 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.Cooki
 	return pJar
 }
 
-// PersistentJar decorates an [http.CookieJar] to synchronize updates to a Storage backend and enforce CHIPS partitioning.
+// PersistentJar decorates a [Jar] to synchronize updates to a Storage backend and enforce CHIPS partitioning.
 type PersistentJar struct {
-	http.CookieJar
+	Inner    Jar
 	proxyURL string
 	backend  Storage
 	cookies  generic.Safe[map[cookieKey]Cookie]
@@ -257,14 +200,13 @@ func isExpiredCookie(expires time.Time, maxAge int, now time.Time) bool {
 	return (!expires.IsZero() && expires.Before(now)) || maxAge < 0
 }
 
-func deleteMatchingCookie(m map[cookieKey]Cookie, name, domain string) bool {
+func deleteMatchingCookie(m map[cookieKey]Cookie, name, domain, partitionKey string) bool {
 	normDomain := strings.TrimPrefix(domain, ".")
 	deleted := false
 
 	for k := range m {
-		if k.name == name && bytesconv.EqualFoldASCII(strings.TrimPrefix(k.domain, "."), normDomain) {
+		if k.name == name && k.partitionKey == partitionKey && bytesconv.EqualFoldASCII(strings.TrimPrefix(k.domain, "."), normDomain) {
 			delete(m, k)
-
 			deleted = true
 		}
 	}
@@ -278,7 +220,6 @@ func purgeExpiredCookies(m map[cookieKey]Cookie, now time.Time) bool {
 	for k, c := range m {
 		if isExpiredCookie(c.Expires, c.MaxAge, now) {
 			delete(m, k)
-
 			changed = true
 		}
 	}
@@ -287,12 +228,13 @@ func purgeExpiredCookies(m map[cookieKey]Cookie, now time.Time) bool {
 }
 
 // Cookies returns non-expired cookies matching the target URL and partition key.
-func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
-	cookies := pj.CookieJar.Cookies(u)
+func (pj *PersistentJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie {
+	cookies := pj.Inner.Cookies(ctx, u)
 	if len(cookies) == 0 {
 		return nil
 	}
-
+	
+	partitionKey := GetPartitionKey(ctx)
 	now := clock.CoarseTime()
 	validCookies := make([]*http.Cookie, 0, len(cookies))
 
@@ -303,7 +245,7 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 
 		for _, c := range cookies {
 			if isExpiredCookie(c.Expires, c.MaxAge, now) {
-				hasExpired = deleteMatchingCookie(*m, c.Name, c.Domain) || hasExpired
+				hasExpired = deleteMatchingCookie(*m, c.Name, c.Domain, partitionKey) || hasExpired
 				continue
 			}
 
@@ -339,10 +281,11 @@ func (pj *PersistentJar) purgeExpired() {
 }
 
 // SetCookies stores cookies in the inner jar and flushes non-expired cookies to persistent storage.
-func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	pj.CookieJar.SetCookies(u, cookies)
+func (pj *PersistentJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http.Cookie) {
+	pj.Inner.SetCookies(ctx, u, cookies)
 
 	now := clock.CoarseTime()
+	partitionKey := GetPartitionKey(ctx)
 
 	var flushList []Cookie
 
@@ -352,14 +295,22 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		for _, c := range cookies {
 			domain := strings.ToLower(generic.Coalesce(c.Domain, u.Hostname()))
 			path := generic.Coalesce(c.Path, "/")
-			key := cookieKey{domain: domain, path: path, name: c.Name}
+			
+			pk := ""
+			if c.Partitioned {
+				pk = partitionKey
+			}
+			
+			key := cookieKey{domain: domain, path: path, name: c.Name, partitionKey: pk}
 
 			if isExpiredCookie(c.Expires, c.MaxAge, now) {
-				changed = deleteMatchingCookie(*m, c.Name, domain) || changed
+				changed = deleteMatchingCookie(*m, c.Name, domain, pk) || changed
 				continue
 			}
 
-			(*m)[key] = FromStd(c, domain, path)
+			parsed := FromStd(c, domain, path)
+			parsed.PartitionKey = pk
+			(*m)[key] = parsed
 			changed = true
 		}
 
@@ -379,25 +330,25 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 
 // Finder defines a capability interface for cookie jars that support direct named cookie lookups.
 type Finder interface {
-	FindCookie(u *url.URL, name string) (*http.Cookie, bool)
+	FindCookie(ctx context.Context, u *url.URL, name string) (*http.Cookie, bool)
 }
 
 var _ Finder = (*ProxyIsolatedJar)(nil)
 
 // FindCookie searches for a cookie by name for a given URL and reports whether it was found.
-func (p *ProxyIsolatedJar) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
+func (p *ProxyIsolatedJar) FindCookie(ctx context.Context, u *url.URL, name string) (*http.Cookie, bool) {
 	if p == nil || u == nil {
 		return nil, false
 	}
 
-	return generic.Find(p.Cookies(u), func(c *http.Cookie) bool {
+	return generic.Find(p.Cookies(ctx, u), func(c *http.Cookie) bool {
 		return c != nil && c.Name == name
 	})
 }
 
 // GetCookieValue retrieves the value of a named cookie.
-func (p *ProxyIsolatedJar) GetCookieValue(u *url.URL, name string) (string, bool) {
-	if c, ok := p.FindCookie(u, name); ok && c != nil {
+func (p *ProxyIsolatedJar) GetCookieValue(ctx context.Context, u *url.URL, name string) (string, bool) {
+	if c, ok := p.FindCookie(ctx, u, name); ok && c != nil {
 		return c.Value, true
 	}
 
@@ -405,6 +356,6 @@ func (p *ProxyIsolatedJar) GetCookieValue(u *url.URL, name string) (string, bool
 }
 
 // HasCookies reports whether the jar stores any active cookies for URL u.
-func (p *ProxyIsolatedJar) HasCookies(u *url.URL) bool {
-	return p != nil && len(p.Cookies(u)) > 0
+func (p *ProxyIsolatedJar) HasCookies(ctx context.Context, u *url.URL) bool {
+	return p != nil && len(p.Cookies(ctx, u)) > 0
 }

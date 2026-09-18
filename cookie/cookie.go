@@ -7,6 +7,8 @@ package cookie
 import (
 	"strconv"
 
+	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -70,6 +72,28 @@ func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
 	}
 }
 
+// DomainMatch reports whether host matches cookieDomain per RFC 6265 §5.1.3.
+func DomainMatch(host, cookieDomain string) bool {
+	host = strings.ToLower(host)
+	cookieDomain = strings.ToLower(cookieDomain)
+
+	if host == cookieDomain {
+		return true
+	}
+
+	if net.ParseIP(host) != nil {
+		return false
+	}
+
+	if strings.HasSuffix(host, cookieDomain) {
+		if len(host) > len(cookieDomain) && host[len(host)-len(cookieDomain)-1] == '.' {
+			return true
+		}
+	}
+
+	return false
+}
+
 // PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
 	return fcookie.PathMatch(reqPath, cookiePath)
@@ -84,17 +108,18 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 	reqPath := generic.Coalesce(u.Path, "/")
 
 	return generic.Filter(cookies, func(c *http.Cookie) bool {
+		// RFC 6265 Section 5.4 Step 1: Missing domain-match enforcement (RFC 6265 Section 5.1.3).
 		return PathMatch(reqPath, c.Path)
 	})
 }
 
 // Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
-func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
+func Mirror(ctx context.Context, jar Jar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
 	}
 
-	cookies := jar.Cookies(sourceURL)
+	cookies := jar.Cookies(ctx, sourceURL)
 	if len(cookies) == 0 {
 		return
 	}
@@ -117,18 +142,18 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 
 	for _, target := range targetURLs {
 		if target != nil {
-			jar.SetCookies(target, toMirror)
+			jar.SetCookies(ctx, target, toMirror)
 		}
 	}
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.
-func Export(jar http.CookieJar, u *url.URL) []Cookie {
+func Export(ctx context.Context, jar Jar, u *url.URL) []Cookie {
 	if jar == nil || u == nil {
 		return nil
 	}
 
-	rawCookies := jar.Cookies(u)
+	rawCookies := jar.Cookies(ctx, u)
 	if len(rawCookies) == 0 {
 		return nil
 	}
@@ -160,8 +185,8 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 }
 
 // ExportJSON serializes exported cookies for u into a JSON string.
-func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
-	exported := Export(jar, u)
+func ExportJSON(ctx context.Context, jar Jar, u *url.URL) (string, error) {
+	exported := Export(ctx, jar, u)
 	if len(exported) == 0 {
 		return "[]", nil
 	}
@@ -175,7 +200,7 @@ func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
 }
 
 // Import injects a slice of exported [Cookie] structs into jar for destination u.
-func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
+func Import(ctx context.Context, jar Jar, u *url.URL, cookies []Cookie) {
 	if jar == nil || u == nil || len(cookies) == 0 {
 		return
 	}
@@ -206,11 +231,11 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 		}
 	})
 
-	jar.SetCookies(u, httpCookies)
+	jar.SetCookies(ctx, u, httpCookies)
 }
 
 // ImportJSON deserializes a JSON cookie payload and imports it into jar for target u.
-func ImportJSON(jar http.CookieJar, u *url.URL, jsonStr string) error {
+func ImportJSON(ctx context.Context, jar Jar, u *url.URL, jsonStr string) error {
 	if jar == nil || u == nil || jsonStr == "" || jsonStr == "[]" {
 		return nil
 	}
@@ -220,7 +245,7 @@ func ImportJSON(jar http.CookieJar, u *url.URL, jsonStr string) error {
 		return err
 	}
 
-	Import(jar, u, cookies)
+	Import(ctx, jar, u, cookies)
 
 	return nil
 }
@@ -232,6 +257,7 @@ func SortForBrowser(cookies []*http.Cookie) {
 	}
 
 	slices.SortStableFunc(cookies, func(a, b *http.Cookie) int {
+		// RFC 6265 Section 5.4 Step 2: Missing secondary sort by creation-time for equal-length paths.
 		return len(b.Path) - len(a.Path)
 	})
 }
@@ -273,11 +299,11 @@ func BuildCookieHeader(cookies []*http.Cookie) string {
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
-func ExportNetscape(jar http.CookieJar, u *url.URL) string {
+func ExportNetscape(ctx context.Context, jar Jar, u *url.URL) string {
 	if jar == nil || u == nil {
 		return ""
 	}
-	cookies := jar.Cookies(u)
+	cookies := jar.Cookies(ctx, u)
 	if len(cookies) == 0 {
 		return ""
 	}
