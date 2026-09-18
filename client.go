@@ -25,7 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil/dict"
-	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/foundation/system/power"
 	"github.com/lemon4ksan/aoni/pipeline"
 )
 

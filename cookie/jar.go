@@ -18,7 +18,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 
-	"github.com/lemon4ksan/aoni/netutil/nik"
+	"github.com/lemon4ksan/foundation/net/http/nik"
 )
 
 type (
@@ -395,15 +395,6 @@ func (p *ProxyIsolatedJar) FindCookie(u *url.URL, name string) (*http.Cookie, bo
 	})
 }
 
-// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
-func (p *ProxyIsolatedJar) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
-	if c, ok := p.FindCookie(u, name); ok {
-		return generic.Some(c)
-	}
-
-	return generic.None[*http.Cookie]()
-}
-
 // GetCookieValue retrieves the value of a named cookie.
 func (p *ProxyIsolatedJar) GetCookieValue(u *url.URL, name string) (string, bool) {
 	if c, ok := p.FindCookie(u, name); ok && c != nil {
@@ -411,15 +402,6 @@ func (p *ProxyIsolatedJar) GetCookieValue(u *url.URL, name string) (string, bool
 	}
 
 	return "", false
-}
-
-// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
-func (p *ProxyIsolatedJar) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
-	if val, ok := p.GetCookieValue(u, name); ok {
-		return generic.Some(val)
-	}
-
-	return generic.None[string]()
 }
 
 // HasCookies reports whether the jar stores any active cookies for URL u.

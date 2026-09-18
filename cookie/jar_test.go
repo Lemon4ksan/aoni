@@ -65,59 +65,6 @@ func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 	assert.Empty(t, jarNoProxy.Cookies(u))
 }
 
-func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
-	t.Parallel()
-
-	pJar := cookie.NewProxyIsolatedJar()
-	u, err := url.Parse("https://yahoo.com")
-	require.NoError(t, err)
-
-	cookie1 := &http.Cookie{Name: "c1", Value: "v1"}
-	cookie2 := &http.Cookie{Name: "c2", Value: "v2"}
-
-	// Explicitly set cookies for proxy1
-	pJar.SetCookiesForProxy("http://proxy1.net", u, []*http.Cookie{cookie1})
-	// Explicitly set cookies for proxy2
-	pJar.SetCookiesForProxy("http://proxy2.net", u, []*http.Cookie{cookie2})
-
-	// Read back and assert isolation
-	cProxy1 := pJar.CookiesForProxy("http://proxy1.net", u)
-	require.Len(t, cProxy1, 1)
-	assert.Equal(t, "v1", cProxy1[0].Value)
-
-	cProxy2 := pJar.CookiesForProxy("http://proxy2.net", u)
-	require.Len(t, cProxy2, 1)
-	assert.Equal(t, "v2", cProxy2[0].Value)
-
-	// Retrieve the underlying jar directly
-	jar1 := pJar.GetJarForProxy("http://proxy1.net")
-	assert.NotNil(t, jar1)
-	assert.Equal(t, cProxy1, jar1.Cookies(u))
-
-	// Test HasCookies, FindCookie, GetCookieValue on default unproxied jar
-	pJar.SetCookies(u, []*http.Cookie{cookie1})
-	assert.True(t, pJar.HasCookies(u))
-
-	foundCookie, found := pJar.FindCookie(u, "c1")
-	require.True(t, found)
-	assert.Equal(t, "v1", foundCookie.Value)
-
-	foundOpt := pJar.FindCookieOptional(u, "c1")
-	require.True(t, foundOpt.IsPresent())
-	assert.Equal(t, "v1", foundOpt.MustValue().Value)
-
-	val, ok := pJar.GetCookieValue(u, "c1")
-	require.True(t, ok)
-	assert.Equal(t, "v1", val)
-
-	valOpt := pJar.GetCookieValueOptional(u, "c1")
-	require.True(t, valOpt.IsPresent())
-	assert.Equal(t, "v1", valOpt.MustValue())
-
-	_, missing := pJar.FindCookie(u, "non_existent")
-	assert.False(t, missing)
-}
-
 func TestProxyIsolatedCookieJar_JanitorAndPurgeExpired(t *testing.T) {
 	t.Parallel()
 

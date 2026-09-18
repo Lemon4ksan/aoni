@@ -24,7 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/dict"
-	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/resiliency/cache"

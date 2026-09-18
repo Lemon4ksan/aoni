@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/netutil/nik"
+	"github.com/lemon4ksan/foundation/net/http/nik"
 	"github.com/lemon4ksan/aoni/pipeline"
 )
 

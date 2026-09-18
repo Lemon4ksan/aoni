@@ -21,7 +21,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 
-	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 var (

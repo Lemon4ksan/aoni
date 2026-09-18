@@ -18,8 +18,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/netutil/priority"
-	"github.com/lemon4ksan/aoni/netutil/secret"
+	"github.com/lemon4ksan/foundation/net/http/priority"
+	"github.com/lemon4ksan/foundation/types/secret"
 )
 
 // WithPriority sets the default RFC 9218 "Priority" header on every outbound request.

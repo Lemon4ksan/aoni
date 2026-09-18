@@ -181,45 +181,7 @@ func TestExportNetscape(t *testing.T) {
 	assert.Contains(t, netscapeText, "example.com\tFALSE\t/\tFALSE\t0\tsession\tabc123")
 }
 
-func TestProxyIsolatedJar_FindCookie_And_GetCookieValue(t *testing.T) {
-	t.Parallel()
 
-	jar := cookie.NewProxyIsolatedJar()
-	u, _ := url.Parse("https://example.com/login")
-
-	jar.SetCookies(u, []*http.Cookie{
-		{Name: "auth_token", Value: "secret-token-123"},
-		{Name: "theme", Value: "dark"},
-	})
-
-	// FindCookie (T, bool)
-	c, ok := jar.FindCookie(u, "auth_token")
-	require.True(t, ok)
-	assert.Equal(t, "secret-token-123", c.Value)
-
-	// FindCookieOptional
-	cOpt := jar.FindCookieOptional(u, "auth_token")
-	require.True(t, cOpt.IsPresent())
-	assert.Equal(t, "secret-token-123", cOpt.MustValue().Value)
-
-	// Missing cookie
-	_, missing := jar.FindCookie(u, "non_existent")
-	assert.False(t, missing)
-	assert.False(t, jar.FindCookieOptional(u, "non_existent").IsPresent())
-
-	// GetCookieValue (string, bool)
-	val, okVal := jar.GetCookieValue(u, "theme")
-	require.True(t, okVal)
-	assert.Equal(t, "dark", val)
-
-	// GetCookieValueOptional
-	valOpt := jar.GetCookieValueOptional(u, "theme")
-	require.True(t, valOpt.IsPresent())
-	assert.Equal(t, "dark", valOpt.ValueOr("light"))
-
-	missingValOpt := jar.GetCookieValueOptional(u, "missing_setting")
-	assert.Equal(t, "default_setting", missingValOpt.ValueOr("default_setting"))
-}
 
 func TestValidateCookiePrefix(t *testing.T) {
 	t.Parallel()

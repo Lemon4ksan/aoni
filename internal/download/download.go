@@ -20,7 +20,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/netutil/sanitize"
+	"github.com/lemon4ksan/foundation/net/http/contentdisposition"
 )
 
 // ErrDownloadFailed indicates a download request failure due to an HTTP error status code.
@@ -151,7 +151,7 @@ func resolveDownloadTarget(resp *http.Response, targetPath, outputFile, outputDi
 	var filename string
 	if resp != nil && resp.Header != nil {
 		if cd := resp.Header.Get(header.ContentDisposition); cd != "" {
-			filename = sanitize.ExtractFilename(cd)
+			filename = contentdisposition.ExtractFilename(cd)
 		}
 	}
 

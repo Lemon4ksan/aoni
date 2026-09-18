@@ -10,7 +10,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
 
-	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 // ConnFilter defines the zero-allocation stream transformation contract.

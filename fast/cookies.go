@@ -23,7 +23,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/foundation/net/netutil"
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
