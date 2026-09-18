@@ -7,12 +7,13 @@ package fast
 import (
 	"io"
 
+	machhttp "github.com/lemon4ksan/mach/proto/http"
+
 	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/client/h1"
 )
 
-func decompressFastResponse(resp *h1.Response) bool {
+func decompressFastResponse(resp *machhttp.Response) bool {
 	encodingBytes := resp.Header.ContentEncoding()
 	if len(encodingBytes) == 0 {
 		return false
@@ -37,7 +38,7 @@ func decompressFastResponse(resp *h1.Response) bool {
 	return false
 }
 
-func enforceContentLengthTruncation(resp *h1.Response) {
+func enforceContentLengthTruncation(resp *machhttp.Response) {
 	if resp == nil {
 		return
 	}

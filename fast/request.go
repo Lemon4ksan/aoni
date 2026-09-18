@@ -15,7 +15,7 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/lemon4ksan/mach/client/h1"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -26,7 +26,7 @@ var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 	return &Request{}
 })
 
-// Request adapts a high-performance [*h1.Request] to the unified [aoni.Request] contract.
+// Request adapts a high-performance [*machhttp.Request] to the unified [aoni.Request] contract.
 //
 // Thread Safety & Memory Lifetime Invariants:
 // Request instances are recycled via sharded [pool.PerPStorage] for zero-lock execution.
@@ -34,7 +34,7 @@ var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
 	_          cpu.CacheLinePad
-	req        *h1.Request
+	req        *machhttp.Request
 	_          cpu.CacheLinePad
 	ctx        context.Context
 	cfg        any
@@ -43,13 +43,13 @@ type Request struct {
 	_          cpu.CacheLinePad
 }
 
-// NewRequest acquires a pooled [Request] adapter wrapping an active [*h1.Request].
-// If req is nil, a new [*h1.Request] is acquired automatically from [h1.AcquireRequest].
+// NewRequest acquires a pooled [Request] adapter wrapping an active [*machhttp.Request].
+// If req is nil, a new [*machhttp.Request] is acquired automatically from [machhttp.AcquireRequest].
 // Yields a ready-to-use [Request] adapter bound to the pool. Caller MUST call Release() when finished.
-func NewRequest(req *h1.Request) *Request {
+func NewRequest(req *machhttp.Request) *Request {
 	isAcquired := false
 	if req == nil {
-		req = h1.AcquireRequest()
+		req = machhttp.AcquireRequest()
 		req.Reset()
 
 		isAcquired = true
@@ -384,12 +384,12 @@ func (f *Request) HTTPRequest() *http.Request {
 	return nil
 }
 
-// FastHTTPRequest yields the underlying [*h1.Request] instance.
-func (f *Request) FastHTTPRequest() *h1.Request {
+// FastHTTPRequest yields the underlying [*machhttp.Request] instance.
+func (f *Request) FastHTTPRequest() *machhttp.Request {
 	return f.req
 }
 
-// EngineRequest yields the underlying [*h1.Request] cast to any.
+// EngineRequest yields the underlying [*machhttp.Request] cast to any.
 func (f *Request) EngineRequest() any {
 	return f.req
 }

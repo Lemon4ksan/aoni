@@ -19,7 +19,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/lemon4ksan/mach/client/h1"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -37,8 +37,8 @@ var (
 
 type fastBodyReadCloser struct {
 	io.Reader
-	fastReq  *h1.Request
-	fastResp *h1.Response
+	fastReq  *machhttp.Request
+	fastResp *machhttp.Response
 	once     sync.Once
 }
 
@@ -52,8 +52,8 @@ func (b *fastBodyReadCloser) Bytes() (data []byte, volatile bool) {
 
 func (b *fastBodyReadCloser) Close() error {
 	b.once.Do(func() {
-		ReleaseRequestSafe(b.fastReq)
-		ReleaseResponseSafe(b.fastResp)
+		machhttp.ReleaseRequest(b.fastReq)
+		machhttp.ReleaseResponse(b.fastResp)
 	})
 
 	return nil
@@ -81,26 +81,26 @@ func newBytesReadCloser(data []byte, volatile bool) io.ReadCloser {
 	}
 }
 
-// Response adapts a high-performance [*h1.Response] to the unified [aoni.Response] contract.
+// Response adapts a high-performance [*machhttp.Response] to the unified [aoni.Response] contract.
 //
 // Memory Lifetime Invariants & Thread Safety:
 // Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
 // when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
 	_            cpu.CacheLinePad
-	resp         *h1.Response
+	resp         *machhttp.Response
 	_            cpu.CacheLinePad
 	trailers     map[string][]string
 	uncompressed bool
 	_            cpu.CacheLinePad
 }
 
-// NewResponse acquires a pooled [Response] adapter wrapping an active [*h1.Response].
-// If resp is nil, a new [*h1.Response] is acquired automatically from [h1.AcquireResponse].
+// NewResponse acquires a pooled [Response] adapter wrapping an active [*machhttp.Response].
+// If resp is nil, a new [*machhttp.Response] is acquired automatically from [machhttp.AcquireResponse].
 // Yields a adapter instance configured for pipeline processing.
-func NewResponse(resp *h1.Response) *Response {
+func NewResponse(resp *machhttp.Response) *Response {
 	if resp == nil {
-		resp = h1.AcquireResponse()
+		resp = machhttp.AcquireResponse()
 	}
 
 	r := responseAdapterStorage.Get()
@@ -360,12 +360,12 @@ func (f *Response) HTTPResponse() *http.Response {
 	}
 }
 
-// FastHTTPResponse yields the underlying [*h1.Response] instance.
-func (f *Response) FastHTTPResponse() *h1.Response {
+// FastHTTPResponse yields the underlying [*machhttp.Response] instance.
+func (f *Response) FastHTTPResponse() *machhttp.Response {
 	return f.resp
 }
 
-// EngineResponse yields the underlying [*h1.Response] cast to any.
+// EngineResponse yields the underlying [*machhttp.Response] cast to any.
 func (f *Response) EngineResponse() any {
 	return f.resp
 }
@@ -483,15 +483,15 @@ type PooledResponse struct {
 	_ cpu.CacheLinePad
 	Response
 	_        cpu.CacheLinePad
-	fastReq  *h1.Request
-	fastResp *h1.Response
+	fastReq  *machhttp.Request
+	fastResp *machhttp.Response
 	closed   atomic.Bool
 	_        cpu.CacheLinePad
 }
 
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
-func NewPooledResponse(fastReq *h1.Request, fastResp *h1.Response) *PooledResponse {
+func NewPooledResponse(fastReq *machhttp.Request, fastResp *machhttp.Response) *PooledResponse {
 	pr := pooledResponseStorage.Get()
 
 	pr.resp = fastResp
@@ -532,12 +532,12 @@ func (r *PooledResponse) Close() error {
 		_ = r.Response.Close()
 
 		if r.fastReq != nil {
-			ReleaseRequestSafe(r.fastReq)
+			machhttp.ReleaseRequest(r.fastReq)
 			r.fastReq = nil
 		}
 
 		if r.fastResp != nil {
-			ReleaseResponseSafe(r.fastResp)
+			machhttp.ReleaseResponse(r.fastResp)
 			r.fastResp = nil
 		}
 

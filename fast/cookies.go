@@ -12,18 +12,20 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/lemon4ksan/foundation/net/http/zerocopy"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
+
 	impl "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/client/h1"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
-func (c *Client) applyCookies(ctx context.Context, req *h1.Request) {
+func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
@@ -67,7 +69,7 @@ func (c *Client) applyCookies(ctx context.Context, req *h1.Request) {
 }
 
 // captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
-func (c *Client) captureCookies(ctx context.Context, req *h1.Request, resp *h1.Response) {
+func (c *Client) captureCookies(ctx context.Context, req *machhttp.Request, resp *machhttp.Response) {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
@@ -131,7 +133,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 }
 
 // extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
-func extractUserInfoAndSetAuth(req *h1.Request) {
+func extractUserInfoAndSetAuth(req *machhttp.Request) {
 	if len(req.Header.Peek(header.Authorization)) > 0 {
 		return
 	}
@@ -164,7 +166,7 @@ func extractUserInfoAndSetAuth(req *h1.Request) {
 }
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
-func scrubSensitiveHeaders(req *h1.Request, currentURI, nextURI *h1.URI) {
+func scrubSensitiveHeaders(req *machhttp.Request, currentURI, nextURI *zerocopy.URI) {
 	req.Header.Del(header.Authorization)
 	req.Header.Del(header.ProxyAuthorization)
 	req.Header.Del(header.ProxyAuthenticate)
@@ -193,7 +195,7 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	return urlkit.IsSameDomainOrSubdomain(clean1, clean2)
 }
 
-func uriToURL(uri *h1.URI) *url.URL {
+func uriToURL(uri *zerocopy.URI) *url.URL {
 	return &url.URL{
 		Scheme:   bytesconv.B2S(uri.Scheme()),
 		Host:     bytesconv.B2S(uri.Host()),
