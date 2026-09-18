@@ -11,7 +11,7 @@ import (
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 
-	"github.com/lemon4ksan/aoni/x/tunnel/masque/wire"
+	"github.com/lemon4ksan/aoni/x/tunnel/masque"
 )
 
 func TestIPAM_AllocationAndRelease(t *testing.T) {
@@ -34,7 +34,7 @@ func TestIPAM_AllocationAndRelease(t *testing.T) {
 
 	// 2. Specific address request
 	reqIP := netip.MustParseAddr("10.8.0.7")
-	assignedReq, err := ipam.Allocate([]wire.RequestedAddress{
+	assignedReq, err := ipam.Allocate([]masque.RequestedAddress{
 		{
 			Addr:      reqIP,
 			RequestID: 5,

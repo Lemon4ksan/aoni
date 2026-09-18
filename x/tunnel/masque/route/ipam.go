@@ -9,7 +9,7 @@ import (
 	"net/netip"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/x/tunnel/masque/wire"
+	"github.com/lemon4ksan/aoni/x/tunnel/masque"
 )
 
 var (
@@ -51,7 +51,7 @@ func NewIPAM(v4Prefix, v6Prefix netip.Prefix) *IPAM {
 
 // Allocate leases an IP address for the client. If specific requests match the subnet and are free,
 // they are honored; otherwise, the next free address in the subnet is leased.
-func (m *IPAM) Allocate(reqs []wire.RequestedAddress) (wire.AssignedAddress, error) {
+func (m *IPAM) Allocate(reqs []masque.RequestedAddress) (masque.AssignedAddress, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -66,7 +66,7 @@ func (m *IPAM) Allocate(reqs []wire.RequestedAddress) (wire.AssignedAddress, err
 					pLen = 128
 				}
 
-				return wire.AssignedAddress{
+				return masque.AssignedAddress{
 					Addr:         req.Addr,
 					RequestID:    req.RequestID,
 					IPVersion:    req.IPVersion,
@@ -106,7 +106,7 @@ func (m *IPAM) Allocate(reqs []wire.RequestedAddress) (wire.AssignedAddress, err
 				reqID = reqs[0].RequestID
 			}
 
-			return wire.AssignedAddress{
+			return masque.AssignedAddress{
 				Addr:         candidate,
 				RequestID:    reqID,
 				IPVersion:    4,
@@ -115,7 +115,7 @@ func (m *IPAM) Allocate(reqs []wire.RequestedAddress) (wire.AssignedAddress, err
 		}
 	}
 
-	return wire.AssignedAddress{}, ErrIPPoolExhausted
+	return masque.AssignedAddress{}, ErrIPPoolExhausted
 }
 
 // Release returns an allocated IP address back to the pool.
