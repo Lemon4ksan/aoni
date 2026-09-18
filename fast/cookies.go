@@ -44,7 +44,7 @@ func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
 		return
 	}
 
-	cookieHeader := impl.BuildCookieHeader(cookies)
+	cookieHeader := cookie.BuildCookieHeader(cookies)
 	if cookieHeader == "" {
 		return
 	}

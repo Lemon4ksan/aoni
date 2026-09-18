@@ -5,6 +5,8 @@
 package cookie
 
 import (
+	"strconv"
+
 	"net/http"
 	"net/url"
 	"slices"
@@ -39,11 +41,11 @@ func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 	return fcookie.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 }
 
-// ValidateCookiePrefix reports whether a cookie satisfies RFC 6265bis §4.1.3 & §5.4 cookie prefix rules:
+// ValidatePrefix reports whether a cookie satisfies RFC 6265bis §4.1.3 & §5.4 cookie prefix rules:
 //   - "__Secure-": MUST have Secure=true.
 //   - "__Host-": MUST have Secure=true, Path="/", and empty Domain (host-only).
 //   - Nameless cookies whose value begins with "__Secure-" or "__Host-" MUST be rejected (RFC 6265bis §5.7 step 22).
-func ValidateCookiePrefix(c Cookie) bool {
+func ValidatePrefix(c Cookie) bool {
 	return fcookie.ValidatePrefix(c)
 }
 
@@ -118,25 +120,6 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 			jar.SetCookies(target, toMirror)
 		}
 	}
-}
-
-// SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
-func SortForBrowser(cookies []*http.Cookie) {
-	fcookie.SortForBrowser(cookies)
-}
-
-// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string (RFC 6265 §4.2.1 & §5.4).
-func BuildCookieHeader(cookies []*http.Cookie) string {
-	return fcookie.BuildCookieHeader(cookies)
-}
-
-// ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
-func ExportNetscape(jar http.CookieJar, u *url.URL) string {
-	if jar == nil || u == nil {
-		return ""
-	}
-
-	return fcookie.ExportNetscape(jar.Cookies(u), u.Hostname())
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.
@@ -238,6 +221,116 @@ func ImportJSON(jar http.CookieJar, u *url.URL, jsonStr string) error {
 	}
 
 	Import(jar, u, cookies)
+
+	return nil
+}
+
+// SortForBrowser sorts cookies in-place per RFC 6265 §5.4.
+func SortForBrowser(cookies []*http.Cookie) {
+	if len(cookies) <= 1 {
+		return
+	}
+
+	slices.SortStableFunc(cookies, func(a, b *http.Cookie) int {
+		return len(b.Path) - len(a.Path)
+	})
+}
+
+// BuildCookieHeader constructs an RFC 6265 compliant Cookie request header string.
+func BuildCookieHeader(cookies []*http.Cookie) string {
+	if len(cookies) == 0 {
+		return ""
+	}
+
+	var (
+		stackBuf [16]*http.Cookie
+		sorted   []*http.Cookie
+	)
+
+	if len(cookies) <= len(stackBuf) {
+		sorted = stackBuf[:len(cookies)]
+		copy(sorted, cookies)
+	} else {
+		sorted = slices.Clone(cookies)
+	}
+
+	SortForBrowser(sorted)
+
+	var sb strings.Builder
+	sb.Grow(len(sorted) * 36)
+
+	for i, c := range sorted {
+		if i > 0 {
+			sb.WriteString("; ")
+		}
+
+		sb.WriteString(c.Name)
+		sb.WriteByte('=')
+		sb.WriteString(c.Value)
+	}
+
+	return sb.String()
+}
+
+// ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
+func ExportNetscape(jar http.CookieJar, u *url.URL) string {
+	if jar == nil || u == nil {
+		return ""
+	}
+	cookies := jar.Cookies(u)
+	if len(cookies) == 0 {
+		return ""
+	}
+	defaultHost := u.Hostname()
+
+	var sb strings.Builder
+	sb.Grow(len(cookies) * 80)
+	sb.WriteString("# Netscape HTTP Cookie File\n\n")
+
+	var numBuf [20]byte
+
+	for _, c := range cookies {
+		domain := generic.Coalesce(c.Domain, defaultHost)
+		includeSubdomains := generic.Ternary(len(domain) > 0 && domain[0] == '.', "TRUE", "FALSE")
+		path := generic.Coalesce(c.Path, "/")
+		secure := generic.Ternary(c.Secure, "TRUE", "FALSE")
+
+		expires := "0"
+		if !c.Expires.IsZero() {
+			b := strconv.AppendInt(numBuf[:0], c.Expires.Unix(), 10)
+			expires = bytesconv.B2S(b)
+		}
+
+		sb.WriteString(domain)
+		sb.WriteByte('\t')
+		sb.WriteString(includeSubdomains)
+		sb.WriteByte('\t')
+		sb.WriteString(path)
+		sb.WriteByte('\t')
+		sb.WriteString(secure)
+		sb.WriteByte('\t')
+		sb.WriteString(expires)
+		sb.WriteByte('\t')
+		sb.WriteString(c.Name)
+		sb.WriteByte('\t')
+		sb.WriteString(c.Value)
+		sb.WriteByte('\n')
+	}
+
+	return sb.String()
+}
+
+// ParseSingleCookie parses key and value bytes into an http.Cookie pointer.
+func ParseSingleCookie(_, value []byte) *http.Cookie {
+	header := http.Header{}
+	header.Add("Set-Cookie", bytesconv.B2S(value))
+
+	fakeResp := &http.Response{Header: header}
+
+	parsed := fakeResp.Cookies()
+	if len(parsed) > 0 {
+		return parsed[0]
+	}
 
 	return nil
 }

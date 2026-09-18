@@ -181,32 +181,30 @@ func TestExportNetscape(t *testing.T) {
 	assert.Contains(t, netscapeText, "example.com\tFALSE\t/\tFALSE\t0\tsession\tabc123")
 }
 
-
-
 func TestValidateCookiePrefix(t *testing.T) {
 	t.Parallel()
 
 	// __Secure-
-	assert.True(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+	assert.True(t, cookie.ValidatePrefix(cookie.Cookie{
 		Name:   "__Secure-id",
 		Value:  "val",
 		Secure: true,
 	}))
-	assert.False(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+	assert.False(t, cookie.ValidatePrefix(cookie.Cookie{
 		Name:   "__Secure-id",
 		Value:  "val",
 		Secure: false,
 	}))
 
 	// __Host-
-	assert.True(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+	assert.True(t, cookie.ValidatePrefix(cookie.Cookie{
 		Name:   "__Host-id",
 		Value:  "val",
 		Secure: true,
 		Path:   "/",
 		Domain: "",
 	}))
-	assert.False(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+	assert.False(t, cookie.ValidatePrefix(cookie.Cookie{
 		Name:   "__Host-id",
 		Value:  "val",
 		Secure: true,
