@@ -62,7 +62,7 @@ func main() {
 	totalReqs := int64(1200000)
 	reqsPerWorker := totalReqs / int64(workers)
 
-	var completed int64
+	var completed atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(workers)
 
@@ -79,14 +79,14 @@ func main() {
 					return
 				}
 				_ = resp.Close()
-				atomic.AddInt64(&completed, 1)
+				completed.Add(1)
 			}
 		}()
 	}
 
 	wg.Wait()
 	dur := time.Since(start)
-	totalDone := atomic.LoadInt64(&completed)
+	totalDone := completed.Load()
 
 	rps := float64(totalDone) / dur.Seconds()
 	avgLat := float64(dur.Nanoseconds()) / float64(totalDone) * float64(workers)

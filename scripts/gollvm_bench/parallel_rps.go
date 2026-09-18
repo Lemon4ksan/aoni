@@ -98,7 +98,7 @@ func runParallelBenchmark(workers int, totalRequests int64) (rps float64, avgLat
 	reqPayload := []byte("GET /api/v1/resource HTTP/1.1\r\nHost: inmemory\r\nUser-Agent: aoni/gollvm-bench\r\nAccept: application/json\r\nConnection: keep-alive\r\n\r\n")
 
 	reqsPerWorker := totalRequests / int64(workers)
-	var completedCount int64
+	var completedCount atomic.Int64
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -153,7 +153,7 @@ func runParallelBenchmark(workers int, totalRequests int64) (rps float64, avgLat
 					latencies[workerID] = append(latencies[workerID], lat)
 				}
 				sampleCounter++
-				atomic.AddInt64(&completedCount, 1)
+				completedCount.Add(1)
 			}
 		}()
 	}
@@ -161,7 +161,7 @@ func runParallelBenchmark(workers int, totalRequests int64) (rps float64, avgLat
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	totalDone := atomic.LoadInt64(&completedCount)
+	totalDone := completedCount.Load()
 	rps = float64(totalDone) / elapsed.Seconds()
 	avgLatencyNs = float64(elapsed.Nanoseconds()) / float64(totalDone) * float64(workers)
 

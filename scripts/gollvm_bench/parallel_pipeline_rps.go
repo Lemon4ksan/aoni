@@ -161,7 +161,7 @@ func runParallelFullPipeline(workers int, totalRequests int64) (rps float64, avg
 	headersToMatch := "accept"
 
 	reqsPerWorker := totalRequests / int64(workers)
-	var completedCount int64
+	var completedCount atomic.Int64
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -201,7 +201,7 @@ func runParallelFullPipeline(workers int, totalRequests int64) (rps float64, avg
 				// 4. Compute: Varint packet framing
 				binary.PutUvarint(varintBuf, uint64(n))
 
-				atomic.AddInt64(&completedCount, 1)
+				completedCount.Add(1)
 			}
 		}()
 	}
@@ -209,7 +209,7 @@ func runParallelFullPipeline(workers int, totalRequests int64) (rps float64, avg
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	totalDone := atomic.LoadInt64(&completedCount)
+	totalDone := completedCount.Load()
 	rps = float64(totalDone) / elapsed.Seconds()
 	avgLatNs = float64(elapsed.Nanoseconds()) / float64(totalDone) * float64(workers)
 	return rps, avgLatNs

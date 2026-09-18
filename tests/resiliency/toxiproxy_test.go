@@ -177,7 +177,7 @@ func TestToxiproxyResilienceAndStress(t *testing.T) {
 		client := aoni.NewClient(fast.NewClient())
 		const concurrency = 1000
 		var wg sync.WaitGroup
-		var success, failures int32
+		var success, failures atomic.Int32
 
 		for range concurrency {
 			wg.Go(func() {
@@ -186,17 +186,17 @@ func TestToxiproxyResilienceAndStress(t *testing.T) {
 
 				resp, err := client.Get(ctx, proxyURL)
 				if err != nil {
-					atomic.AddInt32(&failures, 1)
+					failures.Add(1)
 					return
 				}
 				io.ReadAll(resp.Body)
 				resp.Body.Close()
-				atomic.AddInt32(&success, 1)
+				success.Add(1)
 			})
 		}
 
 		wg.Wait()
-		if success == 0 {
+		if success.Load() == 0 {
 			t.Fatal("All connections failed in Thundering Herd")
 		}
 	})
