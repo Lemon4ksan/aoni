@@ -11,8 +11,8 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/ext/codec/decode"
-	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/x/codec/decode"
+	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 

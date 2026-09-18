@@ -19,9 +19,9 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/ext/codec"
-	"github.com/lemon4ksan/aoni/ext/codec/decode"
-	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/x/codec"
+	"github.com/lemon4ksan/aoni/x/codec/decode"
+	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/download"
 	"github.com/lemon4ksan/aoni/mod"

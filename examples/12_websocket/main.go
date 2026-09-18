@@ -18,7 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/ext/realtime/ws"
+	"github.com/lemon4ksan/aoni/x/realtime/ws"
 )
 
 func main() {

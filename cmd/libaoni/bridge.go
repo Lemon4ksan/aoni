@@ -21,7 +21,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/simd"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/ext/realtime/ws"
+	"github.com/lemon4ksan/aoni/x/realtime/ws"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/option"

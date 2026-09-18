@@ -7,7 +7,7 @@ package proxy
 import (
 	"time"
 
-	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/x/telemetry"
 	"github.com/lemon4ksan/aoni/internal/health"
 )
 
