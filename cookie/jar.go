@@ -4,6 +4,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 
 	"context"
+	"sync/atomic"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,13 +59,15 @@ type cookieKey struct {
 
 // ProxyIsolatedJar provides thread-safe, per-proxy and CHIPS partitioned cookie storage isolation.
 type ProxyIsolatedJar struct {
-	jars    generic.ConcurrentMap[string, core.CookieJar]
+	jars    *generic.LRU[string, core.CookieJar]
 	backend generic.Safe[Storage]
 }
 
 // NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar].
 func NewProxyIsolatedJar() *ProxyIsolatedJar {
-	return &ProxyIsolatedJar{}
+	return &ProxyIsolatedJar{
+		jars: generic.NewLRU[string, core.CookieJar](10000),
+	}
 }
 
 // SetCookies satisfies the context-aware [cookie.core.CookieJar] interface.
@@ -84,23 +87,18 @@ func (p *ProxyIsolatedJar) Cookies(ctx context.Context, u *url.URL) []*http.Cook
 
 // GetJarForProxy retrieves or lazily initializes an isolated [core.CookieJar] bound to the specified proxyURL.
 func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) core.CookieJar {
-	if jar, ok := p.jars.Load(proxyURL); ok {
+	if jar, ok := p.jars.Get(proxyURL); ok {
 		return jar
 	}
 
 	baseJar := NewMemoryJar()
-
 	var jar core.CookieJar = baseJar
-
 	backend := p.backend.Get()
-
 	if backend != nil {
 		jar = p.initPersistentJar(proxyURL, baseJar, backend)
 	}
-
-	actual, _ := p.jars.LoadOrStore(proxyURL, jar)
-
-	return actual
+	p.jars.Put(proxyURL, jar)
+	return jar
 }
 
 // WithStorageBackend configures a persistent storage backend.
@@ -137,12 +135,11 @@ func (p *ProxyIsolatedJar) StartJanitor(ctx context.Context, interval time.Durat
 
 // PurgeExpired removes all expired cookies.
 func (p *ProxyIsolatedJar) PurgeExpired() {
-	p.jars.Range(func(_ string, jar core.CookieJar) bool {
+	for _, jar := range p.jars.Values() {
 		if pJar, ok := jar.(*PersistentJar); ok {
 			pJar.purgeExpired()
 		}
-		return true
-	})
+	}
 }
 
 func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar core.CookieJar, backend Storage) core.CookieJar {
@@ -196,6 +193,7 @@ type PersistentJar struct {
 	proxyURL string
 	backend  Storage
 	cookies  generic.Safe[map[cookieKey]Cookie]
+	dirty    atomic.Bool
 }
 
 func isExpiredCookie(expires time.Time, maxAge int, now time.Time) bool {
@@ -240,7 +238,6 @@ func (pj *PersistentJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie
 	now := clock.CoarseTime()
 	validCookies := make([]*http.Cookie, 0, len(cookies))
 
-	var flushList []Cookie
 
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		hasExpired := false
@@ -254,32 +251,41 @@ func (pj *PersistentJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie
 			validCookies = append(validCookies, c)
 		}
 
-		if hasExpired && pj.backend != nil {
-			flushList = generic.Values(*m)
+		if hasExpired {
+			pj.dirty.Store(true)
 		}
 	})
 
-	if len(flushList) > 0 && pj.backend != nil {
-		_ = pj.backend.Save(pj.proxyURL, flushList)
-	}
-
 	return validCookies
+}
+
+
+// SaveIfDirty flushes the cookie state to persistent storage if it has changed since the last save.
+func (pj *PersistentJar) SaveIfDirty() {
+	if pj.backend == nil {
+		return
+	}
+	if !pj.dirty.CompareAndSwap(true, false) {
+		return
+	}
+	var flushList []Cookie
+	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
+		flushList = generic.Values(*m)
+	})
+	_ = pj.backend.Save(pj.proxyURL, flushList)
 }
 
 func (pj *PersistentJar) purgeExpired() {
 	now := clock.CoarseTime()
 
-	var flushList []Cookie
 
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
-		if purgeExpiredCookies(*m, now) && pj.backend != nil {
-			flushList = generic.Values(*m)
+		if purgeExpiredCookies(*m, now) {
+			pj.dirty.Store(true)
 		}
 	})
-
-	if len(flushList) > 0 && pj.backend != nil {
-		_ = pj.backend.Save(pj.proxyURL, flushList)
-	}
+	
+	pj.SaveIfDirty()
 }
 
 // SetCookies stores cookies in the inner jar and flushes non-expired cookies to persistent storage.
@@ -289,7 +295,6 @@ func (pj *PersistentJar) SetCookies(ctx context.Context, u *url.URL, cookies []*
 	now := clock.CoarseTime()
 	partitionKey := GetPartitionKey(ctx)
 
-	var flushList []Cookie
 
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		changed := false
@@ -320,14 +325,10 @@ func (pj *PersistentJar) SetCookies(ctx context.Context, u *url.URL, cookies []*
 			changed = true
 		}
 
-		if changed && pj.backend != nil {
-			flushList = generic.Values(*m)
+		if changed {
+			pj.dirty.Store(true)
 		}
 	})
-
-	if len(flushList) > 0 && pj.backend != nil {
-		_ = pj.backend.Save(pj.proxyURL, flushList)
-	}
 }
 
 // Finder defines a capability interface for cookie jars that support direct named cookie lookups.
