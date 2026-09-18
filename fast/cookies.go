@@ -7,7 +7,7 @@
 package fast
 
 import (
-	auth "github.com/lemon4ksan/foundation/net/http/auth"
+	"github.com/lemon4ksan/foundation/net/http/auth"
 
 	"bytes"
 	"context"
@@ -15,9 +15,8 @@ import (
 	"net/url"
 
 	"github.com/lemon4ksan/foundation/net/http/zerocopy"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 
-	impl "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -27,7 +26,7 @@ import (
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
-func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
+func (c *Client) applyCookies(ctx context.Context, req *mach.Request) {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
@@ -67,12 +66,8 @@ func (c *Client) applyCookies(ctx context.Context, req *machhttp.Request) {
 }
 
 // captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
-func (c *Client) captureCookies(ctx context.Context, req *machhttp.Request, resp *machhttp.Response) {
+func (c *Client) captureCookies(ctx context.Context, req *mach.Request, resp *mach.Response) {
 	jar := c.cfg.Engine.CookieJar
-	if jar == nil {
-		return
-	}
-
 	if jar == nil {
 		return
 	}
@@ -97,7 +92,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 		return nil
 	}
 
-	dto := impl.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
+	dto := cookie.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
 	if dto.Name == "" {
 		return nil
 	}
@@ -127,7 +122,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 }
 
 // extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
-func extractUserInfoAndSetAuth(req *machhttp.Request) {
+func extractUserInfoAndSetAuth(req *mach.Request) {
 	if len(req.Header.Peek(header.Authorization)) > 0 {
 		return
 	}
@@ -160,7 +155,7 @@ func extractUserInfoAndSetAuth(req *machhttp.Request) {
 }
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
-func scrubSensitiveHeaders(req *machhttp.Request, currentURI, nextURI *zerocopy.URI) {
+func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *zerocopy.URI) {
 	req.Header.Del(header.Authorization)
 	req.Header.Del(header.ProxyAuthorization)
 	req.Header.Del(header.ProxyAuthenticate)
@@ -183,10 +178,7 @@ func scrubSensitiveHeaders(req *machhttp.Request, currentURI, nextURI *zerocopy.
 
 // isSameDomainOrSubdomain reports whether h1 and h2 belong to the same domain or subdomain hierarchy.
 func isSameDomainOrSubdomain(h1, h2 string) bool {
-	clean1 := netutil.CleanHost(h1)
-	clean2 := netutil.CleanHost(h2)
-
-	return urlkit.IsSameDomainOrSubdomain(clean1, clean2)
+	return urlkit.IsSameDomainOrSubdomain(netutil.CleanHost(h1), netutil.CleanHost(h2))
 }
 
 func uriToURL(uri *zerocopy.URI) *url.URL {

@@ -7,6 +7,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/transport"
+	"github.com/lemon4ksan/foundation/generic"
 	machhttp "github.com/lemon4ksan/mach/proto/http"
 )
 
@@ -17,9 +18,9 @@ type Client struct {
 
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := aoni.Config{}
-	for _, opt := range opts {
-		opt(&c)
-	}
+
+	generic.ApplyOptions(&c, opts...)
+
 	return &Client{
 		engine: transport.NewPool(),
 		cfg:    c,
@@ -37,7 +38,6 @@ func (c *Client) Do(req core.Request) (core.Response, error) {
 	}
 
 	fastRes := NewResponse(nil)
-	// Actually AcquireResponse in response.go might just do  := responseAdapterStorage.Get(); r.resp = machhttp.NewResponse(nil). Let's assume fastRes has .resp.
 
 	ctx := req.Context()
 	if ctx == nil {
@@ -58,8 +58,7 @@ func (c *Client) Do(req core.Request) (core.Response, error) {
 	return fastRes, nil
 }
 
-func (c *Client) execute(ctx context.Context, fastReq *machhttp.Request, fastRes *machhttp.Response) (map[string][]string, error, bool) {
+func (c *Client) execute(fastReq *machhttp.Request, fastRes *machhttp.Response) (map[string][]string, error, bool) {
 	err := c.engine.Do(fastReq, fastRes)
 	return nil, err, false
 }
-func (c *Client) referer(req *machhttp.Request, res *machhttp.Response) {}

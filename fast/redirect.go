@@ -28,7 +28,7 @@ func (c *Client) executeWithRedirects(
 		c.applyCookies(ctx, fastReq)
 		extractUserInfoAndSetAuth(fastReq)
 
-		trailers, err, autoReleased = c.execute(ctx, fastReq, fastResp)
+		trailers, err, autoReleased = c.execute(fastReq, fastResp)
 		if err == nil {
 			c.captureCookies(ctx, fastReq, fastResp)
 		}
@@ -46,7 +46,7 @@ func (c *Client) executeWithRedirects(
 		fastReq.URI().CopyTo(currentURI)
 		extractUserInfoAndSetAuth(fastReq)
 
-		trailers, err, autoReleased = c.execute(ctx, fastReq, fastResp)
+		trailers, err, autoReleased = c.execute(fastReq, fastResp)
 		if err != nil {
 			return nil, err, autoReleased
 		}

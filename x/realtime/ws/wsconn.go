@@ -1085,7 +1085,8 @@ func isForbiddenH2ConnectHeader(key string) bool {
 }
 
 func (c *wsH2Conn) readConnectResponse() (http.Header, error) {
-	decoder := hpack.NewDecoder(4096, nil)
+	decoder := hpack.AcquireHPACK()
+	defer hpack.ReleaseHPACK(decoder)
 	respHeaders := make(http.Header)
 
 	for {
@@ -1133,23 +1134,32 @@ func (c *wsH2Conn) readConnectResponse() (http.Header, error) {
 
 func (c *wsH2Conn) processResponseHeaders(
 	f *http2.HeadersFrame,
-	decoder *hpack.Decoder,
+	decoder *hpack.HPACK,
 	headers http.Header,
 ) (http.Header, error) {
-	fields, err := decoder.DecodeFull(f.HeaderBlockFragment())
-	if err != nil {
-		return nil, err
-	}
+	hf := hpack.AcquireHeaderField()
+	defer hpack.ReleaseHeaderField(hf)
 
+	b := f.HeaderBlockFragment()
+	var err error
 	status := ""
-	for _, field := range fields {
-		if field.Name == ":status" {
-			status = field.Value
+	
+	for len(b) > 0 {
+		b, err = decoder.Next(hf, b)
+		if err != nil {
+			return nil, err
+		}
+
+		name := string(hf.KeyBytes())
+		value := string(hf.ValueBytes())
+
+		if name == ":status" {
+			status = value
 			continue
 		}
 
-		if !strings.HasPrefix(field.Name, ":") {
-			headers.Add(field.Name, field.Value)
+		if !strings.HasPrefix(name, ":") {
+			headers.Add(name, value)
 		}
 	}
 

@@ -6,7 +6,6 @@
 package ws
 
 import (
-	"bytes"
 	"net/http"
 	"strings"
 
@@ -20,27 +19,29 @@ func EncodeConnectHeaders(
 	req *http.Request,
 	isForbiddenHeader func(string) bool,
 ) ([]byte, error) {
-	var buf bytes.Buffer
 
-	encoder := hpack.NewEncoder(&buf)
+	hp := hpack.AcquireHPACK()
+	defer hpack.ReleaseHPACK(hp)
+	hf := hpack.AcquireHeaderField()
+	defer hpack.ReleaseHeaderField(hf)
 
-	pseudoHeaders := []hpack.HeaderField{
-		{Name: header.PseudoMethod, Value: header.MethodConnect},
-		{Name: header.PseudoProtocol, Value: header.ValueWebSocket},
-		{Name: header.PseudoScheme, Value: scheme},
-		{Name: header.PseudoPath, Value: path},
-		{Name: header.PseudoAuthority, Value: host},
+	var out []byte
+
+	pseudoHeaders := [][2]string{
+		{header.PseudoMethod, header.MethodConnect},
+		{header.PseudoProtocol, header.ValueWebSocket},
+		{header.PseudoScheme, scheme},
+		{header.PseudoPath, path},
+		{header.PseudoAuthority, host},
 	}
 
 	for _, h := range pseudoHeaders {
-		if err := encoder.WriteField(h); err != nil {
-			return nil, err
-		}
+		hf.Set(h[0], h[1])
+		out = hp.AppendHeader(out, hf, false)
 	}
 
-	if err := encoder.WriteField(hpack.HeaderField{Name: "sec-websocket-version", Value: "13"}); err != nil {
-		return nil, err
-	}
+	hf.Set("sec-websocket-version", "13")
+	out = hp.AppendHeader(out, hf, false)
 
 	if req != nil {
 		for k, vv := range req.Header {
@@ -50,12 +51,11 @@ func EncodeConnectHeaders(
 			}
 
 			for _, v := range vv {
-				if err := encoder.WriteField(hpack.HeaderField{Name: lowerKey, Value: v}); err != nil {
-					return nil, err
-				}
+				hf.Set(lowerKey, v)
+				out = hp.AppendHeader(out, hf, false)
 			}
 		}
 	}
 
-	return buf.Bytes(), nil
+	return out, nil
 }
