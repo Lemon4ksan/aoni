@@ -21,10 +21,10 @@ import (
 
 	"github.com/lemon4ksan/aoni/ext/codec"
 	"github.com/lemon4ksan/aoni/ext/codec/decode"
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/download"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 var (

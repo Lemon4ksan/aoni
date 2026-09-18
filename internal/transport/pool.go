@@ -15,11 +15,11 @@ type Pool struct {
 	conns map[string][]*h1.ClientConn
 	mu    sync.Mutex
 
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	TLSConfig    *tls.Config
-	Dial         func(string) (net.Conn, error)
-	DialDualStack bool
+	ReadTimeout                   time.Duration
+	WriteTimeout                  time.Duration
+	TLSConfig                     *tls.Config
+	Dial                          func(string) (net.Conn, error)
+	DialDualStack                 bool
 	DisableHeaderNamesNormalizing bool
 }
 

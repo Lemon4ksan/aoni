@@ -16,9 +16,9 @@ import (
 
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/foundation/net/quic"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
-	"github.com/lemon4ksan/foundation/net/quic"
 )
 
 func startMockDoQServer(t *testing.T, _ func(stream *quic.Stream)) (string, *tls.Config, func()) {

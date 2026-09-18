@@ -99,7 +99,7 @@ func (c *Client) executeWithRedirects(
 			fastReq.Header.SetBytesKV(bytesconv.S2B("Referer"), currentURI.FullURI())
 		}
 
-				zerocopy.ReleaseURI(nextURI)
+		zerocopy.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
 }

@@ -19,11 +19,11 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
-	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // AsReplayable wraps an [io.ReadCloser] into a replayable stream ([iokit.ReplayableBody])

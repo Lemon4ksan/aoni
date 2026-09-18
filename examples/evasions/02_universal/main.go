@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/PuerkitoBio/goquery"

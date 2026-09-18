@@ -5,6 +5,8 @@
 package core
 
 import (
+	auth "github.com/lemon4ksan/foundation/net/http/auth"
+
 	"bytes"
 	"context"
 	"io"
@@ -15,8 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-
-	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // ModifierType specifies the discrete operation type of a [RequestModifier] value.
@@ -61,9 +61,9 @@ func (m RequestModifier) Apply(req Request) {
 	case ModQuery, ModQueryAdd:
 		req.AddQueryParam(m.Key, m.Value)
 	case ModBearer:
-		req.SetHeader(header.Authorization, netutil.FormatBearerAuth(m.Value))
+		req.SetHeader(header.Authorization, auth.FormatBearer(m.Value))
 	case ModBasicAuth:
-		req.SetHeader(header.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
+		req.SetHeader(header.Authorization, auth.FormatBasic(m.Key, m.Value))
 	case ModBodyBytes:
 		req.SetBodyBytes(m.Bytes)
 
@@ -128,14 +128,14 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(header.Authorization, netutil.FormatBearerAuth(m.Value))
+		req.Header.Set(header.Authorization, auth.FormatBearer(m.Value))
 
 	case ModBasicAuth:
 		if req.Header == nil {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(header.Authorization, netutil.FormatBasicAuth(m.Key, m.Value))
+		req.Header.Set(header.Authorization, auth.FormatBasic(m.Key, m.Value))
 
 	case ModBodyBytes:
 		buf := m.Bytes

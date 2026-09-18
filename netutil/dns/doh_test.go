@@ -24,7 +24,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/dns"
-	"github.com/lemon4ksan/aoni/netutil/svcb"
+	"github.com/lemon4ksan/foundation/net/dns/svcb"
 )
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)

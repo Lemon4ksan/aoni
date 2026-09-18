@@ -26,8 +26,8 @@ import (
 	"github.com/lemon4ksan/foundation/testing/require"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 type mockDoer struct {

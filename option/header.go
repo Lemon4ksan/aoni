@@ -5,6 +5,8 @@
 package option
 
 import (
+	auth "github.com/lemon4ksan/foundation/net/http/auth"
+
 	"net/http"
 	"net/url"
 	"os"
@@ -16,7 +18,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/priority"
 	"github.com/lemon4ksan/aoni/netutil/secret"
 )
@@ -198,7 +199,7 @@ func WithBearer(token string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Authorization, netutil.FormatBearerAuth(token))
+		cfg.Defaults.Headers.Set(header.Authorization, auth.FormatBearer(token))
 	}
 }
 
@@ -220,7 +221,7 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Authorization, netutil.FormatBasicAuth(username, password))
+		cfg.Defaults.Headers.Set(header.Authorization, auth.FormatBasic(username, password))
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"

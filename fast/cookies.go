@@ -7,6 +7,8 @@
 package fast
 
 import (
+	auth "github.com/lemon4ksan/foundation/net/http/auth"
+
 	"bytes"
 	"context"
 	"net/http"
@@ -142,7 +144,7 @@ func extractUserInfoAndSetAuth(req *machhttp.Request) {
 	if len(uBytes) > 0 {
 		user := bytesconv.B2S(uBytes)
 		pass := bytesconv.B2S(req.URI().Password())
-		req.Header.Set(header.Authorization, netutil.FormatBasicAuth(user, pass))
+		req.Header.Set(header.Authorization, auth.FormatBasic(user, pass))
 		req.URI().SetUsernameBytes(nil)
 		req.URI().SetPasswordBytes(nil)
 
@@ -158,7 +160,7 @@ func extractUserInfoAndSetAuth(req *machhttp.Request) {
 	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
 		user := parsed.User.Username()
 		pass, _ := parsed.User.Password()
-		req.Header.Set(header.Authorization, netutil.FormatBasicAuth(user, pass))
+		req.Header.Set(header.Authorization, auth.FormatBasic(user, pass))
 	}
 
 	req.URI().SetUsername("")

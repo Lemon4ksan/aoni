@@ -7,8 +7,8 @@ package pipeline
 import (
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // PipelineHandler defines the domain-specific logic for processing a transaction.

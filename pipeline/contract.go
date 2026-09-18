@@ -12,8 +12,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 
-	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/ext/telemetry"
+	"github.com/lemon4ksan/aoni/netutil/dict"
 )
 
 // PhaseID identifies fixed transaction execution phases.

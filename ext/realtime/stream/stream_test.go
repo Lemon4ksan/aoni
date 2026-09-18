@@ -21,9 +21,9 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/ext/realtime/stream"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/ext/realtime/stream"
 )
 
 // setupTestServer creates a test server and pre-configures a client with its URL.

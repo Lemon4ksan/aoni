@@ -9,7 +9,7 @@ import (
 	"net"
 	"sync"
 
-		machhttp "github.com/lemon4ksan/mach/proto/http"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
 )
 
 // ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.

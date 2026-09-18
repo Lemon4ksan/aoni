@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"net/http"
 
-	"github.com/lemon4ksan/aoni/netutil/cachestatus"
+	"github.com/lemon4ksan/foundation/net/cachestatus"
 )
 
 // HeaderCacheStatus is the standard HTTP response header field name for cache status metadata (RFC 9211 §2).

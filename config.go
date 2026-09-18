@@ -19,6 +19,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 
+	"github.com/lemon4ksan/aoni/ext/telemetry"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -27,7 +28,6 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
-	"github.com/lemon4ksan/aoni/ext/telemetry"
 )
 
 // ============================================================================
