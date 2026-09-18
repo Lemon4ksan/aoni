@@ -32,15 +32,22 @@ type Session struct {
 	controlStream io.ReadWriteCloser
 	datagrams     DatagramTransport
 	contextID     uint64
+	quarterStreamID uint64
 	closed        atomic.Bool
 }
 
 // NewSession initializes a new MASQUE [Session] over an underlying control stream and datagram transport.
 func NewSession(controlStream io.ReadWriteCloser, datagrams DatagramTransport) *Session {
+	var qid uint64
+	if s, ok := controlStream.(interface{ StreamID() quic.StreamID }); ok {
+		qid = uint64(s.StreamID()) / 4
+	}
+
 	return &Session{
 		controlStream: controlStream,
 		datagrams:     datagrams,
 		contextID:     0,
+		quarterStreamID: qid,
 	}
 }
 
@@ -51,25 +58,37 @@ func (s *Session) SendIPPacket(packet []byte) error {
 		return netErrClosed
 	}
 
-	if s.datagrams == nil {
-		return errors.New("aoni/masque: datagram transport not configured")
-	}
-
 	var stackBuf [2048]byte
-
 	var buf []byte
 
-	varIDLen := impl.EncodeVarintSlice(s.contextID, stackBuf[:8])
-	totalLen := varIDLen + len(packet)
+	if s.datagrams == nil {
+		// Fallback to DATAGRAM capsule
+		varIDLen := impl.EncodeVarintSlice(s.contextID, stackBuf[:8])
+		totalLen := varIDLen + len(packet)
+
+		if totalLen <= len(stackBuf) {
+			buf = stackBuf[:totalLen]
+		} else {
+			buf = make([]byte, totalLen)
+			_ = impl.EncodeVarintSlice(s.contextID, buf[:varIDLen])
+		}
+		copy(buf[varIDLen:], packet)
+
+		return s.WriteCapsule(CapsuleDatagram, buf)
+	}
+
+	n1 := impl.EncodeVarintSlice(s.quarterStreamID, stackBuf[:8])
+	n2 := impl.EncodeVarintSlice(s.contextID, stackBuf[n1:n1+8])
+	totalLen := n1 + n2 + len(packet)
 
 	if totalLen <= len(stackBuf) {
 		buf = stackBuf[:totalLen]
 	} else {
 		buf = make([]byte, totalLen)
-		_ = impl.EncodeVarintSlice(s.contextID, buf[:varIDLen])
+		n1 = impl.EncodeVarintSlice(s.quarterStreamID, buf[:8])
+		_ = impl.EncodeVarintSlice(s.contextID, buf[n1:n1+8])
 	}
-
-	copy(buf[varIDLen:], packet)
+	copy(buf[n1+n2:], packet)
 
 	return s.datagrams.SendDatagram(buf)
 }
@@ -82,7 +101,9 @@ func (s *Session) ReceiveIPPacket(ctx context.Context) ([]byte, error) {
 	}
 
 	if s.datagrams == nil {
-		return nil, errors.New("aoni/masque: datagram transport not configured")
+		// Cannot safely do blocking ReadCapsule here since user might be reading capsules directly.
+		// If they use capsules, they should manually call ReadCapsule and check type.
+		return nil, errors.New("aoni/masque: datagram transport not configured, use ReadCapsule")
 	}
 
 	for {
@@ -95,17 +116,33 @@ func (s *Session) ReceiveIPPacket(ctx context.Context) ([]byte, error) {
 			continue
 		}
 
-		ctxID, n, err := DecodeVarint(raw)
+		// Decode Quarter Stream ID (RFC 9297 Section 2.1)
+		qStreamID, n1, err := DecodeVarint(raw)
+		if err != nil {
+			continue
+		}
+
+		if qStreamID != s.quarterStreamID {
+			continue
+		}
+
+		raw = raw[n1:]
+
+		if len(raw) == 0 {
+			continue
+		}
+
+		// Decode Context ID (RFC 9484 / RFC 9298)
+		ctxID, n2, err := DecodeVarint(raw)
 		if err != nil {
 			continue
 		}
 
 		if ctxID != s.contextID {
-			// Ignore unexpected context IDs per RFC 9484 §6
 			continue
 		}
 
-		return raw[n:], nil
+		return raw[n2:], nil
 	}
 }
 

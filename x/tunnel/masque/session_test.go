@@ -143,10 +143,11 @@ func TestSession_SendReceiveIPPacket(t *testing.T) {
 
 	// Context ID should be 0 (1 byte 0x00)
 	assert.Equal(t, byte(0x00), sentDatagram[0])
-	assert.Equal(t, ipPkt, sentDatagram[1:])
+	assert.Equal(t, byte(0x00), sentDatagram[1])
+	assert.Equal(t, ipPkt, sentDatagram[2:])
 
 	// Inject incoming datagram with Context ID 0
-	incomingRaw := append([]byte{0x00}, ipPkt...)
+	incomingRaw := append([]byte{0x00, 0x00}, ipPkt...)
 	dgrams.InjectDatagram(incomingRaw)
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)

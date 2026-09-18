@@ -56,12 +56,13 @@ func TestBridgeTUNDatagram_BasicForwarding(t *testing.T) {
 	sent := dgrams.sent[0]
 	dgrams.mu.Unlock()
 
-	assert.Equal(t, byte(0x00), sent[0]) // Context ID 0
-	assert.Equal(t, pkt, sent[1:])
+	assert.Equal(t, byte(0x00), sent[0])
+	assert.Equal(t, byte(0x00), sent[1])
+	assert.Equal(t, pkt, sent[2:])
 
 	// 2. Packet from Datagram -> TUN
 	respPkt := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x02, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 1, 1, 1, 1, 10, 0, 0, 5}
-	dgrams.InjectDatagram(append([]byte{0x00}, respPkt...))
+	dgrams.InjectDatagram(append([]byte{0x00, 0x00}, respPkt...))
 
 	require.Eventually(t, func() bool {
 		written := adapter.GetWrittenBytes()
@@ -120,7 +121,9 @@ func TestBridgeTUNDatagram_IngressFilterAndMTU(t *testing.T) {
 	dgrams.mu.Lock()
 	sent := dgrams.sent[0]
 	dgrams.mu.Unlock()
-	assert.Equal(t, validPkt, sent[1:])
+	assert.Equal(t, byte(0x00), sent[0])
+	assert.Equal(t, byte(0x00), sent[1])
+	assert.Equal(t, validPkt, sent[2:])
 
 	// Oversized packet -> triggers ICMP PTB
 	overPkt := make([]byte, 1400)
