@@ -12,7 +12,7 @@ import (
 	"net"
 	"sync/atomic"
 
-	"github.com/lemon4ksan/mach/quic"
+	"github.com/lemon4ksan/foundation/net/quic"
 
 	impl "github.com/lemon4ksan/aoni/internal/masque"
 )

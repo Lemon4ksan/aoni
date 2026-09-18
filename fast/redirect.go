@@ -94,16 +94,12 @@ func (c *Client) executeWithRedirects(
 		}
 
 		if isHTTPSDowngrade(currentURI, nextURI) {
-			fastReq.Header.Del(header.Referer)
+			fastReq.Header.Del("Referer")
 		} else {
-			fastReq.Header.SetBytesKV(bytesconv.S2B(header.Referer), currentURI.FullURI())
+			fastReq.Header.SetBytesKV(bytesconv.S2B("Referer"), currentURI.FullURI())
 		}
 
-		if c.referer != nil {
-			zerocopy.AcquireURI() // c.referer.LastURL.Set(string(currentURI.FullURI()))
-		}
-
-		zerocopy.ReleaseURI(nextURI)
+				zerocopy.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
 }
