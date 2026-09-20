@@ -30,6 +30,7 @@ type Pool struct {
 
 	// H2 multiplexed connections (single connection per origin)
 	h2Conns map[string]*h2.Conn
+	h2Dials map[string]*h2DialPromise
 
 	// H3 QUIC multiplexed connections (single connection per origin)
 	h3Conns map[string]*h3.ClientConn
@@ -51,6 +52,12 @@ type Pool struct {
 	H3Settings *coreh3.Settings
 }
 
+type h2DialPromise struct {
+	done chan struct{}
+	conn *h2.Conn
+	err  error
+}
+
 type dialPromise struct {
 	done chan struct{}
 	conn *h3.ClientConn
@@ -62,6 +69,7 @@ func NewPool() *Pool {
 	return &Pool{
 		conns:    make(map[string][]*h1.ClientConn),
 		h2Conns:  make(map[string]*h2.Conn),
+		h2Dials:  make(map[string]*h2DialPromise),
 		h3Conns:  make(map[string]*h3.ClientConn),
 		h3Dials:  make(map[string]*dialPromise),
 		EnableH2: true,
@@ -173,52 +181,111 @@ func (p *Pool) doH3(ctx context.Context, addr string, req *machhttp.Request, res
 }
 
 func (p *Pool) doTLS(ctx context.Context, addr string, req *machhttp.Request, res *machhttp.Response) (map[string][]string, error) {
-	// Check existing multiplexed H2 connection
-	if p.EnableH2 || p.ForceH2 {
-		p.mu.Lock()
-		h2c := p.h2Conns[addr]
-		p.mu.Unlock()
+	for {
+		// Check existing multiplexed H2 connection
+		if p.EnableH2 || p.ForceH2 {
+			p.mu.Lock()
+			if h2c := p.h2Conns[addr]; h2c != nil && !h2c.Closed() && h2c.CanOpenStream() {
+				p.mu.Unlock()
+				return nil, h2c.Do(ctx, req, res)
+			}
 
-		if h2c != nil && !h2c.Closed() && h2c.CanOpenStream() {
-			return nil, h2c.Do(ctx, req, res)
+			dp, inFlight := p.h2Dials[addr]
+			if inFlight {
+				p.mu.Unlock()
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-dp.done:
+					if dp.conn != nil && !dp.conn.Closed() && dp.conn.CanOpenStream() {
+						return nil, dp.conn.Do(ctx, req, res)
+					}
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					continue
+				}
+			}
+
+			dp = &h2DialPromise{
+				done: make(chan struct{}),
+			}
+			if p.h2Dials == nil {
+				p.h2Dials = make(map[string]*h2DialPromise)
+			}
+			p.h2Dials[addr] = dp
+			p.mu.Unlock()
+
+			// Dial fresh TLS connection with ALPN h2
+			nextProtos := []string{"h2", "http/1.1"}
+			tlsConf := p.getTLSConfig(addr, nextProtos)
+			rawConn, err := p.dialTCP(ctx, addr)
+			if err != nil {
+				p.mu.Lock()
+				delete(p.h2Dials, addr)
+				dp.err = err
+				close(dp.done)
+				p.mu.Unlock()
+				return nil, err
+			}
+
+			tlsConn := tls.Client(rawConn, tlsConf)
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				_ = rawConn.Close()
+				p.mu.Lock()
+				delete(p.h2Dials, addr)
+				dp.err = err
+				close(dp.done)
+				p.mu.Unlock()
+				return nil, err
+			}
+
+			negotiated := tlsConn.ConnectionState().NegotiatedProtocol
+			if negotiated == "h2" || p.ForceH2 {
+				h2Conn := h2.NewConn(tlsConn, p.H2Opts)
+				if err := h2Conn.Handshake(); err != nil {
+					_ = tlsConn.Close()
+					p.mu.Lock()
+					delete(p.h2Dials, addr)
+					dp.err = err
+					close(dp.done)
+					p.mu.Unlock()
+					return nil, fmt.Errorf("transport: h2 handshake failed: %w", err)
+				}
+
+				p.mu.Lock()
+				p.h2Conns[addr] = h2Conn
+				delete(p.h2Dials, addr)
+				dp.conn = h2Conn
+				close(dp.done)
+				p.mu.Unlock()
+
+				return nil, h2Conn.Do(ctx, req, res)
+			}
+
+			// Negotiated HTTP/1.1 over TLS fallback
+			p.mu.Lock()
+			delete(p.h2Dials, addr)
+			dp.err = nil
+			close(dp.done)
+			p.mu.Unlock()
+
+			return nil, p.doH1(ctx, addr, req, res, tlsConn)
 		}
-	}
 
-	// Dial fresh TLS connection
-	nextProtos := []string{"http/1.1"}
-	if p.EnableH2 || p.ForceH2 {
-		nextProtos = []string{"h2", "http/1.1"}
-	}
-
-	tlsConf := p.getTLSConfig(addr, nextProtos)
-	rawConn, err := p.dialTCP(ctx, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	tlsConn := tls.Client(rawConn, tlsConf)
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = rawConn.Close()
-		return nil, err
-	}
-
-	negotiated := tlsConn.ConnectionState().NegotiatedProtocol
-	if negotiated == "h2" || p.ForceH2 {
-		h2Conn := h2.NewConn(tlsConn, p.H2Opts)
-		if err := h2Conn.Handshake(); err != nil {
-			_ = tlsConn.Close()
-			return nil, fmt.Errorf("transport: h2 handshake failed: %w", err)
+		// Plain TLS H1 (when H2 is disabled)
+		tlsConf := p.getTLSConfig(addr, []string{"http/1.1"})
+		rawConn, err := p.dialTCP(ctx, addr)
+		if err != nil {
+			return nil, err
 		}
-
-		p.mu.Lock()
-		p.h2Conns[addr] = h2Conn
-		p.mu.Unlock()
-
-		return nil, h2Conn.Do(ctx, req, res)
+		tlsConn := tls.Client(rawConn, tlsConf)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
+			return nil, err
+		}
+		return nil, p.doH1(ctx, addr, req, res, tlsConn)
 	}
-
-	// Negotiated HTTP/1.1 over TLS
-	return nil, p.doH1(ctx, addr, req, res, tlsConn)
 }
 
 func (p *Pool) doH1(ctx context.Context, addr string, req *machhttp.Request, res *machhttp.Response, existingConn net.Conn) error {
@@ -320,10 +387,12 @@ func (p *Pool) CloseIdleConnections() {
 		_ = h2c.Close()
 	}
 	p.h2Conns = make(map[string]*h2.Conn)
+	p.h2Dials = make(map[string]*h2DialPromise)
 
 	// 3. Close H3 connections
 	for _, h3c := range p.h3Conns {
 		_ = h3c.Close()
 	}
 	p.h3Conns = make(map[string]*h3.ClientConn)
+	p.h3Dials = make(map[string]*dialPromise)
 }

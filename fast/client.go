@@ -98,3 +98,32 @@ func (c *Client) execute(ctx context.Context, fastReq *machhttp.Request, fastRes
 	trailers, err := c.engine.DoCtx(ctx, fastReq, fastRes)
 	return trailers, err, false
 }
+
+// AcquireRequest obtains a pooled [Request] instance.
+func (c *Client) AcquireRequest() core.Request {
+	return NewRequest(nil)
+}
+
+// ReleaseRequest releases a pooled [Request] instance back to the memory pool.
+func (c *Client) ReleaseRequest(req core.Request) {
+	ReleaseRequest(req)
+}
+
+// ReleaseResponse releases a pooled [Response] instance back to the memory pool.
+func (c *Client) ReleaseResponse(res core.Response) {
+	ReleaseResponse(res)
+}
+
+// ReleaseRequest releases a request adapter back to the pool.
+func ReleaseRequest(req core.Request) {
+	if r, ok := req.(*Request); ok {
+		r.Release()
+	}
+}
+
+// ReleaseResponse releases a response adapter back to the pool.
+func ReleaseResponse(res core.Response) {
+	if r, ok := res.(*Response); ok {
+		r.Release()
+	}
+}

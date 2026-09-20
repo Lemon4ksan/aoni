@@ -400,6 +400,10 @@ func (f *Request) Release() {
 		return
 	}
 
+	if f.isAcquired && f.req != nil {
+		machhttp.ReleaseRequest(f.req)
+	}
+
 	f.req = nil
 	f.ctx = nil
 	f.cfg = nil

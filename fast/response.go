@@ -447,7 +447,10 @@ func (f *Response) Release() {
 		return
 	}
 
-	f.resp = nil
+	if f.resp != nil {
+		machhttp.ReleaseResponse(f.resp)
+		f.resp = nil
+	}
 	f.trailers = nil
 	f.uncompressed = false
 	responseAdapterStorage.Put(f)
