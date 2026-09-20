@@ -49,6 +49,11 @@ func (c *Client) Engine() *transport.Pool {
 	return c.engine
 }
 
+// Unwrap returns the underlying multi-protocol connection pool.
+func (c *Client) Unwrap() *transport.Pool {
+	return c.engine
+}
+
 // SetTLSConfig configures the TLS configuration on the underlying transport pool.
 func (c *Client) SetTLSConfig(tlsConf *tls.Config) *Client {
 	c.engine.TLSConfig = tlsConf

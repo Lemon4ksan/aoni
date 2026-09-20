@@ -6,7 +6,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni/fast)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
-[![RPS](https://img.shields.io/badge/throughput-2.12M%2B%20RPS-brightgreen?style=flat-square)](#feature-matrix)
+[![Throughput](https://img.shields.io/badge/throughput-193k%20H1%20%7C%2070k%20H2%20%7C%202.12M%20In--Memory-brightgreen?style=flat-square)](#empirical-benchmarks--protocol-breakdown)
 
 > _"Strict memory geometry. Raw hardware speed."_
 
@@ -21,7 +21,7 @@ For years, frameworks pushed a lazy dogma:
 
 That is pure nonsense and an excuse for laziness.
 
-`aoni/fast` takes `fasthttp`, integrates native HTTP/2 and HTTP/3 framing directly over uTLS, and wraps it in the clean option/mod interface from `aoni`.
+`aoni/fast` takes `mach`, integrates native HTTP/2 and HTTP/3 framing directly over uTLS, and wraps it in the clean option/mod interface from `aoni`.
 
 Using bloated HTTP wrappers is like hiring a crowd of fifty drunk movers to carry a single paper envelope across town — tearing up the dirt and burning a whole tank of gas. `aoni/fast` is a straight pneumatic tube: you load bytes into the socket, pull the lever, and they fly onto the wire without dropping a single allocated byte on the floor.
 
@@ -33,14 +33,48 @@ go get github.com/lemon4ksan/aoni
 
 | Feature / Capability | Standard Go `net/http` | Resty / Wrappers | `aoni` (Base) | `aoni/fast` |
 | :--- | :---: | :---: | :---: | :---: |
-| **Engine Core** | `net/http` | `net/http` | `net/http` | **`fasthttp` + Native H2/H3** |
-| **Execution Latency** | ~50 µs | ~50 µs | ~56 µs | **5.9 µs** |
-| **Zero-Alloc Object Pooling** | ✗ | ✗ | ✗ | **✓ (`sync.Pool` Request/Response)** |
-| **Native HTTP/2 (`h2engine`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (Zero-Alloc Byte Engine)** |
-| **Native HTTP/3 (`h3engine`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (QPACK Byte Engine)** |
+| **Engine Core** | `net/http` | `net/http` | `net/http` | **`mach` + Native H2/H3** |
+| **HTTP/1.1 Throughput (Parallel)** | ~17.3k RPS | ~16k RPS | ~17k RPS | **151k – 193k RPS (8.7x – 11x)** |
+| **HTTP/1.1 Latency** | 57.6 µs | ~60 µs | 56 µs | **6.6 µs (8.7x faster)** |
+| **HTTP/2 Throughput (TLS)** | 43.4k RPS | ~40k RPS | ~40k RPS | **60.5k – 69.3k RPS** |
+| **HTTP/2 Latency (TLS)** | 23.0 µs | ~25 µs | ~24 µs | **16.5 µs (1.4x faster)** |
+| **HTTP/3 QUIC Throughput** | N/A | N/A | N/A | **1,091 RPS** |
+| **In-Memory Core (Zero-IO)** | N/A | N/A | N/A | **2,126,754 RPS (0.47 µs)** |
+| **Zero-Alloc Object Pooling** | ✗ (73-83 allocs) | ✗ (>90 allocs) | ✗ | **✓ (`PerPStorage` Request/Response)** |
+| **Native HTTP/2 (`h2`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (`mach/client/h2` Singleflight)** |
+| **Native HTTP/3 (`h3`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (`mach/client/h3` + QPACK)** |
 | **uTLS & Fingerprinting** | ✗ | ✗ | **✓** | **✓ (uTLS over `fastDialer`)** |
 | **Custom Header Order (JA4H)** | ✗ | ✗ | **✓** | **✓** |
 | **`http.Client` Compatibility Bridge** | Native | ✗ | Native | **✓ (`fast.NewStdClient`)** |
+
+## Empirical Benchmarks & Protocol Breakdown
+
+Measured on **Intel Core i5-12400F @ 4.4 GHz (6 Cores / 12 Threads)**, Windows amd64, using Go 1.27 (`go test -bench=BenchmarkFast_ -benchmem ./tests`). Real network loopback sockets (TCP / TLS / UDP QUIC).
+
+### 1. Multi-Protocol Performance Comparison (Parallel, 12 Workers)
+
+| Protocol / Client Stack | Requests / sec (**RPS**) | Latency (`ns/op`) | Memory (`B/op`) | Allocs (`allocs/op`) | Speedup vs `net/http` |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`aoni/fast` (In-Memory Core)** | **2,126,754 RPS** | **0.47 µs** (470 ns) | 0 B | 0 allocs | *Pure CPU Pipeline* |
+| **`aoni/fast` (HTTP/1.1 TCP)** | **151,446 – 193,000 RPS** | **6.6 µs** (6,603 ns) | **2,160 B** | **21 allocs** | **8.7x – 11.1x RPS** |
+| `net/http` (HTTP/1.1 TCP) | 17,356 RPS | 57.6 µs (57,616 ns) | 11,230 B | 83 allocs | Baseline (1.0x) |
+| **`aoni/fast` (HTTP/2 TLS)** | **60,569 – 69,300 RPS** | **16.5 µs** (16,510 ns) | **3,197 B** | **32 allocs** | **1.4x – 1.6x RPS** |
+| `net/http` (HTTP/2 TLS) | 43,385 RPS | 23.0 µs (23,049 ns) | 8,569 B | 73 allocs | Baseline (1.0x) |
+| **`aoni/fast` (HTTP/3 QUIC)** | **1,091 RPS** | **916 µs** (0.91 ms) | 130,404 B | 155 allocs | *Multiplexed UDP* |
+
+### 2. Sequential (Single-Thread) Latency
+
+| Protocol | Requests / sec (**RPS**) | Latency (`ns/op`) | Microarchitectural Characteristics |
+| :--- | :---: | :---: | :--- |
+| **HTTP/1.1 Keep-Alive** | **23,195 RPS** | 43.1 µs | Single-stream synchronous TCP roundtrip |
+| **HTTP/2 TLS Multiplex** | **12,468 RPS** | 80.2 µs | TLS frame encryption + HPACK dynamic table compression |
+| **HTTP/3 QUIC Multiplex** | **50.5 RPS** | 19.8 ms | Limited by QUIC `MaxAckDelay` (25 ms RFC 9000) on loopback |
+
+### 3. Why Numbers Differ Across Protocols
+
+* **HTTP/1.1 (Raw Throughput King on LAN / Microservices)**: Writes monolithic byte buffers directly to TCP Keep-Alive sockets. Zero framing overhead, 6.6 µs latency, saturating OS network limits at up to ~193k RPS.
+* **HTTP/2 (Optimal for Web Traffic & Concurrency)**: Multiplexes concurrent requests over a single TLS connection with singleflight dialing. HPACK and TLS framing add ~10 µs, achieving ~70k RPS with 2.7x less RAM than `net/http`.
+* **HTTP/3 (Engineered for Lossy & Mobile Networks)**: Every request instantiates an RFC 9114 bidirectional QUIC stream state machine (`quic.Stream`, `frameSorter`, flow control). On local loopback, QUIC timer granularities (~20ms ACK delay) dominate sequential latency, while parallel multiplexing achieves >1,000 RPS. Its architectural superpower is zero Head-of-Line blocking under packet loss and seamless Connection Migration across networks.
 
 ## Compatibility Bridge: `fast.NewStdClient`
 

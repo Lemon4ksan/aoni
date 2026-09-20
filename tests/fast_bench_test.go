@@ -5,6 +5,7 @@
 package aoni_test
 
 import (
+	"io"
 	"net/http"
 	"testing"
 
@@ -249,6 +250,70 @@ func BenchmarkFast_H3_Parallel(b *testing.B) {
 			}
 			req.Release()
 			fast.ReleaseResponse(resp)
+		}
+	})
+}
+
+// -----------------------------------------------------------------------------
+// Standard Library Baseline (net/http)
+// -----------------------------------------------------------------------------
+
+func BenchmarkStd_H1_Parallel(b *testing.B) {
+	s := testutil.NewH1Server(b, benchHandler())
+	defer s.Close()
+
+	client := s.Client()
+	targetURL := s.URL() + "/bench"
+
+	// Warm up
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		b.Fatalf("warmup failed: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := client.Get(targetURL)
+			if err != nil {
+				b.Fatalf("request failed: %v", err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	})
+}
+
+func BenchmarkStd_H2_Parallel(b *testing.B) {
+	s := testutil.NewH2Server(b, benchHandler())
+	defer s.Close()
+
+	client := s.Client()
+	targetURL := s.URL() + "/bench"
+
+	// Warm up
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		b.Fatalf("warmup failed: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := client.Get(targetURL)
+			if err != nil {
+				b.Fatalf("request failed: %v", err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 	})
 }

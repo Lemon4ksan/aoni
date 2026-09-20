@@ -35,18 +35,20 @@ This specification documents the low-level hardware alignment, native PLAN9 x86-
 * **Windows RIO**: Registers user-space memory buffers via `RIORegisterBuffer`, eliminating page pinning overhead in `WSASend`/`WSARecv`.
 * **Linux Zero-Copy Sockets**: Applies socket options (`SO_MARK`, `TCP_MAXSEG`, `TCP_QUICKACK`) directly.
 
-## 4. Instruction Budget Limits
+## 4. Instruction Budget Limits & Protocol Benchmarks
 
 *Hardware: Intel Core i5-12400F @ 4.4 GHz, 12 threads.*
 
-| Metric Tier | Throughput | Microarchitectural Limit |
+| Metric Tier | Throughput | Microarchitectural Limit / Bound |
 | :--- | :--- | :--- |
 | Request Pool Lifecycle | 122,891,942 Ops/sec | ~42 CPU Clock Cycles |
 | URL Template & Cache | 22,548,748 Ops/sec | Zero-Alloc Byte Slice Pool |
-| Fast Engine Core | 2,126,754 RPS | ~2480 Clock Cycles / Tx |
+| Fast Engine Core (In-Memory Pipeline) | 2,126,754 RPS | ~2480 Clock Cycles / Tx |
 | AVX2 VPXOR Masker | 69.02 GB/sec | Memory Bus Bandwidth |
 | WebSocket 1KB Masking | 68.69 GB/sec | L1/L2 Write Bandwidth |
-| OS Socket Network | 154,508 RPS | OS Kernel Bottleneck |
+| OS Socket Network (HTTP/1.1 TCP Parallel) | 151,446 – 193,000 RPS | OS Kernel Socket Bottleneck (6.6 µs latency) |
+| OS Socket Network (HTTP/2 TLS Multiplex) | 60,569 – 69,300 RPS | TLS Framing + HPACK Table (16.5 µs latency) |
+| OS Socket Network (HTTP/3 QUIC Parallel) | 1,091 RPS | Bidirectional QUIC Stream FSM (0.91 ms latency) |
 
 ## 5. Gollvm (LLVM 20+) Integration
 
