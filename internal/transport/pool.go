@@ -50,6 +50,9 @@ type Pool struct {
 	ForceH3    bool
 	H2Opts     h2.ConnOpts
 	H3Settings *coreh3.Settings
+
+	// WrapTLSClient wraps an established TCP connection with a custom TLS implementation (e.g., uTLS).
+	WrapTLSClient func(ctx context.Context, conn net.Conn, cfg *tls.Config, addr string) (net.Conn, error)
 }
 
 type h2DialPromise struct {
@@ -229,18 +232,37 @@ func (p *Pool) doTLS(ctx context.Context, addr string, req *machhttp.Request, re
 				return nil, err
 			}
 
-			tlsConn := tls.Client(rawConn, tlsConf)
-			if err := tlsConn.HandshakeContext(ctx); err != nil {
-				_ = rawConn.Close()
-				p.mu.Lock()
-				delete(p.h2Dials, addr)
-				dp.err = err
-				close(dp.done)
-				p.mu.Unlock()
-				return nil, err
+			var tlsConn net.Conn
+			if p.WrapTLSClient != nil {
+				var wrapErr error
+				tlsConn, wrapErr = p.WrapTLSClient(ctx, rawConn, tlsConf, addr)
+				if wrapErr != nil {
+					_ = rawConn.Close()
+					p.mu.Lock()
+					delete(p.h2Dials, addr)
+					dp.err = wrapErr
+					close(dp.done)
+					p.mu.Unlock()
+					return nil, wrapErr
+				}
+			} else {
+				stdTLS := tls.Client(rawConn, tlsConf)
+				if err := stdTLS.HandshakeContext(ctx); err != nil {
+					_ = rawConn.Close()
+					p.mu.Lock()
+					delete(p.h2Dials, addr)
+					dp.err = err
+					close(dp.done)
+					p.mu.Unlock()
+					return nil, err
+				}
+				tlsConn = stdTLS
 			}
 
-			negotiated := tlsConn.ConnectionState().NegotiatedProtocol
+			var negotiated string
+			if cs, ok := tlsConn.(interface{ ConnectionState() tls.ConnectionState }); ok {
+				negotiated = cs.ConnectionState().NegotiatedProtocol
+			}
 			if negotiated == "h2" || p.ForceH2 {
 				h2Conn := h2.NewConn(tlsConn, p.H2Opts)
 				if err := h2Conn.Handshake(); err != nil {
@@ -279,10 +301,21 @@ func (p *Pool) doTLS(ctx context.Context, addr string, req *machhttp.Request, re
 		if err != nil {
 			return nil, err
 		}
-		tlsConn := tls.Client(rawConn, tlsConf)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = rawConn.Close()
-			return nil, err
+		var tlsConn net.Conn
+		if p.WrapTLSClient != nil {
+			var wrapErr error
+			tlsConn, wrapErr = p.WrapTLSClient(ctx, rawConn, tlsConf, addr)
+			if wrapErr != nil {
+				_ = rawConn.Close()
+				return nil, wrapErr
+			}
+		} else {
+			stdTLS := tls.Client(rawConn, tlsConf)
+			if err := stdTLS.HandshakeContext(ctx); err != nil {
+				_ = rawConn.Close()
+				return nil, err
+			}
+			tlsConn = stdTLS
 		}
 		return nil, p.doH1(ctx, addr, req, res, tlsConn)
 	}

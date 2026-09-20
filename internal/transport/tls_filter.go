@@ -17,7 +17,16 @@ func TLSHandshakeFilter(ctx context.Context, conn net.Conn, targetHost string, c
 	}
 
 	if cfg.WrapTLSClient != nil {
-		return cfg.WrapTLSClient(ctx, conn, cfg.BaseTLSConfig, targetHost)
+		baseCfg := cfg.BaseTLSConfig
+		if baseCfg == nil {
+			baseCfg = &tls.Config{}
+		} else {
+			baseCfg = baseCfg.Clone()
+		}
+		if cfg.InsecureSkipVerify {
+			baseCfg.InsecureSkipVerify = true
+		}
+		return cfg.WrapTLSClient(ctx, conn, baseCfg, targetHost)
 	}
 
 	return handshakeStandardTLS(ctx, conn, targetHost, cfg)

@@ -1401,10 +1401,12 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 	}
 }
 
-// applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
-func applyMSSLimit(conn net.Conn, mss int) net.Conn {
+// ApplyMSSLimit applies maximum segment size boundaries to TCP socket streams.
+func ApplyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return transport.ApplyMSSLimit(conn, mss)
 }
+
+var applyMSSLimit = ApplyMSSLimit
 
 // ExtensionConfig provides standard hooks for third-party plugins (like aoni-browser)
 // to modify low-level transport and serialization behaviors without altering the core engine.
@@ -1427,6 +1429,9 @@ type ExtensionConfig struct {
 
 	// JA4Callback is invoked when a JA4 fingerprint is computed.
 	JA4Callback func(report interface{})
+
+	// Extra stores extension-specific arbitrary state (e.g., *profile.BrowserTLSConfig) keyed by extension domain.
+	Extra map[string]any
 }
 
 // Clone creates a memory-isolated deep copy of the extension config.
@@ -1446,6 +1451,17 @@ func (e ExtensionConfig) Clone() ExtensionConfig {
 	if e.OverrideH2Settings != nil {
 		cloned.OverrideH2Settings = make(map[uint16]uint32, len(e.OverrideH2Settings))
 		maps.Copy(cloned.OverrideH2Settings, e.OverrideH2Settings)
+	}
+
+	if e.Extra != nil {
+		cloned.Extra = make(map[string]any, len(e.Extra))
+		for k, v := range e.Extra {
+			if cloner, ok := v.(interface{ Clone() any }); ok {
+				cloned.Extra[k] = cloner.Clone()
+			} else {
+				cloned.Extra[k] = v
+			}
+		}
 	}
 
 	return cloned

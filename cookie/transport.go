@@ -69,3 +69,8 @@ func (t *Transport) Clone() *Transport {
 		CookieJar: t.CookieJar,
 	}
 }
+
+// Unwrap returns the underlying RoundTripper.
+func (t *Transport) Unwrap() http.RoundTripper {
+	return t.Next
+}

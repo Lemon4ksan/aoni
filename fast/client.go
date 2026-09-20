@@ -40,6 +40,10 @@ func NewClient(opts ...any) *Client {
 		}
 	}
 
+	if c.Ext.WrapTLSClient != nil {
+		client.engine.WrapTLSClient = c.Ext.WrapTLSClient
+	}
+
 	client.cfg = c
 	return client
 }

@@ -33,9 +33,14 @@ import (
 func TestM1_Challenger_H3_MultiHeaderCorruption(t *testing.T) {
 	defer testutil.Check(t, testutil.WithTimeout(5*time.Second))()
 
-	var receivedHeaders http.Header
+	var (
+		mu              sync.Mutex
+		receivedHeaders http.Header
+	)
 	server := testutil.NewH3Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		receivedHeaders = r.Header.Clone()
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -54,12 +59,16 @@ func TestM1_Challenger_H3_MultiHeaderCorruption(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	t.Logf("Headers received by server: %#v", receivedHeaders)
+	mu.Lock()
+	hdrs := receivedHeaders.Clone()
+	mu.Unlock()
+
+	t.Logf("Headers received by server: %#v", hdrs)
 
 	// Assert that all three headers were received with their exact expected names and values
-	assert.Equal(t, "val-alpha", receivedHeaders.Get("X-Header-Alpha"))
-	assert.Equal(t, "val-beta", receivedHeaders.Get("X-Header-Beta"))
-	assert.Equal(t, "val-gamma", receivedHeaders.Get("X-Header-Gamma"))
+	assert.Equal(t, "val-alpha", hdrs.Get("X-Header-Alpha"))
+	assert.Equal(t, "val-beta", hdrs.Get("X-Header-Beta"))
+	assert.Equal(t, "val-gamma", hdrs.Get("X-Header-Gamma"))
 }
 
 // -----------------------------------------------------------------------------
