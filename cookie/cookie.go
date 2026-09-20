@@ -5,21 +5,20 @@
 package cookie
 
 import (
-	"github.com/lemon4ksan/aoni/internal/core"
-
-	"strconv"
-
 	"context"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	fcookie "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // MaxCookieAgeSeconds defines the maximum recommended cookie lifetime in seconds (400 days / 34,560,000s)
@@ -305,10 +304,12 @@ func ExportNetscape(ctx context.Context, jar core.CookieJar, u *url.URL) string 
 	if jar == nil || u == nil {
 		return ""
 	}
+
 	cookies := jar.Cookies(ctx, u)
 	if len(cookies) == 0 {
 		return ""
 	}
+
 	defaultHost := u.Hostname()
 
 	var sb strings.Builder

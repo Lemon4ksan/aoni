@@ -22,16 +22,19 @@ func decodeHPACK(t *testing.T, payload []byte) map[string][]string {
 
 	decoder := hpack.AcquireHPACK()
 	defer hpack.ReleaseHPACK(decoder)
+
 	hf := hpack.AcquireHeaderField()
 	defer hpack.ReleaseHeaderField(hf)
 
 	b := payload
+
 	var err error
 	for len(b) > 0 {
 		b, err = decoder.Next(hf, b)
 		if err != nil {
 			require.NoError(t, err)
 		}
+
 		headers[string(hf.KeyBytes())] = append(headers[string(hf.KeyBytes())], string(hf.ValueBytes()))
 	}
 

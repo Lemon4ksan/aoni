@@ -22,8 +22,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/x/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/x/realtime/ws"
 	"github.com/lemon4ksan/mach/client/h1"
 )

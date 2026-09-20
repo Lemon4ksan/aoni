@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package cookie
 
 import (
@@ -35,6 +39,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 			if domain == "" {
 				domain = u.Hostname()
 			}
+
 			domain = strings.ToLower(domain)
 
 			// If cookie explicitly specified a domain, check public suffix
@@ -42,6 +47,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 				if suffix := psl.List.PublicSuffix(domain); suffix == domain {
 					continue // RFC 6265 §5.3 step 5
 				}
+
 				if !DomainMatch(u.Hostname(), domain) {
 					continue // RFC 6265 §5.3 step 6
 				}
@@ -106,6 +112,7 @@ func (mj *MemoryJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie {
 	})
 
 	SortForBrowser(validCookies)
+
 	return validCookies
 }
 

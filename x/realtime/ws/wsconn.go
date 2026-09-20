@@ -1087,6 +1087,7 @@ func isForbiddenH2ConnectHeader(key string) bool {
 func (c *wsH2Conn) readConnectResponse() (http.Header, error) {
 	decoder := hpack.AcquireHPACK()
 	defer hpack.ReleaseHPACK(decoder)
+
 	respHeaders := make(http.Header)
 
 	for {
@@ -1141,9 +1142,11 @@ func (c *wsH2Conn) processResponseHeaders(
 	defer hpack.ReleaseHeaderField(hf)
 
 	b := f.HeaderBlockFragment()
+
 	var err error
+
 	status := ""
-	
+
 	for len(b) > 0 {
 		b, err = decoder.Next(hf, b)
 		if err != nil {

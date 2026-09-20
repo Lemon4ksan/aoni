@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/priority"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
+	"github.com/lemon4ksan/foundation/types/secret"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/foundation/net/http/priority"
-	"github.com/lemon4ksan/foundation/types/secret"
 )
 
 // WithPriority configures RFC 9218 extensible request priority headers and HTTP/2-3 stream scheduling.

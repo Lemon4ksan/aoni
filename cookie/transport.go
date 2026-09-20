@@ -1,10 +1,15 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package cookie
 
 import (
 	"net/http"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/foundation/net/http/header"
+
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // Transport intercepts HTTP responses to extract and store Set-Cookie headers,

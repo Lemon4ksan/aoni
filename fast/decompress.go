@@ -7,10 +7,9 @@ package fast
 import (
 	"io"
 
-	machhttp "github.com/lemon4ksan/mach/proto/http"
-
 	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
 )
 
 func decompressFastResponse(resp *machhttp.Response) bool {

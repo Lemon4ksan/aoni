@@ -180,6 +180,39 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	return httpResp, nil
 }
 
+// Unwrap returns the underlying core.RequestDoer.
+func (a *RequestDoerAdapter) Unwrap() any {
+	if a == nil {
+		return nil
+	}
+
+	return a.doer
+}
+
+// CloseIdleConnections forwards idle connection closing to the underlying doer if supported.
+func (a *RequestDoerAdapter) CloseIdleConnections() {
+	if a == nil || a.doer == nil {
+		return
+	}
+
+	if closer, ok := a.doer.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+// Close forwards connection closure to the underlying doer if supported.
+func (a *RequestDoerAdapter) Close() error {
+	if a == nil || a.doer == nil {
+		return nil
+	}
+
+	if closer, ok := a.doer.(io.Closer); ok {
+		return closer.Close()
+	}
+
+	return nil
+}
+
 // ToHTTPRequest converts a generic [core.Request] interface into a standard [*http.Request].
 func ToHTTPRequest(req core.Request) (*http.Request, error) {
 	if httpReq := req.HTTPRequest(); httpReq != nil {

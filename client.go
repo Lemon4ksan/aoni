@@ -20,13 +20,13 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/urlkit"
+	"github.com/lemon4ksan/foundation/system/power"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/x/telemetry"
-	"github.com/lemon4ksan/foundation/system/power"
 )
 
 // Client is a thread-safe HTTP client supporting custom transports, TLS fingerprinting,

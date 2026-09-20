@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/dns"
+	"github.com/lemon4ksan/foundation/net/dns/svcb"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
@@ -22,7 +23,6 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/foundation/net/dns/svcb"
 )
 
 // DoHMediaType specifies the official IETF RFC 8484 media type for DoH queries and responses.

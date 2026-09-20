@@ -162,9 +162,7 @@ func TestTypedGroup(t *testing.T) {
 		)
 
 		for range numGoroutines {
-
 			wg.Go(func() {
-
 				entered.Add(1)
 
 				val, err := g.Do("user:42", func() (int, error) {

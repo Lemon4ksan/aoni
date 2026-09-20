@@ -45,6 +45,7 @@ func InspectTLSChain(state *tls.ConnectionState) *CertChainInfo {
 	fingerprint := hex.EncodeToString(fp[:])
 
 	spkiFP, _ := cert.SPKIFingerprintBase64(leaf)
+
 	var spkiPin string
 	if spkiFP != "" {
 		spkiPin = `pin-sha256="` + spkiFP + `"`

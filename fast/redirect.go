@@ -9,12 +9,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/lemon4ksan/foundation/net/http/zerocopy"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
-
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/zerocopy"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	machhttp "github.com/lemon4ksan/mach/proto/http"
 )
 
 func (c *Client) executeWithRedirects(
@@ -28,7 +27,7 @@ func (c *Client) executeWithRedirects(
 		c.applyCookies(ctx, fastReq)
 		extractUserInfoAndSetAuth(fastReq)
 
-		trailers, err, autoReleased = c.execute(fastReq, fastResp)
+		trailers, err, autoReleased = c.execute(ctx, fastReq, fastResp)
 		if err == nil {
 			c.captureCookies(ctx, fastReq, fastResp)
 		}
@@ -46,7 +45,7 @@ func (c *Client) executeWithRedirects(
 		fastReq.URI().CopyTo(currentURI)
 		extractUserInfoAndSetAuth(fastReq)
 
-		trailers, err, autoReleased = c.execute(fastReq, fastResp)
+		trailers, err, autoReleased = c.execute(ctx, fastReq, fastResp)
 		if err != nil {
 			return nil, err, autoReleased
 		}

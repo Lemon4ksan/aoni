@@ -5,8 +5,6 @@
 package option
 
 import (
-	auth "github.com/lemon4ksan/foundation/net/http/auth"
-
 	"net/http"
 	"net/url"
 	"os"
@@ -14,12 +12,13 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
+	auth "github.com/lemon4ksan/foundation/net/http/auth"
 	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/priority"
+	"github.com/lemon4ksan/foundation/types/secret"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/foundation/net/http/priority"
-	"github.com/lemon4ksan/foundation/types/secret"
 )
 
 // WithPriority sets the default RFC 9218 "Priority" header on every outbound request.

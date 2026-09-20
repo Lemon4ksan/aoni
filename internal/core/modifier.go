@@ -5,8 +5,6 @@
 package core
 
 import (
-	auth "github.com/lemon4ksan/foundation/net/http/auth"
-
 	"bytes"
 	"context"
 	"io"
@@ -15,6 +13,7 @@ import (
 	"net/url"
 
 	"github.com/lemon4ksan/foundation/iokit"
+	auth "github.com/lemon4ksan/foundation/net/http/auth"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )

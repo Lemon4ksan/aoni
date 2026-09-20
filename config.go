@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
@@ -27,7 +28,6 @@ import (
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/x/telemetry"
-	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 // ============================================================================

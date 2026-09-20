@@ -19,9 +19,9 @@ func EncodeConnectHeaders(
 	req *http.Request,
 	isForbiddenHeader func(string) bool,
 ) ([]byte, error) {
-
 	hp := hpack.AcquireHPACK()
 	defer hpack.ReleaseHPACK(hp)
+
 	hf := hpack.AcquireHeaderField()
 	defer hpack.ReleaseHeaderField(hf)
 

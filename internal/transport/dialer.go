@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/foundation/net/ip"
+	"github.com/lemon4ksan/foundation/net/netutil"
 
 	"github.com/lemon4ksan/aoni/netutil/netdial"
-	"github.com/lemon4ksan/foundation/net/fragment"
-	"github.com/lemon4ksan/foundation/net/netutil"
 )
 
 var (

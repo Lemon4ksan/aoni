@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/http/contentdisposition"
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/foundation/net/http/contentdisposition"
 )
 
 // ErrDownloadFailed indicates a download request failure due to an HTTP error status code.

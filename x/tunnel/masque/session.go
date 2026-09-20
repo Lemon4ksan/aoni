@@ -29,11 +29,11 @@ type DatagramTransport interface {
 // Session represents an active MASQUE proxying session multiplexing QUIC datagrams and capsule control frames
 // per RFC 9484 Section 4 (Tunnelling IP over HTTP) and RFC 9297 Section 3.2 (The Capsule Protocol).
 type Session struct {
-	controlStream io.ReadWriteCloser
-	datagrams     DatagramTransport
-	contextID     uint64
+	controlStream   io.ReadWriteCloser
+	datagrams       DatagramTransport
+	contextID       uint64
 	quarterStreamID uint64
-	closed        atomic.Bool
+	closed          atomic.Bool
 }
 
 // NewSession initializes a new MASQUE [Session] over an underlying control stream and datagram transport.
@@ -44,9 +44,9 @@ func NewSession(controlStream io.ReadWriteCloser, datagrams DatagramTransport) *
 	}
 
 	return &Session{
-		controlStream: controlStream,
-		datagrams:     datagrams,
-		contextID:     0,
+		controlStream:   controlStream,
+		datagrams:       datagrams,
+		contextID:       0,
 		quarterStreamID: qid,
 	}
 }
@@ -58,8 +58,10 @@ func (s *Session) SendIPPacket(packet []byte) error {
 		return netErrClosed
 	}
 
-	var stackBuf [2048]byte
-	var buf []byte
+	var (
+		stackBuf [2048]byte
+		buf      []byte
+	)
 
 	if s.datagrams == nil {
 		// Fallback to DATAGRAM capsule
@@ -72,6 +74,7 @@ func (s *Session) SendIPPacket(packet []byte) error {
 			buf = make([]byte, totalLen)
 			_ = impl.EncodeVarintSlice(s.contextID, buf[:varIDLen])
 		}
+
 		copy(buf[varIDLen:], packet)
 
 		return s.WriteCapsule(CapsuleDatagram, buf)
@@ -88,6 +91,7 @@ func (s *Session) SendIPPacket(packet []byte) error {
 		n1 = impl.EncodeVarintSlice(s.quarterStreamID, buf[:8])
 		_ = impl.EncodeVarintSlice(s.contextID, buf[n1:n1+8])
 	}
+
 	copy(buf[n1+n2:], packet)
 
 	return s.datagrams.SendDatagram(buf)

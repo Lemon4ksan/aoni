@@ -7,22 +7,20 @@
 package fast
 
 import (
-	"github.com/lemon4ksan/foundation/net/http/auth"
-
 	"bytes"
 	"context"
 	"net/http"
 	"net/url"
 
-	"github.com/lemon4ksan/foundation/net/http/zerocopy"
-	mach "github.com/lemon4ksan/mach/proto/http"
-
+	"github.com/lemon4ksan/foundation/net/http/auth"
 	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/foundation/net/http/zerocopy"
+	"github.com/lemon4ksan/foundation/net/netutil"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	mach "github.com/lemon4ksan/mach/proto/http"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/foundation/net/netutil"
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.

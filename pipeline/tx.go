@@ -10,12 +10,12 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/x/telemetry"
-	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 var txStorage = pool.NewPerPStorage(func() *Tx {

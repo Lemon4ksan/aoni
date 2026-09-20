@@ -5,7 +5,6 @@
 package telemetry
 
 import (
-
 	"bytes"
 	"io"
 	"net/http"

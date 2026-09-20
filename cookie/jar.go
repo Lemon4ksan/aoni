@@ -1,13 +1,15 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package cookie
 
 import (
-	"github.com/lemon4ksan/aoni/internal/core"
-
 	"context"
-	"sync/atomic"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/ctxkit"
@@ -15,6 +17,8 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/nik"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
+
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 type (
@@ -82,6 +86,7 @@ func (p *ProxyIsolatedJar) Cookies(ctx context.Context, u *url.URL) []*http.Cook
 	if jar := p.GetJar(ctx); jar != nil {
 		return jar.Cookies(ctx, u)
 	}
+
 	return nil
 }
 
@@ -92,12 +97,16 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) core.CookieJar {
 	}
 
 	baseJar := NewMemoryJar()
+
 	var jar core.CookieJar = baseJar
+
 	backend := p.backend.Get()
 	if backend != nil {
 		jar = p.initPersistentJar(proxyURL, baseJar, backend)
 	}
+
 	p.jars.Put(proxyURL, jar)
+
 	return jar
 }
 
@@ -205,8 +214,10 @@ func deleteMatchingCookie(m map[cookieKey]Cookie, name, domain, partitionKey str
 	deleted := false
 
 	for k := range m {
-		if k.name == name && k.partitionKey == partitionKey && bytesconv.EqualFoldASCII(strings.TrimPrefix(k.domain, "."), normDomain) {
+		if k.name == name && k.partitionKey == partitionKey &&
+			bytesconv.EqualFoldASCII(strings.TrimPrefix(k.domain, "."), normDomain) {
 			delete(m, k)
+
 			deleted = true
 		}
 	}
@@ -220,6 +231,7 @@ func purgeExpiredCookies(m map[cookieKey]Cookie, now time.Time) bool {
 	for k, c := range m {
 		if isExpiredCookie(c.Expires, c.MaxAge, now) {
 			delete(m, k)
+
 			changed = true
 		}
 	}
@@ -237,7 +249,6 @@ func (pj *PersistentJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie
 	partitionKey := GetPartitionKey(ctx)
 	now := clock.CoarseTime()
 	validCookies := make([]*http.Cookie, 0, len(cookies))
-
 
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		hasExpired := false
@@ -259,15 +270,16 @@ func (pj *PersistentJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie
 	return validCookies
 }
 
-
 // SaveIfDirty flushes the cookie state to persistent storage if it has changed since the last save.
 func (pj *PersistentJar) SaveIfDirty() {
 	if pj.backend == nil {
 		return
 	}
+
 	if !pj.dirty.CompareAndSwap(true, false) {
 		return
 	}
+
 	var flushList []Cookie
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		flushList = generic.Values(*m)
@@ -278,13 +290,12 @@ func (pj *PersistentJar) SaveIfDirty() {
 func (pj *PersistentJar) purgeExpired() {
 	now := clock.CoarseTime()
 
-
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		if purgeExpiredCookies(*m, now) {
 			pj.dirty.Store(true)
 		}
 	})
-	
+
 	pj.SaveIfDirty()
 }
 
@@ -294,7 +305,6 @@ func (pj *PersistentJar) SetCookies(ctx context.Context, u *url.URL, cookies []*
 
 	now := clock.CoarseTime()
 	partitionKey := GetPartitionKey(ctx)
-
 
 	pj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		changed := false

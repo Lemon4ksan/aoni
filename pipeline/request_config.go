@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/iokit"
+	"github.com/lemon4ksan/foundation/net/fragment"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -20,7 +21,6 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/x/telemetry"
-	"github.com/lemon4ksan/foundation/net/fragment"
 )
 
 var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {
