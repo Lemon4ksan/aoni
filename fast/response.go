@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -34,30 +33,6 @@ var (
 		return &PooledResponse{}
 	})
 )
-
-type fastBodyReadCloser struct {
-	io.Reader
-	fastReq  *machhttp.Request
-	fastResp *machhttp.Response
-	once     sync.Once
-}
-
-func (b *fastBodyReadCloser) Bytes() (data []byte, volatile bool) {
-	if b.fastResp != nil {
-		return b.fastResp.Body(), true
-	}
-
-	return nil, false
-}
-
-func (b *fastBodyReadCloser) Close() error {
-	b.once.Do(func() {
-		machhttp.ReleaseRequest(b.fastReq)
-		machhttp.ReleaseResponse(b.fastResp)
-	})
-
-	return nil
-}
 
 type bytesReadCloser struct {
 	*bytes.Reader
@@ -451,6 +426,7 @@ func (f *Response) Release() {
 		machhttp.ReleaseResponse(f.resp)
 		f.resp = nil
 	}
+
 	f.trailers = nil
 	f.uncompressed = false
 	responseAdapterStorage.Put(f)

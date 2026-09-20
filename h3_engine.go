@@ -477,12 +477,13 @@ func (b *h3BodyReadCloser) Close() error {
 }
 
 func getTargetAddr(req *http.Request) string {
-	host := ""
-	if req.URL != nil && req.URL.Host != "" {
+	var host string
+	switch {
+	case req.URL != nil && req.URL.Host != "":
 		host = req.URL.Host
-	} else if req.Host != "" {
+	case req.Host != "":
 		host = req.Host
-	} else {
+	default:
 		return "127.0.0.1:443"
 	}
 

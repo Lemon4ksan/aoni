@@ -5,7 +5,6 @@
 package netutil_test
 
 import (
-	"crypto/tls"
 	"net"
 	"net/netip"
 	"testing"
@@ -114,12 +113,4 @@ func TestIPv6SubnetRotator(t *testing.T) {
 	prefix, _ := netip.ParsePrefix("2001:db8::/64")
 	parsedIP, _ := netip.ParseAddr(ip1.String())
 	assert.True(t, prefix.Contains(parsedIP))
-}
-
-type mockSessionCacheProvider struct {
-	cache tls.ClientSessionCache
-}
-
-func (m *mockSessionCacheProvider) StdTLSSessionCache() tls.ClientSessionCache {
-	return m.cache
 }

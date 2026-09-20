@@ -128,6 +128,7 @@ func toStd(c Cookie) *http.Cookie {
 		sameSite = http.SameSiteNoneMode
 	}
 
+	//nolint:gosec // G124: dynamic conversion from stored cookie attributes
 	return &http.Cookie{
 		Name:        c.Name,
 		Value:       c.Value,

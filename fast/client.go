@@ -45,6 +45,7 @@ func NewClient(opts ...any) *Client {
 	}
 
 	client.cfg = c
+
 	return client
 }
 
@@ -99,12 +100,18 @@ func (c *Client) Do(req core.Request) (core.Response, error) {
 	}
 
 	fastRes.SetTrailers(trailers)
+	decompressFastResponse(fastRes.resp)
 
 	return fastRes, nil
 }
 
-func (c *Client) execute(ctx context.Context, fastReq *machhttp.Request, fastRes *machhttp.Response) (map[string][]string, error, bool) {
+func (c *Client) execute(
+	ctx context.Context,
+	fastReq *machhttp.Request,
+	fastRes *machhttp.Response,
+) (map[string][]string, error, bool) {
 	trailers, err := c.engine.DoCtx(ctx, fastReq, fastRes)
+
 	return trailers, err, false
 }
 

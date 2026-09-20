@@ -23,9 +23,11 @@ func TLSHandshakeFilter(ctx context.Context, conn net.Conn, targetHost string, c
 		} else {
 			baseCfg = baseCfg.Clone()
 		}
+
 		if cfg.InsecureSkipVerify {
 			baseCfg.InsecureSkipVerify = true
 		}
+
 		return cfg.WrapTLSClient(ctx, conn, baseCfg, targetHost)
 	}
 
