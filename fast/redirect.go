@@ -105,11 +105,11 @@ func (c *Client) executeWithRedirects(
 }
 
 func isRedirectStatus(code int) bool {
-	return code == machhttp.StatusMovedPermanently ||
-		code == machhttp.StatusFound ||
-		code == machhttp.StatusSeeOther ||
-		code == machhttp.StatusTemporaryRedirect ||
-		code == machhttp.StatusPermanentRedirect
+	return code == http.StatusMovedPermanently ||
+		code == http.StatusFound ||
+		code == http.StatusSeeOther ||
+		code == http.StatusTemporaryRedirect ||
+		code == http.StatusPermanentRedirect
 }
 
 func isSameHost(u1, u2 *zerocopy.URI) bool {
@@ -124,7 +124,7 @@ func isHTTPSDowngrade(u1, u2 *zerocopy.URI) bool {
 // upon 301, 302, and 303 redirects per RFC 9110 §15.4 and §6.4.2.
 func applyRedirectMethodAndBody(statusCode int, req *machhttp.Request) {
 	switch statusCode {
-	case machhttp.StatusMovedPermanently, machhttp.StatusFound, machhttp.StatusSeeOther:
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
 		method := bytesconv.B2S(req.Header.Method())
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)

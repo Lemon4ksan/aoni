@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/tls/ja4"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 
@@ -79,6 +80,7 @@ type TraceInfo struct {
 	CertChain        *probe.CertChainInfo
 	Probe            *probe.FullReport
 	PeerCertificates []*x509.Certificate
+	JA4              *ja4.Report
 
 	DNSStart     time.Time
 	ConnectStart time.Time

@@ -1424,6 +1424,9 @@ type ExtensionConfig struct {
 
 	// OverrideH2Settings allows injecting custom HTTP/2 SETTINGS frames (e.g., MAX_CONCURRENT_STREAMS).
 	OverrideH2Settings map[uint16]uint32
+
+	// JA4Callback is invoked when a JA4 fingerprint is computed.
+	JA4Callback func(report interface{})
 }
 
 // Clone creates a memory-isolated deep copy of the extension config.

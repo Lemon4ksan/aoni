@@ -387,7 +387,7 @@ aoni/
 The `aoni` project follows a micro-kernel philosophy: the core engine is permanently locked to IETF RFC and W3C standards with zero business logic, while specialized domain layers reside in companion repositories:
 
 - **[`aoni-browser`](https://github.com/lemon4ksan/aoni-browser)**: The Stealth Shield — pure-Go uTLS ClientHello spoofing, JA3/JA4/JA4H fingerprinting, p0f TCP/IP stack emulation, CDN padding, and full browser impersonation (Chrome, Firefox, Safari).
-- **[`aoni-x`](https://github.com/lemon4ksan/aoni-x)**: Ecosystem Extensions — specialized protocol adapters including OpenTelemetry (`aoni-x/otel`), Socket.IO v5 / Engine.IO v4 (`aoni-x/socketio`), OAuth2/PKCE/DPoP, and GeoIP MMDB.
+- **[`aoni-contrib`](https://github.com/lemon4ksan/aoni-contrib)**: Ecosystem Extensions — specialized protocol adapters including OpenTelemetry (`aoni-contrib/otel`), Socket.IO v5 / Engine.IO v4 (`aoni-contrib/socketio`), OAuth2/PKCE/DPoP, and GeoIP MMDB.
 - **[`vortex`](https://github.com/lemon4ksan/vortex)**: Static Analysis & Code Generator — AST borrow checking, memory safety verifier, and schema-driven client generation for OpenAPI 3.1, AsyncAPI, and Protobuf schemas.
 - **[`ao`](https://github.com/lemon4ksan/ao)**: High-performance `curl` fork powered by `libaoni` (`lib/aoni_bridge.c`), delivering 9,145+ RPS across 100 concurrent threads.
 - **[`discordgo-aoni`](https://github.com/lemon4ksan/discordgo-aoni)**: High-efficiency fork of `discordgo` with network transport replaced by `aoni` and `aoni/realtime/ws`.
