@@ -98,7 +98,11 @@ func (r *ResponseBodyCloser) Close() error {
 	}
 
 	if r.Resp != nil {
-		_ = r.Resp.Close()
+		if rel, ok := r.Resp.(interface{ Release() }); ok {
+			rel.Release()
+		} else {
+			_ = r.Resp.Close()
+		}
 	}
 
 	return err
@@ -143,6 +147,12 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 					httpResp.Trailer.Add(k, v)
 				}
 			}
+		}
+
+		if httpResp.Body != nil {
+			httpResp.Body = &ResponseBodyCloser{ReadCloser: httpResp.Body, Resp: resp}
+		} else if rel, ok := resp.(interface{ Release() }); ok {
+			rel.Release()
 		}
 
 		return httpResp, nil

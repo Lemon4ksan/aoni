@@ -7,6 +7,9 @@ package fast
 import "errors"
 
 var (
+	// ErrNilRequest is returned when attempting to execute a nil request.
+	ErrNilRequest = errors.New("aoni/fast: request is nil")
+
 	// ErrNilURL is returned when attempting to dispatch an HTTP request without a destination address.
 	ErrNilURL = errors.New("aoni/fast: request URL is nil")
 

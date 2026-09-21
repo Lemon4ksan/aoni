@@ -6,6 +6,7 @@ package aoni_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/tests/testutil"
 )
@@ -158,5 +160,26 @@ func TestFast_MultiProtocol_H1_H2_H3(t *testing.T) {
 		for err := range errCh {
 			t.Fatalf("fast H3 request failed: %v", err)
 		}
+	})
+
+	// -------------------------------------------------------------------------
+	// D. Test aoni.NewClient wrapping fast.Client (standard core.Request adapters)
+	// -------------------------------------------------------------------------
+	t.Run("FastClient_Adapted_AoniClient", func(t *testing.T) {
+		fc := fast.NewClient()
+		defer fc.Engine().CloseIdleConnections()
+
+		client := aoni.NewClient(fc)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		resp, err := client.Get(ctx, h1Server.URL()+"/adapted-ping")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "fast-ok-HTTP/1.1", string(body))
 	})
 }

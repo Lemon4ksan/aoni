@@ -7,7 +7,8 @@ package fast
 import (
 	"context"
 	"crypto/tls"
-	"errors"
+	"net/http"
+	"strings"
 
 	machhttp "github.com/lemon4ksan/mach/proto/http"
 
@@ -78,10 +79,12 @@ func (c *Client) EnableH3(enable bool) *Client {
 }
 
 func (c *Client) Do(req core.Request) (core.Response, error) {
-	fastReq, ok := req.(*Request)
-	if !ok {
-		return nil, errors.New("fast: invalid request type, expected *fast.Request")
+	if req == nil {
+		return nil, ErrNilRequest
 	}
+
+	fastReq, cleanup := toFastRequest(req)
+	defer cleanup()
 
 	fastRes := NewResponse(nil)
 
@@ -141,5 +144,53 @@ func ReleaseRequest(req core.Request) {
 func ReleaseResponse(res core.Response) {
 	if r, ok := res.(*Response); ok {
 		r.Release()
+	}
+}
+
+func toFastRequest(req core.Request) (*Request, func()) {
+	if fastReq, ok := req.(*Request); ok {
+		return fastReq, func() {}
+	}
+
+	fastReq := NewRequest(nil)
+	fastReq.SetContext(req.Context())
+	fastReq.SetMethod(req.Method())
+
+	rawURL := req.URL()
+	if rawQuery := req.RawQuery(); rawQuery != "" && !strings.Contains(rawURL, "?") {
+		rawURL += "?" + rawQuery
+	}
+	fastReq.SetURL(rawURL)
+
+	if httpReq := req.HTTPRequest(); httpReq != nil {
+		for k, vv := range httpReq.Header {
+			for _, v := range vv {
+				fastReq.AddHeader(k, v)
+			}
+		}
+		if httpReq.Host != "" {
+			fastReq.req.Header.SetHost(httpReq.Host)
+		}
+		if httpReq.Body != nil && httpReq.Body != http.NoBody {
+			fastReq.SetBodyStream(httpReq.Body, httpReq.ContentLength)
+			if httpReq.GetBody != nil {
+				fastReq.SetGetBody(httpReq.GetBody)
+			}
+		}
+	} else {
+		for k, v := range req.Headers() {
+			fastReq.AddHeaderBytes(k, v)
+		}
+		if b := req.BodyBytes(); len(b) > 0 {
+			fastReq.SetBodyBytes(b)
+		} else if stream := req.BodyStream(); stream != nil {
+			fastReq.SetBodyStream(stream, -1)
+		}
+	}
+
+	fastReq.SetConfig(req.Config())
+
+	return fastReq, func() {
+		fastReq.Release()
 	}
 }
