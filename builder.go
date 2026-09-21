@@ -19,7 +19,6 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/download"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/x/codec"
@@ -105,7 +104,7 @@ type RequestBuilder struct {
 	sink             func(*http.Response) error
 	validators       []func(*http.Response) error
 	pluginErr        error
-	retryOverride    *core.RetryOverride
+	retryOverride    *RetryOverride
 	consumed         bool
 }
 
@@ -259,9 +258,9 @@ func (r *RequestBuilder) SetProxy(proxyURL string) *RequestBuilder {
 	return r
 }
 
-// RetryPolicyProvider represents any type capable of exporting a [core.RetryOverride].
+// RetryPolicyProvider represents any type capable of exporting a [RetryOverride].
 type RetryPolicyProvider interface {
-	ToOverride() core.RetryOverride
+	ToOverride() RetryOverride
 }
 
 // Retry sets the request retry policy via a [RetryPolicyProvider].
@@ -277,7 +276,7 @@ func (r *RequestBuilder) Retry(builder RetryPolicyProvider) *RequestBuilder {
 
 // SetRetry configures custom retry parameters for this request attempt.
 func (r *RequestBuilder) SetRetry(maxAttempts int, backoff time.Duration) *RequestBuilder {
-	override := core.RetryOverride{
+	override := RetryOverride{
 		MaxAttempts: maxAttempts,
 		Backoff:     backoff,
 	}
@@ -606,8 +605,8 @@ func (r *RequestBuilder) Execute(method, path string) (*http.Response, error) {
 		signer := r.signer
 
 		mods = append(mods, RequestModifier{
-			Kind: core.ModCustom,
-			Fn: func(req core.Request) {
+			Kind: ModCustom,
+			Fn: func(req Request) {
 				if httpReq := req.HTTPRequest(); httpReq != nil {
 					_ = signer(httpReq)
 				}

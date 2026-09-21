@@ -7,8 +7,9 @@ package fast
 import (
 	"crypto/tls"
 
-	"github.com/lemon4ksan/aoni"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 // Option defines a functional option for configuring [fast.Client].

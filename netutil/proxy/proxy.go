@@ -25,7 +25,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/health"
 )
 
@@ -115,7 +114,7 @@ type RotatorConfig struct {
 	RetryAfter          time.Duration
 	HealthCheckURL      string
 	HealthCheckInterval time.Duration
-	Logger              core.Logger
+	Logger              aoni.Logger
 }
 
 // StickyKeyFunc extracts a sticky session identifier string from an incoming request.
@@ -199,8 +198,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 
 	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
 	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
-
-	cfg.Logger = generic.Ternary[core.Logger](cfg.Logger != nil, cfg.Logger, logkit.Discard)
+	cfg.Logger = generic.Ternary[aoni.Logger](cfg.Logger != nil, cfg.Logger, logkit.Discard)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Rotator{

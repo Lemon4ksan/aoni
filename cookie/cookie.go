@@ -17,8 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	fcookie "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // MaxCookieAgeSeconds defines the maximum recommended cookie lifetime in seconds (400 days / 34,560,000s)
@@ -38,6 +36,22 @@ const (
 // Thread Safety:
 // Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
 type Cookie = fcookie.Cookie
+
+// CookieJar defines a context-aware HTTP cookie storage interface supporting RFC 6265bis CHIPS.
+//
+// Unlike the standard [net/http/cookiejar.Jar], this interface accepts a [context.Context]
+// to extract proxy and partition keys for strict cookie isolation.
+type CookieJar interface {
+	// SetCookies handles the receipt of the cookies in a reply for the
+	// given URL. It may or may not choose to save the cookies, depending
+	// on the jar's policy and implementation.
+	SetCookies(ctx context.Context, u *url.URL, cookies []*http.Cookie)
+
+	// Cookies returns the cookies to send in a request for the given URL.
+	// It is up to the implementation to honor the standard cookie use
+	// restrictions such as in RFC 6265.
+	Cookies(ctx context.Context, u *url.URL) []*http.Cookie
+}
 
 // ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie] (RFC 6265 §5.2, RFC 6265bis §5.5 & §5.7).
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
@@ -115,7 +129,7 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 }
 
 // Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
-func Mirror(ctx context.Context, jar core.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
+func Mirror(ctx context.Context, jar CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
 	}
@@ -149,7 +163,7 @@ func Mirror(ctx context.Context, jar core.CookieJar, sourceURL *url.URL, targetU
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.
-func Export(ctx context.Context, jar core.CookieJar, u *url.URL) []Cookie {
+func Export(ctx context.Context, jar CookieJar, u *url.URL) []Cookie {
 	if jar == nil || u == nil {
 		return nil
 	}
@@ -186,7 +200,7 @@ func Export(ctx context.Context, jar core.CookieJar, u *url.URL) []Cookie {
 }
 
 // ExportJSON serializes exported cookies for u into a JSON string.
-func ExportJSON(ctx context.Context, jar core.CookieJar, u *url.URL) (string, error) {
+func ExportJSON(ctx context.Context, jar CookieJar, u *url.URL) (string, error) {
 	exported := Export(ctx, jar, u)
 	if len(exported) == 0 {
 		return "[]", nil
@@ -201,7 +215,7 @@ func ExportJSON(ctx context.Context, jar core.CookieJar, u *url.URL) (string, er
 }
 
 // Import injects a slice of exported [Cookie] structs into jar for destination u.
-func Import(ctx context.Context, jar core.CookieJar, u *url.URL, cookies []Cookie) {
+func Import(ctx context.Context, jar CookieJar, u *url.URL, cookies []Cookie) {
 	if jar == nil || u == nil || len(cookies) == 0 {
 		return
 	}
@@ -236,7 +250,7 @@ func Import(ctx context.Context, jar core.CookieJar, u *url.URL, cookies []Cooki
 }
 
 // ImportJSON deserializes a JSON cookie payload and imports it into jar for target u.
-func ImportJSON(ctx context.Context, jar core.CookieJar, u *url.URL, jsonStr string) error {
+func ImportJSON(ctx context.Context, jar CookieJar, u *url.URL, jsonStr string) error {
 	if jar == nil || u == nil || jsonStr == "" || jsonStr == "[]" {
 		return nil
 	}
@@ -300,7 +314,7 @@ func BuildCookieHeader(cookies []*http.Cookie) string {
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
-func ExportNetscape(ctx context.Context, jar core.CookieJar, u *url.URL) string {
+func ExportNetscape(ctx context.Context, jar CookieJar, u *url.URL) string {
 	if jar == nil || u == nil {
 		return ""
 	}

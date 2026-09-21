@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/logkit"
@@ -23,7 +25,6 @@ import (
 	"github.com/lemon4ksan/foundation/system/power"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/x/telemetry"
@@ -37,11 +38,20 @@ import (
 // Client instances are immutable after construction; derivation methods such as
 // [Client.With] and [Client.Clone] return a new independent Client instance.
 type Client struct {
+	// mu synchronizes dynamic mutations of client middlewares and execution chains.
+	mu sync.RWMutex
+
 	// cfg holds the immutable snapshot of all client configuration DTOs (defaults, network, fingerprint, engine).
 	cfg Config
 
 	// engine represents the underlying execution target (typically an isolated [*http.Client] or custom [HTTPDoer]).
 	engine HTTPDoer
+
+	// middlewares holds the registered client-level execution interceptors.
+	middlewares []Middleware
+
+	// chain caches the precomputed execution chain wrapping engine with middlewares.
+	chain HTTPDoer
 
 	// pipeline orchestrates the 5-stage middleware chain, interceptors, compression, and WAF challenge solvers.
 	pipeline *pipeline.Pipeline[*http.Request, *http.Response]
@@ -103,6 +113,10 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 		},
 	}
 
+	if doer != nil {
+		cfg.Engine.CustomEngine = DefaultEngine(doer)
+	}
+
 	generic.ApplyOptions(&cfg, opts...)
 
 	client := &Client{
@@ -132,7 +146,10 @@ func (c *Client) Clone() *Client {
 // The receiver Client is not modified and remains safe for concurrent use.
 // The returned Client is fully independent with isolated configuration state.
 func (c *Client) With(opts ...ClientOption) *Client {
+	c.mu.RLock()
 	cfg := c.cfg.Clone()
+	c.mu.RUnlock()
+
 	generic.ApplyOptions(&cfg, opts...)
 
 	clonedReferer := &pipeline.RefererState{}
@@ -154,6 +171,90 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
+// Use appends one or more [Middleware] interceptors to the client execution pipeline.
+//
+// Middlewares wrap the core execution engine and execute in registration order.
+// Calling Use preserves all existing transport configuration (timeouts, dialers,
+// TLS, uTLS, cookie jars, proxy rotation, and connection pools).
+//
+// Chaining:
+// Use returns the receiver [*Client] to allow fluent method chaining.
+func (c *Client) Use(mws ...Middleware) *Client {
+	if len(mws) == 0 {
+		return c
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, mw := range mws {
+		if mw != nil {
+			c.middlewares = append(c.middlewares, mw)
+			c.cfg.Middlewares = append(c.cfg.Middlewares, mw)
+		}
+	}
+
+	c.baremetalEligible = false
+	c.rebuildChainLocked()
+
+	return c
+}
+
+// Middlewares returns a copy of the registered middleware slice.
+func (c *Client) Middlewares() []Middleware {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return slices.Clone(c.middlewares)
+}
+
+func (c *Client) rebuildChainLocked() {
+	if len(c.middlewares) == 0 {
+		c.chain = c.engine
+		return
+	}
+
+	chained := chainMiddlewares(c.engine, c.middlewares...)
+	c.chain = NewRequestDoerAdapter(chained)
+}
+
+func (c *Client) executionEngine() HTTPDoer {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.middlewares) == 0 {
+		return c.engine
+	}
+
+	if c.chain != nil {
+		return c.chain
+	}
+
+	chained := chainMiddlewares(c.engine, c.middlewares...)
+
+	return NewRequestDoerAdapter(chained)
+}
+
+func chainMiddlewares(doer any, middlewares ...Middleware) RequestDoer {
+	var rd RequestDoer
+	switch d := doer.(type) {
+	case RequestDoer:
+		rd = d
+	case HTTPDoer:
+		rd = NewHTTPDoerAdapter(d)
+	default:
+		return nil
+	}
+
+	for _, mw := range slices.Backward(middlewares) {
+		if mw != nil {
+			rd = mw(rd)
+		}
+	}
+
+	return rd
+}
+
 // Request executes an HTTP request using the specified method, path, and modifiers,
 // returning the raw [*http.Response].
 //
@@ -168,10 +269,11 @@ func (c *Client) Request(
 	method, path string,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
-	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
-	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
-	// full pipeline.Execute and route directly to the underlying engine.
-	if c.baremetalEligible && len(mods) == 0 && pipeline.GetRequestConfig(ctx) == nil {
+	c.mu.RLock()
+	baremetal := c.baremetalEligible && len(c.middlewares) == 0
+	c.mu.RUnlock()
+
+	if baremetal && len(mods) == 0 && pipeline.GetRequestConfig(ctx) == nil {
 		return c.doBaremetal(ctx, method, path)
 	}
 
@@ -468,7 +570,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipeline.Execute(req.Context(), req, c.engine, pipe.toInternal())
+	return c.pipeline.Execute(req.Context(), req, c.executionEngine(), pipe.toInternal())
 }
 
 // Config returns a clone DTO copy of the active client configuration.
@@ -565,15 +667,35 @@ func (c *Client) Inspector() telemetry.TrafficInspector {
 
 // TLSConfig returns a deep copy of the active TLS client configuration.
 func (c *Client) TLSConfig() *tls.Config {
+	if c == nil {
+		return nil
+	}
+
 	if tr := c.Transport(); tr != nil && tr.TLSClientConfig != nil {
 		return tr.TLSClientConfig.Clone()
+	}
+
+	if tlsProvider, ok := UnwrapAs[interface{ TLSConfig() *tls.Config }](c.engine); ok {
+		if cfg := tlsProvider.TLSConfig(); cfg != nil {
+			return cfg.Clone()
+		}
+	}
+
+	if tlsProvider, ok := UnwrapAs[interface{ TLSClientConfig() *tls.Config }](c.engine); ok {
+		if cfg := tlsProvider.TLSClientConfig(); cfg != nil {
+			return cfg.Clone()
+		}
+	}
+
+	if c.cfg.Network.TLSConfig != nil {
+		return c.cfg.Network.TLSConfig.Clone()
 	}
 
 	return nil
 }
 
-// Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
-func (c *Client) Logger() core.Logger {
+// Logger returns the configured diagnostic [Logger], or a no-op discard fallback.
+func (c *Client) Logger() Logger {
 	if c.cfg.Defaults.Logger == nil {
 		return logkit.Discard
 	}
@@ -606,12 +728,25 @@ func (c *Client) Transport() *http.Transport {
 	}
 
 	if httpClient, ok := UnwrapAs[*http.Client](c.engine); ok && httpClient.Transport != nil {
-		tr, _ := UnwrapAs[*http.Transport](httpClient.Transport)
+		if tr, ok := UnwrapAs[*http.Transport](httpClient.Transport); ok {
+			return tr
+		}
+
+		if tp, ok := UnwrapAs[interface{ Transport() *http.Transport }](httpClient.Transport); ok {
+			return tp.Transport()
+		}
+	}
+
+	if tr, ok := UnwrapAs[*http.Transport](c.engine); ok {
 		return tr
 	}
 
 	if tp, ok := UnwrapAs[interface{ Transport() *http.Transport }](c.engine); ok {
 		return tp.Transport()
+	}
+
+	if innerClient := UnwrapClient(c.engine); innerClient != nil && innerClient != c {
+		return innerClient.Transport()
 	}
 
 	return nil
@@ -718,7 +853,15 @@ func (c *Client) applyConfig(cfg Config) {
 	c.cfg = cfg
 	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
-	c.baremetalEligible = c.cfg.IsBaremetalEligible()
+
+	if len(cfg.Middlewares) > 0 {
+		c.middlewares = slices.Clone(cfg.Middlewares)
+	} else {
+		c.middlewares = nil
+	}
+
+	c.rebuildChainLocked()
+	c.baremetalEligible = c.cfg.IsBaremetalEligible() && len(c.middlewares) == 0
 
 	applyEngineConfig(c, cfg.Engine)
 

@@ -13,13 +13,13 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/http/zerocopy"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 )
 
 func (c *Client) executeWithRedirects(
 	ctx context.Context,
-	fastReq *machhttp.Request,
-	fastResp *machhttp.Response,
+	fastReq *mach.Request,
+	fastResp *mach.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	redirectLimit := generic.Ternary(c.cfg.Engine.RedirectLimit < 0, 10, c.cfg.Engine.RedirectLimit)
 
@@ -37,6 +37,9 @@ func (c *Client) executeWithRedirects(
 
 	currentURI := zerocopy.AcquireURI()
 	defer zerocopy.ReleaseURI(currentURI)
+
+	nextURI := zerocopy.AcquireURI()
+	defer zerocopy.ReleaseURI(nextURI)
 
 	var redirectsFollowed int
 
@@ -69,7 +72,6 @@ func (c *Client) executeWithRedirects(
 
 		applyRedirectMethodAndBody(statusCode, fastReq)
 
-		nextURI := zerocopy.AcquireURI()
 		currentURI.CopyTo(nextURI)
 		nextURI.UpdateBytes(location)
 
@@ -98,7 +100,6 @@ func (c *Client) executeWithRedirects(
 			fastReq.Header.SetBytesKV(bytesconv.S2B("Referer"), currentURI.FullURI())
 		}
 
-		zerocopy.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
 }
@@ -119,21 +120,28 @@ func isHTTPSDowngrade(u1, u2 *zerocopy.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 
+var representationHeaders = [...]string{
+	header.ContentType,
+	header.ContentLength,
+	header.ContentEncoding,
+	header.ContentLanguage,
+	header.ContentLocation,
+	header.Digest,
+}
+
 // applyRedirectMethodAndBody changes request method to GET and scrubs representation/content headers
 // upon 301, 302, and 303 redirects per RFC 9110 §15.4 and §6.4.2.
-func applyRedirectMethodAndBody(statusCode int, req *machhttp.Request) {
+func applyRedirectMethodAndBody(statusCode int, req *mach.Request) {
 	switch statusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
 		method := bytesconv.B2S(req.Header.Method())
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)
-			req.Header.Del(header.ContentType)
-			req.Header.Del(header.ContentLength)
-			req.Header.Del(header.ContentEncoding)
-			req.Header.Del(header.ContentLanguage)
-			req.Header.Del(header.ContentLocation)
-			req.Header.Del(header.Digest)
+
+			for _, h := range representationHeaders {
+				req.Header.Del(h)
+			}
 		}
 	}
 }

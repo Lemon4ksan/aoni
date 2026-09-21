@@ -37,14 +37,12 @@ func main() {
 		Window:           10 * time.Second,
 	})
 
-	// Wrap client with circuit breaker middleware using the default condition
-	doer := middleware.Chain(
-		aoni.NewClient(nil),
-		middleware.CircuitBreak(cb, middleware.DefaultCircuitBreakerCondition),
-	)
-
-	client := aoni.NewClient(doer,
+	// Configure client with circuit breaker middleware using the default condition
+	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://httpbin.org"),
+		option.WithMiddleware(
+			middleware.CircuitBreak(cb, middleware.DefaultCircuitBreakerCondition),
+		),
 	)
 
 	// Make requests; once the failure ratio exceeds the threshold, the circuit opens

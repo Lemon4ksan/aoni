@@ -27,7 +27,7 @@ import (
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 )
 
 // -----------------------------------------------------------------------------
@@ -519,7 +519,7 @@ func TestQPACK_F10_ConcurrentCodecStress_GoroutineRaceSafety(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < iterations; i++ {
 				streamID := uint64(workerID*iterations + i)
-				var req machhttp.Request
+				var req mach.Request
 				req.Header.SetMethod("GET")
 				req.SetRequestURI(fmt.Sprintf("https://example.com/w%d/i%d", workerID, i))
 				req.Header.Set("X-Worker", fmt.Sprintf("%d", workerID))
@@ -532,7 +532,7 @@ func TestQPACK_F10_ConcurrentCodecStress_GoroutineRaceSafety(t *testing.T) {
 					return
 				}
 
-				var respHeader machhttp.ResponseHeader
+				var respHeader mach.ResponseHeader
 				// Encode response
 				respBlock := codec.EncodeResponseHeaders(streamID, 200, headkit.NewWithCapacity(4), 0)
 				if _, err := codec.DecodeResponseHeaders(streamID, respBlock, &respHeader); err != nil {
@@ -864,7 +864,7 @@ func TestQPACK_F11_HighConcurrency_NoDeadlock_Soak(t *testing.T) {
 					return
 				}
 
-				var respHeader machhttp.ResponseHeader
+				var respHeader mach.ResponseHeader
 				statusCode, err := codec.DecodeResponseHeaders(streamID, block, &respHeader)
 				if err != nil {
 					errCh <- fmt.Errorf("worker %d stream %d decoding failed: %w", workerID, streamID, err)

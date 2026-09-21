@@ -15,18 +15,17 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 	return &Request{}
 })
 
-// Request adapts a high-performance [*machhttp.Request] to the unified [aoni.Request] contract.
+// Request adapts a high-performance [*mach.Request] to the unified [aoni.Request] contract.
 //
 // Thread Safety & Memory Lifetime Invariants:
 // Request instances are recycled via sharded [pool.PerPStorage] for zero-lock execution.
@@ -34,7 +33,7 @@ var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
 	_          cpu.CacheLinePad
-	req        *machhttp.Request
+	req        *mach.Request
 	_          cpu.CacheLinePad
 	ctx        context.Context
 	cfg        any
@@ -43,13 +42,13 @@ type Request struct {
 	_          cpu.CacheLinePad
 }
 
-// NewRequest acquires a pooled [Request] adapter wrapping an active [*machhttp.Request].
-// If req is nil, a new [*machhttp.Request] is acquired automatically from [machhttp.AcquireRequest].
+// NewRequest acquires a pooled [Request] adapter wrapping an active [*mach.Request].
+// If req is nil, a new [*mach.Request] is acquired automatically from [mach.AcquireRequest].
 // Yields a ready-to-use [Request] adapter bound to the pool. Caller MUST call Release() when finished.
-func NewRequest(req *machhttp.Request) *Request {
+func NewRequest(req *mach.Request) *Request {
 	isAcquired := false
 	if req == nil {
-		req = machhttp.AcquireRequest()
+		req = mach.AcquireRequest()
 		req.Reset()
 
 		isAcquired = true
@@ -349,7 +348,7 @@ func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 
 			return io.NopCloser(r), nil
 		}
-	} else if rewinder, ok := r.(core.BodyRewinder); ok {
+	} else if rewinder, ok := r.(aoni.BodyRewinder); ok {
 		f.getBody = rewinder.GetBody
 	} else {
 		f.getBody = nil
@@ -384,12 +383,12 @@ func (f *Request) HTTPRequest() *http.Request {
 	return nil
 }
 
-// FastHTTPRequest yields the underlying [*machhttp.Request] instance.
-func (f *Request) FastHTTPRequest() *machhttp.Request {
+// FastHTTPRequest yields the underlying [*mach.Request] instance.
+func (f *Request) FastHTTPRequest() *mach.Request {
 	return f.req
 }
 
-// EngineRequest yields the underlying [*machhttp.Request] cast to any.
+// EngineRequest yields the underlying [*mach.Request] cast to any.
 func (f *Request) EngineRequest() any {
 	return f.req
 }
@@ -401,7 +400,7 @@ func (f *Request) Release() {
 	}
 
 	if f.isAcquired && f.req != nil {
-		machhttp.ReleaseRequest(f.req)
+		mach.ReleaseRequest(f.req)
 	}
 
 	f.req = nil

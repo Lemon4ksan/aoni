@@ -56,17 +56,15 @@ func main() {
 		return req.URL.Host
 	})
 
-	// Wrap with retry middleware that retries on proxy failures
-	doer := middleware.Chain(
-		rotator,
-		middleware.Retry(
-			middleware.RetryOptions{MaxRetries: 3, Backoff: 1 * time.Second},
-			proxy.RetryCondition(rotator),
-		),
-	)
-
-	client := aoni.NewClient(doer,
+	// Wrap rotator with retry middleware using fluent option.WithMiddleware
+	client := aoni.NewClient(rotator,
 		option.WithBaseURL("https://httpbin.org"),
+		option.WithMiddleware(
+			middleware.Retry(
+				middleware.RetryOptions{MaxRetries: 3, Backoff: 1 * time.Second},
+				proxy.RetryCondition(rotator),
+			),
+		),
 	)
 
 	// Make requests that will be load-balanced across proxies

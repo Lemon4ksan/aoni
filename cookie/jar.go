@@ -17,8 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/nik"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 type (
@@ -63,25 +61,25 @@ type cookieKey struct {
 
 // ProxyIsolatedJar provides thread-safe, per-proxy and CHIPS partitioned cookie storage isolation.
 type ProxyIsolatedJar struct {
-	jars    *generic.LRU[string, core.CookieJar]
+	jars    *generic.LRU[string, CookieJar]
 	backend generic.Safe[Storage]
 }
 
 // NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar].
 func NewProxyIsolatedJar() *ProxyIsolatedJar {
 	return &ProxyIsolatedJar{
-		jars: generic.NewLRU[string, core.CookieJar](10000),
+		jars: generic.NewLRU[string, CookieJar](10000),
 	}
 }
 
-// SetCookies satisfies the context-aware [cookie.core.CookieJar] interface.
+// SetCookies satisfies the context-aware [cookie.CookieJar] interface.
 func (p *ProxyIsolatedJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http.Cookie) {
 	if jar := p.GetJar(ctx); jar != nil {
 		jar.SetCookies(ctx, u, cookies)
 	}
 }
 
-// Cookies satisfies the context-aware [cookie.core.CookieJar] interface.
+// Cookies satisfies the context-aware [cookie.CookieJar] interface.
 func (p *ProxyIsolatedJar) Cookies(ctx context.Context, u *url.URL) []*http.Cookie {
 	if jar := p.GetJar(ctx); jar != nil {
 		return jar.Cookies(ctx, u)
@@ -90,15 +88,15 @@ func (p *ProxyIsolatedJar) Cookies(ctx context.Context, u *url.URL) []*http.Cook
 	return nil
 }
 
-// GetJarForProxy retrieves or lazily initializes an isolated [core.CookieJar] bound to the specified proxyURL.
-func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) core.CookieJar {
+// GetJarForProxy retrieves or lazily initializes an isolated [CookieJar] bound to the specified proxyURL.
+func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) CookieJar {
 	if jar, ok := p.jars.Get(proxyURL); ok {
 		return jar
 	}
 
 	baseJar := NewMemoryJar()
 
-	var jar core.CookieJar = baseJar
+	var jar CookieJar = baseJar
 
 	backend := p.backend.Get()
 	if backend != nil {
@@ -117,7 +115,7 @@ func (p *ProxyIsolatedJar) WithStorageBackend(backend Storage) *ProxyIsolatedJar
 }
 
 // GetJar extracts the active proxy URL from context and yields the corresponding isolated jar.
-func (p *ProxyIsolatedJar) GetJar(ctx context.Context) core.CookieJar {
+func (p *ProxyIsolatedJar) GetJar(ctx context.Context) CookieJar {
 	return p.GetJarForProxy(GetProxyAddress(ctx))
 }
 
@@ -151,7 +149,7 @@ func (p *ProxyIsolatedJar) PurgeExpired() {
 	}
 }
 
-func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar core.CookieJar, backend Storage) core.CookieJar {
+func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar CookieJar, backend Storage) CookieJar {
 	initialMap := make(map[cookieKey]Cookie)
 	pJar := &PersistentJar{
 		Inner:    baseJar,
@@ -196,9 +194,9 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar core.Cooki
 	return pJar
 }
 
-// PersistentJar decorates a [core.CookieJar] to synchronize updates to a Storage backend and enforce CHIPS partitioning.
+// PersistentJar decorates a [CookieJar] to synchronize updates to a Storage backend and enforce CHIPS partitioning.
 type PersistentJar struct {
-	Inner    core.CookieJar
+	Inner    CookieJar
 	proxyURL string
 	backend  Storage
 	cookies  generic.Safe[map[cookieKey]Cookie]

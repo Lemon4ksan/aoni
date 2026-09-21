@@ -14,12 +14,11 @@ import (
 	fheader "github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/std"
 )
 
-// Or combines multiple [core.RetryCondition] predicates, returning true if ANY condition is satisfied.
-func Or(conditions ...core.RetryCondition) core.RetryCondition {
+// Or combines multiple [aoni.RetryCondition] predicates, returning true if ANY condition is satisfied.
+func Or(conditions ...aoni.RetryCondition) aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		for _, cond := range conditions {
 			if cond != nil && cond(resp, err) {
@@ -31,8 +30,8 @@ func Or(conditions ...core.RetryCondition) core.RetryCondition {
 	}
 }
 
-// And combines multiple [core.RetryCondition] predicates, returning true if ALL conditions are satisfied.
-func And(conditions ...core.RetryCondition) core.RetryCondition {
+// And combines multiple [aoni.RetryCondition] predicates, returning true if ALL conditions are satisfied.
+func And(conditions ...aoni.RetryCondition) aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		for _, cond := range conditions {
 			if cond == nil || !cond(resp, err) {
@@ -68,8 +67,8 @@ func newSyntheticResponse(
 	})
 }
 
-// FallbackString returns an [core.FallbackFunc] producing a static plaintext HTTP response.
-func FallbackString(statusCode int, body string) core.FallbackFunc {
+// FallbackString returns an [aoni.FallbackFunc] producing a static plaintext HTTP response.
+func FallbackString(statusCode int, body string) aoni.FallbackFunc {
 	return func(req aoni.Request, _ error) (aoni.Response, error) {
 		return newSyntheticResponse(
 			statusCode,
@@ -81,8 +80,8 @@ func FallbackString(statusCode int, body string) core.FallbackFunc {
 	}
 }
 
-// FallbackJSON returns an [core.FallbackFunc] serializing payload as JSON in a synthetic HTTP response.
-func FallbackJSON(statusCode int, payload any) core.FallbackFunc {
+// FallbackJSON returns an [aoni.FallbackFunc] serializing payload as JSON in a synthetic HTTP response.
+func FallbackJSON(statusCode int, payload any) aoni.FallbackFunc {
 	return func(req aoni.Request, _ error) (aoni.Response, error) {
 		data, err := json.Marshal(payload)
 		if err != nil {

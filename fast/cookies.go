@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// FILE: fast/cookies.go
-
 package fast
 
 import (
@@ -152,22 +150,28 @@ func extractUserInfoAndSetAuth(req *mach.Request) {
 	req.URI().SetPassword("")
 }
 
+var sensitiveRedirectHeaders = [...]string{
+	header.Authorization,
+	header.ProxyAuthorization,
+	header.ProxyAuthenticate,
+	header.WWWAuthenticate,
+	"Cookie2",
+	"X-Api-Key",
+	"X-Auth-Token",
+	"X-Access-Token",
+	"X-Secret",
+	"X-Client-Secret",
+	"Api-Key",
+	"Token",
+	"Secret",
+	"Private-Key",
+}
+
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *zerocopy.URI) {
-	req.Header.Del(header.Authorization)
-	req.Header.Del(header.ProxyAuthorization)
-	req.Header.Del(header.ProxyAuthenticate)
-	req.Header.Del(header.WWWAuthenticate)
-	req.Header.Del("Cookie2")
-	req.Header.Del("X-Api-Key")
-	req.Header.Del("X-Auth-Token")
-	req.Header.Del("X-Access-Token")
-	req.Header.Del("X-Secret")
-	req.Header.Del("X-Client-Secret")
-	req.Header.Del("Api-Key")
-	req.Header.Del("Token")
-	req.Header.Del("Secret")
-	req.Header.Del("Private-Key")
+	for _, h := range sensitiveRedirectHeaders {
+		req.Header.Del(h)
+	}
 
 	if !isSameDomainOrSubdomain(bytesconv.B2S(currentURI.Host()), bytesconv.B2S(nextURI.Host())) {
 		req.Header.Del(header.Cookie)

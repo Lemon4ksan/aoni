@@ -9,7 +9,7 @@ import (
 	"net"
 	"sync"
 
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 )
 
 // ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.
@@ -138,7 +138,7 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 
 // DialWithLocalAddr creates new client<->server connection.
 func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) {
-	pc := machhttp.NewPipeConns()
+	pc := mach.NewPipeConns()
 
 	pc.SetAddresses(local, ln.Addr(), ln.Addr(), local)
 

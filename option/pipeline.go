@@ -12,8 +12,6 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/x/telemetry"
@@ -36,13 +34,7 @@ import (
 func WithRetry(builder *resiliency.RetryBuilder) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if builder != nil {
-			var base any = cfg.Engine.CustomEngine
-			if base == nil {
-				base = http.DefaultClient
-			}
-
-			chained := middleware.Chain(base, builder.Build())
-			cfg.Engine.CustomEngine = aoni.NewRequestDoerAdapter(chained)
+			cfg.Middlewares = append(cfg.Middlewares, builder.Build())
 		}
 	}
 }
@@ -58,17 +50,11 @@ func WithRetry(builder *resiliency.RetryBuilder) aoni.ClientOption {
 //	)
 func WithMiddleware(middlewares ...aoni.Middleware) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		if len(middlewares) == 0 {
-			return
+		for _, mw := range middlewares {
+			if mw != nil {
+				cfg.Middlewares = append(cfg.Middlewares, mw)
+			}
 		}
-
-		var base any = cfg.Engine.CustomEngine
-		if base == nil {
-			base = http.DefaultClient
-		}
-
-		chained := middleware.Chain(base, middlewares...)
-		cfg.Engine.CustomEngine = aoni.NewRequestDoerAdapter(chained)
 	}
 }
 
@@ -153,7 +139,7 @@ func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.ClientOptio
 //	client := aoni.NewClient(nil,
 //	    option.WithCookieJar(cookie.NewProxyIsolatedJar()),
 //	)
-func WithCookieJar(jar core.CookieJar) aoni.ClientOption {
+func WithCookieJar(jar aoni.CookieJar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CookieJar = jar
 	}
@@ -181,7 +167,7 @@ func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
 }
 
 // WithDuplicateRequestGuard enables ring-buffer duplicate request detection to detect accidental infinite request loops.
-func WithDuplicateRequestGuard(window time.Duration, logger core.Logger) aoni.ClientOption {
+func WithDuplicateRequestGuard(window time.Duration, logger aoni.Logger) aoni.ClientOption {
 	if window <= 0 {
 		window = 10 * time.Second
 	}

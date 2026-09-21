@@ -19,7 +19,7 @@ import (
 	"github.com/lemon4ksan/mach/client/h2"
 	"github.com/lemon4ksan/mach/client/h3"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 )
 
 // Pool coordinates multi-protocol zero-allocation connections across HTTP/1.1, HTTP/2, and HTTP/3.
@@ -81,13 +81,13 @@ func NewPool() *Pool {
 }
 
 // Do executes a request using background context.
-func (p *Pool) Do(req *machhttp.Request, res *machhttp.Response) error {
+func (p *Pool) Do(req *mach.Request, res *mach.Response) error {
 	_, err := p.DoCtx(context.Background(), req, res)
 	return err
 }
 
 // DoCtx executes a request under context, automatically selecting and multiplexing over H1, H2, or H3.
-func (p *Pool) DoCtx(ctx context.Context, req *machhttp.Request, res *machhttp.Response) (map[string][]string, error) {
+func (p *Pool) DoCtx(ctx context.Context, req *mach.Request, res *mach.Response) (map[string][]string, error) {
 	addr := string(req.Host())
 	if addr == "" {
 		addr = string(req.URI().Host())
@@ -123,8 +123,8 @@ func (p *Pool) DoCtx(ctx context.Context, req *machhttp.Request, res *machhttp.R
 func (p *Pool) doH3(
 	ctx context.Context,
 	addr string,
-	req *machhttp.Request,
-	res *machhttp.Response,
+	req *mach.Request,
+	res *mach.Response,
 ) (map[string][]string, error) {
 	for {
 		p.mu.Lock()
@@ -199,8 +199,8 @@ func (p *Pool) doH3(
 func (p *Pool) doTLS(
 	ctx context.Context,
 	addr string,
-	req *machhttp.Request,
-	res *machhttp.Response,
+	req *mach.Request,
+	res *mach.Response,
 ) (map[string][]string, error) {
 	for {
 		// Check existing multiplexed H2 connection
@@ -369,8 +369,8 @@ func (p *Pool) doTLS(
 func (p *Pool) doH1(
 	ctx context.Context,
 	addr string,
-	req *machhttp.Request,
-	res *machhttp.Response,
+	req *mach.Request,
+	res *mach.Response,
 	existingConn net.Conn,
 ) error {
 	var cc *h1.ClientConn
@@ -449,7 +449,7 @@ func (p *Pool) getTLSConfig(addr string, nextProtos []string) *tls.Config {
 }
 
 // DoPipeline executes requests sequentially over HTTP/1.1 connections.
-func (p *Pool) DoPipeline(reqs []*machhttp.Request, resps []*machhttp.Response) error {
+func (p *Pool) DoPipeline(reqs []*mach.Request, resps []*mach.Response) error {
 	for i := range reqs {
 		if err := p.Do(reqs[i], resps[i]); err != nil {
 			return err
@@ -500,6 +500,7 @@ func getNegotiatedProtocol(conn net.Conn) string {
 	}
 
 	val := reflect.ValueOf(conn)
+
 	m := val.MethodByName("ConnectionState")
 	if m.IsValid() && m.Type().NumIn() == 0 && m.Type().NumOut() == 1 {
 		res := m.Call(nil)[0]

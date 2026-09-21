@@ -11,7 +11,6 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/x/codec/decode"
 	"github.com/lemon4ksan/aoni/x/telemetry"
 )
@@ -83,7 +82,7 @@ func WithModifiers(mods ...aoni.RequestModifier) aoni.ClientOption {
 }
 
 // WithLogger assigns a structured diagnostic [telemetry.Logger] for pipeline and transport event tracing.
-func WithLogger(l core.Logger) aoni.ClientOption {
+func WithLogger(l aoni.Logger) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Logger = l
 	}

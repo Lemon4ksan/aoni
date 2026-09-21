@@ -9,10 +9,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 )
 
-func decompressFastResponse(resp *machhttp.Response) bool {
+func decompressFastResponse(resp *mach.Response) bool {
 	encodingBytes := resp.Header.ContentEncoding()
 	if len(encodingBytes) == 0 {
 		return false
@@ -37,7 +37,7 @@ func decompressFastResponse(resp *machhttp.Response) bool {
 	return false
 }
 
-func enforceContentLengthTruncation(resp *machhttp.Response) {
+func enforceContentLengthTruncation(resp *mach.Response) {
 	if resp == nil {
 		return
 	}

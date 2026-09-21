@@ -48,6 +48,15 @@ func NewHTTPDoerAdapter(doer HTTPDoer) core.RequestDoer {
 	return &HTTPDoerAdapter{doer: doer}
 }
 
+// Unwrap returns the underlying wrapped [HTTPDoer].
+func (a *HTTPDoerAdapter) Unwrap() any {
+	if a == nil {
+		return nil
+	}
+
+	return a.doer
+}
+
 // Do executes a unified [core.Request] via the underlying [HTTPDoer]. Safe for concurrent execution.
 func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
 	if a == nil || a.doer == nil || req == nil {
@@ -122,6 +131,15 @@ func NewRequestDoerAdapter(doer core.RequestDoer) HTTPDoer {
 	return &RequestDoerAdapter{doer: doer}
 }
 
+// Unwrap returns the underlying wrapped [core.RequestDoer].
+func (a *RequestDoerAdapter) Unwrap() any {
+	if a == nil {
+		return nil
+	}
+
+	return a.doer
+}
+
 // Do executes a standard [*http.Request] via the underlying [spec.RequestDoer]. Safe for concurrent execution.
 func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	if a == nil || a.doer == nil {
@@ -188,15 +206,6 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return httpResp, nil
-}
-
-// Unwrap returns the underlying core.RequestDoer.
-func (a *RequestDoerAdapter) Unwrap() any {
-	if a == nil {
-		return nil
-	}
-
-	return a.doer
 }
 
 // CloseIdleConnections forwards idle connection closing to the underlying doer if supported.

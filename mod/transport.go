@@ -10,7 +10,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/http/nik"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/pipeline"
 )
 
@@ -119,21 +118,21 @@ func WithErrorModel(model any) RequestModifier {
 }
 
 // WithDecoder constructs an [RequestModifier] overriding the response decoder implementation for the request.
-func WithDecoder(d core.ResponseDecoder) RequestModifier {
+func WithDecoder(d ResponseDecoder) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Decoder = d
 	})
 }
 
 // WithUploadProgress constructs an [RequestModifier] registering an upload progress tracking callback.
-func WithUploadProgress(progress core.ProgressFunc) RequestModifier {
+func WithUploadProgress(progress ProgressFunc) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).UploadProgress = progress
 	})
 }
 
 // WithDownloadProgress constructs an [RequestModifier] registering a download progress tracking callback.
-func WithDownloadProgress(progress core.ProgressFunc) RequestModifier {
+func WithDownloadProgress(progress ProgressFunc) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).DownloadProgress = progress
 	})

@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
@@ -125,8 +125,8 @@ func TestM1_Challenger_ClientConn_HighConcurrency_100Workers(t *testing.T) {
 			}
 
 			for r := 0; r < reqsPerWorker; r++ {
-				req := machhttp.AcquireRequest()
-				resp := machhttp.AcquireResponse()
+				req := mach.AcquireRequest()
+				resp := mach.AcquireResponse()
 
 				reqPath := fmt.Sprintf("/worker/%d/req/%d", workerID, r)
 				req.Header.SetMethod(http.MethodPost)
@@ -137,16 +137,16 @@ func TestM1_Challenger_ClientConn_HighConcurrency_100Workers(t *testing.T) {
 
 				_, err := cc.Do(ctx, req, resp, nil)
 				if err != nil {
-					machhttp.ReleaseRequest(req)
-					machhttp.ReleaseResponse(resp)
+					mach.ReleaseRequest(req)
+					mach.ReleaseResponse(resp)
 					errCh <- fmt.Errorf("worker %d req %d cc.Do failed: %w", workerID, r, err)
 					return
 				}
 
 				if resp.StatusCode() != http.StatusOK {
 					status := resp.StatusCode()
-					machhttp.ReleaseRequest(req)
-					machhttp.ReleaseResponse(resp)
+					mach.ReleaseRequest(req)
+					mach.ReleaseResponse(resp)
 					errCh <- fmt.Errorf("worker %d req %d bad status: %d", workerID, r, status)
 					return
 				}
@@ -156,15 +156,15 @@ func TestM1_Challenger_ClientConn_HighConcurrency_100Workers(t *testing.T) {
 					expectedLen := len(payload)
 					actualLen := len(body)
 					status := resp.StatusCode()
-					machhttp.ReleaseRequest(req)
-					machhttp.ReleaseResponse(resp)
+					mach.ReleaseRequest(req)
+					mach.ReleaseResponse(resp)
 					errCh <- fmt.Errorf("worker %d req %d payload mismatch: expected %d bytes, got %d bytes, status=%d",
 						workerID, r, expectedLen, actualLen, status)
 					return
 				}
 
-				machhttp.ReleaseRequest(req)
-				machhttp.ReleaseResponse(resp)
+				mach.ReleaseRequest(req)
+				mach.ReleaseResponse(resp)
 				completedReqs.Add(1)
 			}
 		}(w)
@@ -753,8 +753,8 @@ func TestM1_Challenger_H3_HeaderIntegrity_ConcurrentHeavy(t *testing.T) {
 				defer wg.Done()
 
 				for r := 0; r < reqsPerWorker; r++ {
-					req := machhttp.AcquireRequest()
-					resp := machhttp.AcquireResponse()
+					req := mach.AcquireRequest()
+					resp := mach.AcquireResponse()
 
 					req.Header.SetMethod(http.MethodGet)
 					req.SetRequestURI(fmt.Sprintf("%s/headers-integrity-cc/%d/%d", ccServer.URL(), workerID, r))
@@ -775,22 +775,22 @@ func TestM1_Challenger_H3_HeaderIntegrity_ConcurrentHeavy(t *testing.T) {
 
 					_, err := cc.Do(ctx, req, resp, nil)
 					if err != nil {
-						machhttp.ReleaseRequest(req)
-						machhttp.ReleaseResponse(resp)
+						mach.ReleaseRequest(req)
+						mach.ReleaseResponse(resp)
 						errCh <- fmt.Errorf("worker %d req %d cc.Do err: %w", workerID, r, err)
 						return
 					}
 
 					if resp.StatusCode() != http.StatusOK {
 						statusCode := resp.StatusCode()
-						machhttp.ReleaseRequest(req)
-						machhttp.ReleaseResponse(resp)
+						mach.ReleaseRequest(req)
+						mach.ReleaseResponse(resp)
 						errCh <- fmt.Errorf("worker %d req %d bad status %d", workerID, r, statusCode)
 						return
 					}
 
-					machhttp.ReleaseRequest(req)
-					machhttp.ReleaseResponse(resp)
+					mach.ReleaseRequest(req)
+					mach.ReleaseResponse(resp)
 					completedReqs.Add(1)
 				}
 			}(w)

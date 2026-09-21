@@ -24,3 +24,30 @@ type RetryOverride struct {
 
 // FallbackFunc generates a synthetic fallback [Response] when a request execution permanently fails.
 type FallbackFunc func(req Request, origErr error) (Response, error)
+
+// JitterStrategy defines randomized delay distribution algorithms for retries.
+type JitterStrategy int
+
+const (
+	JitterNone JitterStrategy = iota
+	JitterFull
+	JitterEqual
+)
+
+// RetryOptions configures backoff, jitter, and idempotency constraints for request retries.
+type RetryOptions struct {
+	MaxAttempts        uint32
+	MaxRetries         uint32
+	InitialBackoff     time.Duration
+	Backoff            time.Duration
+	MaxBackoff         time.Duration
+	BackoffFactor      float64
+	Jitter             bool
+	JitterStrategy     JitterStrategy
+	HonorRetryAfter    bool
+	MaxRetryAfter      time.Duration
+	AsyncThreshold     uint32
+	AutoIdempotencyKey bool
+	AllowedMethods     []string
+	OnRetry            func(attempt uint32, err error, delay time.Duration)
+}

@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/dict"
@@ -223,16 +222,20 @@ type Config struct {
 
 	// Ext provides hooks for external extension modules.
 	Ext ExtensionConfig
+
+	// Middlewares holds client-level cross-cutting interceptors registered via [option.WithMiddleware] or [Client.Use].
+	Middlewares []Middleware
 }
 
 // Clone creates a deep copy of Config, allocating fresh memory for all nested
 // maps, slices, and pointer fields to guarantee strict memory isolation.
 func (c Config) Clone() Config {
 	return Config{
-		Network:  c.Network.Clone(),
-		Defaults: c.Defaults.Clone(),
-		Engine:   c.Engine.Clone(),
-		Ext:      c.Ext.Clone(),
+		Network:     c.Network.Clone(),
+		Defaults:    c.Defaults.Clone(),
+		Engine:      c.Engine.Clone(),
+		Ext:         c.Ext.Clone(),
+		Middlewares: slices.Clone(c.Middlewares),
 	}
 }
 
@@ -244,7 +247,9 @@ func (c Config) RequiresRequestContext() bool {
 
 // IsBaremetalEligible reports whether the entire client configuration permits fast 0-alloc baremetal execution.
 func (c Config) IsBaremetalEligible() bool {
-	return !c.RequiresRequestContext() &&
+	return len(c.Middlewares) == 0 &&
+		c.Engine.CustomEngine == nil &&
+		!c.RequiresRequestContext() &&
 		c.Defaults.IsBaremetalEligible()
 }
 
@@ -355,7 +360,10 @@ type EngineConfig struct {
 
 // DigestAuthConfig holds RFC 7616 HTTP Digest Access Authentication credentials.
 type DigestAuthConfig struct {
+	// Username is the authentication principal identity.
 	Username string
+
+	// Password is the shared secret for Digest challenge response calculation.
 	Password string
 }
 
@@ -388,6 +396,7 @@ func (e EngineConfig) Clone() EngineConfig {
 			sCopy.Other = make(map[uint64]uint64, len(e.H3Settings.Other))
 			maps.Copy(sCopy.Other, e.H3Settings.Other)
 		}
+
 		cloned.H3Settings = &sCopy
 	}
 
@@ -717,7 +726,7 @@ type ClientDefaults struct {
 	Decoders DecoderMap
 
 	// Logger receives structured diagnostic log events.
-	Logger core.Logger
+	Logger Logger
 
 	// DefaultMods holds default functional request modifiers applied to every outgoing request.
 	DefaultMods []RequestModifier
@@ -1028,9 +1037,16 @@ func (c CacheConfig) Clone() CacheConfig {
 // NoVarySearchConfig configures RFC 9211 No-Vary-Search URL query parameter normalization.
 // Normalization strips marketing/tracking parameters (e.g. utm_source, gclid) to maximize cache hit rates.
 type NoVarySearchConfig struct {
-	VaryByHeaders   []string
-	IgnoreParams    []string
-	ExceptParams    []string
+	// VaryByHeaders specifies HTTP headers whose values contribute to the cache key calculation.
+	VaryByHeaders []string
+
+	// IgnoreParams lists query parameter keys to ignore when computing the cache key (e.g. utm_source, fbclid).
+	IgnoreParams []string
+
+	// ExceptParams lists query parameter keys that MUST be considered even if IgnoreAllParams is true.
+	ExceptParams []string
+
+	// IgnoreAllParams causes all query parameters to be ignored except those explicitly declared in ExceptParams.
 	IgnoreAllParams bool
 }
 
@@ -1455,7 +1471,7 @@ type ExtensionConfig struct {
 	OverrideH2Settings map[uint16]uint32
 
 	// JA4Callback is invoked when a JA4 fingerprint is computed.
-	JA4Callback func(report interface{})
+	JA4Callback func(report any)
 
 	// Extra stores extension-specific arbitrary state (e.g., *profile.BrowserTLSConfig) keyed by extension domain.
 	Extra map[string]any
@@ -1464,21 +1480,9 @@ type ExtensionConfig struct {
 // Clone creates a memory-isolated deep copy of the extension config.
 func (e ExtensionConfig) Clone() ExtensionConfig {
 	cloned := e
-
-	if e.HeaderOrder != nil {
-		cloned.HeaderOrder = make([]string, len(e.HeaderOrder))
-		copy(cloned.HeaderOrder, e.HeaderOrder)
-	}
-
-	if e.PseudoHeaderOrder != nil {
-		cloned.PseudoHeaderOrder = make([]string, len(e.PseudoHeaderOrder))
-		copy(cloned.PseudoHeaderOrder, e.PseudoHeaderOrder)
-	}
-
-	if e.OverrideH2Settings != nil {
-		cloned.OverrideH2Settings = make(map[uint16]uint32, len(e.OverrideH2Settings))
-		maps.Copy(cloned.OverrideH2Settings, e.OverrideH2Settings)
-	}
+	cloned.HeaderOrder = slices.Clone(e.HeaderOrder)
+	cloned.PseudoHeaderOrder = slices.Clone(e.PseudoHeaderOrder)
+	cloned.OverrideH2Settings = maps.Clone(e.OverrideH2Settings)
 
 	if e.Extra != nil {
 		cloned.Extra = make(map[string]any, len(e.Extra))

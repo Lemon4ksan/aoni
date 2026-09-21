@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/x/codec/decode"
@@ -43,41 +42,26 @@ var (
 var RetryOnProxyFault = proxy.RetryCondition
 
 // JitterStrategy defines randomized delay distribution algorithms for retries.
-type JitterStrategy int
+type JitterStrategy = aoni.JitterStrategy
 
 const (
-	JitterNone JitterStrategy = iota
-	JitterFull
-	JitterEqual
+	JitterNone  = aoni.JitterNone
+	JitterFull  = aoni.JitterFull
+	JitterEqual = aoni.JitterEqual
 )
 
 // RetryOptions configures backoff, jitter, and idempotency constraints for request retries.
-type RetryOptions struct {
-	MaxAttempts        uint32
-	MaxRetries         uint32
-	InitialBackoff     time.Duration
-	Backoff            time.Duration
-	MaxBackoff         time.Duration
-	BackoffFactor      float64
-	Jitter             bool
-	JitterStrategy     JitterStrategy
-	HonorRetryAfter    bool
-	MaxRetryAfter      time.Duration
-	AsyncThreshold     uint32
-	AutoIdempotencyKey bool
-	AllowedMethods     []string
-	OnRetry            func(attempt uint32, err error, delay time.Duration)
-}
+type RetryOptions = aoni.RetryOptions
 
 // RetryOnErr returns a [aoni.RetryCondition] that triggers a retry on any non-nil error.
-func RetryOnErr() core.RetryCondition {
+func RetryOnErr() aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		return err != nil
 	}
 }
 
 // RetryOnTransientErrors returns a [aoni.RetryCondition] triggering retries on network timeouts or 5xx server errors.
-func RetryOnTransientErrors() core.RetryCondition {
+func RetryOnTransientErrors() aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		if err != nil {
 			if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
@@ -105,14 +89,14 @@ func RetryOnTransientErrors() core.RetryCondition {
 }
 
 // RetryOnRateLimit returns a [aoni.RetryCondition] triggering retries on HTTP 429 Too Many Requests.
-func RetryOnRateLimit() core.RetryCondition {
+func RetryOnRateLimit() aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		return resp != nil && resp.StatusCode() == http.StatusTooManyRequests
 	}
 }
 
 // RetryOnGatewayErrors returns a [aoni.RetryCondition] triggering retries on HTTP 502, 503, and 504.
-func RetryOnGatewayErrors() core.RetryCondition {
+func RetryOnGatewayErrors() aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		if resp == nil {
 			return false
@@ -126,7 +110,7 @@ func RetryOnGatewayErrors() core.RetryCondition {
 }
 
 // RetryOnGRPCStatus returns a [aoni.RetryCondition] triggering retries when gRPC trailer status matches codes.
-func RetryOnGRPCStatus(statusCodes ...string) core.RetryCondition {
+func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		var codeStr string
 
@@ -151,7 +135,7 @@ func RetryOnGRPCStatus(statusCodes ...string) core.RetryCondition {
 }
 
 // Retry constructs an [aoni.Middleware] executing automated retries with exponential backoff.
-func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
+func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	if opts.MaxAttempts == 0 && opts.MaxRetries > 0 {
 		opts.MaxAttempts = opts.MaxRetries + 1
 	}
@@ -335,8 +319,8 @@ func waitAsync(ctx context.Context, delay time.Duration) error {
 func resolveRetryOverrides(
 	req aoni.Request,
 	baseOpts RetryOptions,
-	baseCond core.RetryCondition,
-) (RetryOptions, core.RetryCondition) {
+	baseCond aoni.RetryCondition,
+) (RetryOptions, aoni.RetryCondition) {
 	cfg := aoni.GetRequestConfig(req)
 	if cfg == nil || cfg.RetryPolicy == nil {
 		return baseOpts, baseCond
@@ -407,7 +391,7 @@ func rewindRequestBody(req aoni.Request) error {
 		return nil
 	}
 
-	if rewinder, ok := req.(core.BodyRewinder); ok {
+	if rewinder, ok := req.(aoni.BodyRewinder); ok {
 		rc, err := rewinder.GetBody()
 		if err != nil {
 			return err

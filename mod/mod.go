@@ -18,6 +18,21 @@ type (
 
 	// RequestModifier is an alias for core.RequestModifier.
 	RequestModifier = core.RequestModifier
+
+	// RetryOverride is an alias for core.RetryOverride.
+	RetryOverride = core.RetryOverride
+
+	// FallbackFunc is an alias for core.FallbackFunc.
+	FallbackFunc = core.FallbackFunc
+
+	// SoftErrorDetector is an alias for core.SoftErrorDetector.
+	SoftErrorDetector = core.SoftErrorDetector
+
+	// ResponseDecoder is an alias for core.ResponseDecoder.
+	ResponseDecoder = core.ResponseDecoder
+
+	// ProgressFunc is an alias for core.ProgressFunc.
+	ProgressFunc = core.ProgressFunc
 )
 
 var getOrInitRequestConfig = pipeline.GetOrInitRequestConfig

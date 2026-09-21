@@ -421,6 +421,7 @@ func BatchFetchTo[T any](
 
 	type fetchResult struct {
 		idx int
+		val T
 		err error
 	}
 
@@ -429,11 +430,7 @@ func BatchFetchTo[T any](
 	for i, path := range paths {
 		go func(idx int, p string) {
 			val, err := FetchTo[T](ctx, c, method, p, mods...)
-			if err == nil {
-				results[idx] = val
-			}
-
-			resCh <- fetchResult{idx: idx, err: err}
+			resCh <- fetchResult{idx: idx, val: val, err: err}
 		}(i, path)
 	}
 
@@ -442,6 +439,8 @@ func BatchFetchTo[T any](
 		res := <-resCh
 		if res.err != nil && firstErr == nil {
 			firstErr = res.err
+		} else if res.err == nil {
+			results[res.idx] = res.val
 		}
 	}
 

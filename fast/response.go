@@ -18,7 +18,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	machhttp "github.com/lemon4ksan/mach/proto/http"
+	mach "github.com/lemon4ksan/mach/proto/http"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -56,26 +56,26 @@ func newBytesReadCloser(data []byte, volatile bool) io.ReadCloser {
 	}
 }
 
-// Response adapts a high-performance [*machhttp.Response] to the unified [aoni.Response] contract.
+// Response adapts a high-performance [*mach.Response] to the unified [aoni.Response] contract.
 //
 // Memory Lifetime Invariants & Thread Safety:
 // Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
 // when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
 	_            cpu.CacheLinePad
-	resp         *machhttp.Response
+	resp         *mach.Response
 	_            cpu.CacheLinePad
 	trailers     map[string][]string
 	uncompressed bool
 	_            cpu.CacheLinePad
 }
 
-// NewResponse acquires a pooled [Response] adapter wrapping an active [*machhttp.Response].
-// If resp is nil, a new [*machhttp.Response] is acquired automatically from [machhttp.AcquireResponse].
+// NewResponse acquires a pooled [Response] adapter wrapping an active [*mach.Response].
+// If resp is nil, a new [*mach.Response] is acquired automatically from [mach.AcquireResponse].
 // Yields a adapter instance configured for pipeline processing.
-func NewResponse(resp *machhttp.Response) *Response {
+func NewResponse(resp *mach.Response) *Response {
 	if resp == nil {
-		resp = machhttp.AcquireResponse()
+		resp = mach.AcquireResponse()
 	}
 
 	r := responseAdapterStorage.Get()
@@ -335,12 +335,12 @@ func (f *Response) HTTPResponse() *http.Response {
 	}
 }
 
-// FastHTTPResponse yields the underlying [*machhttp.Response] instance.
-func (f *Response) FastHTTPResponse() *machhttp.Response {
+// FastHTTPResponse yields the underlying [*mach.Response] instance.
+func (f *Response) FastHTTPResponse() *mach.Response {
 	return f.resp
 }
 
-// EngineResponse yields the underlying [*machhttp.Response] cast to any.
+// EngineResponse yields the underlying [*mach.Response] cast to any.
 func (f *Response) EngineResponse() any {
 	return f.resp
 }
@@ -423,7 +423,7 @@ func (f *Response) Release() {
 	}
 
 	if f.resp != nil {
-		machhttp.ReleaseResponse(f.resp)
+		mach.ReleaseResponse(f.resp)
 		f.resp = nil
 	}
 
@@ -462,15 +462,15 @@ type PooledResponse struct {
 	_ cpu.CacheLinePad
 	Response
 	_        cpu.CacheLinePad
-	fastReq  *machhttp.Request
-	fastResp *machhttp.Response
+	fastReq  *mach.Request
+	fastResp *mach.Response
 	closed   atomic.Bool
 	_        cpu.CacheLinePad
 }
 
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
-func NewPooledResponse(fastReq *machhttp.Request, fastResp *machhttp.Response) *PooledResponse {
+func NewPooledResponse(fastReq *mach.Request, fastResp *mach.Response) *PooledResponse {
 	pr := pooledResponseStorage.Get()
 
 	pr.resp = fastResp
@@ -485,24 +485,11 @@ func NewPooledResponse(fastReq *machhttp.Request, fastResp *machhttp.Response) *
 
 // HTTPResponse converts PooledResponse into standard *http.Response.
 func (r *PooledResponse) HTTPResponse() *http.Response {
-	if r == nil || r.fastResp == nil {
+	if r == nil {
 		return nil
 	}
 
-	header := make(http.Header)
-	for k, v := range r.fastResp.Header.All() {
-		header.Add(string(k), string(v))
-	}
-
-	body := slices.Clone(r.fastResp.Body())
-
-	return &http.Response{
-		StatusCode:    r.fastResp.StatusCode(),
-		Status:        http.StatusText(r.fastResp.StatusCode()),
-		Header:        header,
-		Body:          newBytesReadCloser(body, false),
-		ContentLength: int64(len(body)),
-	}
+	return r.Response.HTTPResponse()
 }
 
 // Close releases underlying fasthttp objects and returns PooledResponse to memory pool.
@@ -511,12 +498,12 @@ func (r *PooledResponse) Close() error {
 		_ = r.Response.Close()
 
 		if r.fastReq != nil {
-			machhttp.ReleaseRequest(r.fastReq)
+			mach.ReleaseRequest(r.fastReq)
 			r.fastReq = nil
 		}
 
 		if r.fastResp != nil {
-			machhttp.ReleaseResponse(r.fastResp)
+			mach.ReleaseResponse(r.fastResp)
 			r.fastResp = nil
 		}
 

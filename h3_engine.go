@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/quic"
 	"github.com/lemon4ksan/mach/client/h3"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
@@ -25,15 +26,24 @@ import (
 
 // H3Config configures the HTTP/3 execution engine and connection pool.
 type H3Config struct {
-	TLSConfig       *tls.Config
-	Settings        *coreh3.Settings
-	DialTimeout     time.Duration
+	// TLSConfig defines the TLS client parameters used during QUIC handshakes (RFC 9001).
+	TLSConfig *tls.Config
+
+	// Settings defines low-level HTTP/3 protocol parameters sent in the SETTINGS frame (RFC 9114 §7.2.4).
+	Settings *coreh3.Settings
+
+	// DialTimeout specifies the maximum duration allowed for establishing a QUIC handshake.
+	DialTimeout time.Duration
+
+	// IdleConnTimeout specifies the maximum duration an idle HTTP/3 connection remains open in the pool.
 	IdleConnTimeout time.Duration
+
+	// EnableDatagrams enables QUIC DATAGRAM frame transmission (RFC 9221).
 	EnableDatagrams bool
 }
 
 // H3Option defines a functional option for configuring H3Engine.
-type H3Option func(*H3Config)
+type H3Option = generic.Option[*H3Config]
 
 // WithH3TLSConfig sets the TLS client configuration for HTTP/3 QUIC handshakes.
 func WithH3TLSConfig(tlsConf *tls.Config) H3Option {
@@ -78,8 +88,13 @@ type dialPromise struct {
 	err    error
 }
 
-// H3Engine is an HTTP/3 execution engine implementing aoni.HTTPDoer, http.RoundTripper,
-// io.Closer, and interface{ CloseIdleConnections() }.
+// H3Engine is an HTTP/3 execution engine implementing [HTTPDoer], [http.RoundTripper],
+// [io.Closer], and interface{ CloseIdleConnections() }.
+//
+// Concurrency & Connection Pooling:
+// H3Engine maintains a thread-safe connection pool across origin targets using single-flight
+// dial promises to avoid duplicate dials to the same remote host during traffic bursts.
+// All methods on H3Engine are safe for concurrent use by multiple goroutines.
 type H3Engine struct {
 	cfg       H3Config
 	mu        sync.RWMutex
@@ -96,9 +111,8 @@ func NewH3Engine(opts ...H3Option) *H3Engine {
 		IdleConnTimeout: 90 * time.Second,
 		EnableDatagrams: true,
 	}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+
+	generic.ApplyOptions(&cfg, opts...)
 
 	if cfg.TLSConfig == nil {
 		cfg.TLSConfig = &tls.Config{
@@ -495,12 +509,11 @@ func getTargetAddr(req *http.Request) string {
 }
 
 func isForbiddenH3Header(k string) bool {
-	switch strings.ToLower(k) {
-	case "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade":
-		return true
-	default:
-		return false
-	}
+	return strings.EqualFold(k, "connection") ||
+		strings.EqualFold(k, "keep-alive") ||
+		strings.EqualFold(k, "proxy-connection") ||
+		strings.EqualFold(k, "transfer-encoding") ||
+		strings.EqualFold(k, "upgrade")
 }
 
 // Ensure interface compliance at compile time.

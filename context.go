@@ -19,7 +19,6 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
@@ -216,11 +215,11 @@ func GetDNSResolverOverride(ctx context.Context) netdial.DNSResolver {
 	return nil
 }
 
-// GetRetryOverride retrieves the per-request [core.RetryOverride] configuration from context.
-func GetRetryOverride(ctx context.Context) generic.Optional[core.RetryOverride] {
+// GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.
+func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.RetryPolicy == nil {
-		return generic.None[core.RetryOverride]()
+		return generic.None[RetryOverride]()
 	}
 
 	return generic.Some(*cfg.RetryPolicy)

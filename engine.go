@@ -103,7 +103,31 @@ func newDefaultTransport() *http.Transport {
 	}
 }
 
-func (c *Client) reapplyH2Settings(tr *http.Transport) {}
+func (c *Client) reapplyH2Settings(tr *http.Transport) {
+	if tr == nil || c == nil {
+		return
+	}
+
+	if h2Cfg := c.cfg.Engine.HTTP2Config; h2Cfg != nil {
+		if tr.HTTP2 == nil {
+			tr.HTTP2 = &http.HTTP2Config{}
+		}
+
+		tr.HTTP2.SendPingTimeout = h2Cfg.ReadIdleTimeout
+
+		tr.HTTP2.PingTimeout = h2Cfg.PingTimeout
+		if h2Cfg.AllowHTTP {
+			if tr.Protocols == nil {
+				var p http.Protocols
+				p.SetHTTP1(true)
+				p.SetHTTP2(true)
+				tr.Protocols = &p
+			}
+
+			tr.Protocols.SetUnencryptedHTTP2(true)
+		}
+	}
+}
 
 func applyEngineConfig(c *Client, eng EngineConfig) {
 	if eng.CustomEngine != nil {
@@ -111,26 +135,24 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 			c.engine = CloneHTTPClient(httpClient)
 		} else {
 			c.engine = eng.CustomEngine
-			return
 		}
 	}
 
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok {
-		return
+	httpClient, ok := UnwrapAs[*http.Client](c.engine)
+	if ok && httpClient != nil {
+		if httpClient.Transport == nil {
+			httpClient.Transport = newDefaultTransport()
+		}
+
+		if eng.Timeout > 0 {
+			httpClient.Timeout = eng.Timeout
+		}
+
+		applyRedirectPolicy(httpClient, eng)
+		applyCookieJar(httpClient, eng.CookieJar)
+		applyDigestAuth(httpClient, eng.DigestAuth)
 	}
 
-	if httpClient.Transport == nil {
-		httpClient.Transport = newDefaultTransport()
-	}
-
-	if eng.Timeout > 0 {
-		httpClient.Timeout = eng.Timeout
-	}
-
-	applyRedirectPolicy(httpClient, eng)
-	applyCookieJar(httpClient, eng.CookieJar)
-	applyDigestAuth(httpClient, eng.DigestAuth)
 	applyTransportOverrides(c, eng)
 }
 

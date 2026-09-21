@@ -11,7 +11,6 @@ import (
 	"github.com/lemon4ksan/foundation/sync/backoff"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 )
 
@@ -23,7 +22,7 @@ type RetryBuilder struct {
 	maxRetryAfter      time.Duration
 	autoIdempotencyKey bool
 	allowedMethods     []string
-	conditions         []core.RetryCondition
+	conditions         []aoni.RetryCondition
 	onRetry            func(attempt uint32, err error, delay time.Duration)
 }
 
@@ -153,7 +152,7 @@ func (b *RetryBuilder) OnGRPCStatus(codes ...string) *RetryBuilder {
 }
 
 // OnCondition attaches a custom predicate function evaluating whether a response or error warrants a retry.
-func (b *RetryBuilder) OnCondition(cond core.RetryCondition) *RetryBuilder {
+func (b *RetryBuilder) OnCondition(cond aoni.RetryCondition) *RetryBuilder {
 	if cond != nil {
 		b.conditions = append(b.conditions, cond)
 	}
@@ -186,7 +185,7 @@ func (b *RetryBuilder) Build() aoni.Middleware {
 }
 
 // ToOptions exports the configuration as [middleware.RetryOptions] and a consolidated [aoni.RetryCondition].
-func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition) {
+func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, aoni.RetryCondition) {
 	initialBackoff := 100 * time.Millisecond
 	maxBackoff := 30 * time.Second
 	factor := 2.0
@@ -234,11 +233,11 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 
 	conditions := b.conditions
 	if len(conditions) == 0 {
-		conditions = []core.RetryCondition{middleware.RetryOnTransientErrors()}
+		conditions = []aoni.RetryCondition{middleware.RetryOnTransientErrors()}
 	}
 
 	compositeCondition := func(resp aoni.Response, err error) bool {
-		return slices.ContainsFunc(conditions, func(c core.RetryCondition) bool {
+		return slices.ContainsFunc(conditions, func(c aoni.RetryCondition) bool {
 			return c(resp, err)
 		})
 	}
@@ -246,11 +245,11 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 	return opts, compositeCondition
 }
 
-// ToOverride converts the configuration into an [core.RetryOverride] for per-request modifiers.
-func (b *RetryBuilder) ToOverride() core.RetryOverride {
+// ToOverride converts the configuration into an [aoni.RetryOverride] for per-request modifiers.
+func (b *RetryBuilder) ToOverride() aoni.RetryOverride {
 	opts, cond := b.ToOptions()
 
-	return core.RetryOverride{
+	return aoni.RetryOverride{
 		MaxAttempts: int(opts.MaxAttempts),
 		Backoff:     opts.InitialBackoff,
 		Condition:   cond,

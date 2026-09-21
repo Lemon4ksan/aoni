@@ -7,7 +7,7 @@ package resiliency
 import (
 	"github.com/lemon4ksan/foundation/net/http/etag"
 
-	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/resiliency/coalesce"
@@ -15,13 +15,13 @@ import (
 
 type (
 	// RetryCondition evaluates whether a failed transaction attempt should trigger a retry.
-	RetryCondition = core.RetryCondition
+	RetryCondition = aoni.RetryCondition
 
 	// RetryOverride overrides default client retry behavior for a specific request execution.
-	RetryOverride = core.RetryOverride
+	RetryOverride = aoni.RetryOverride
 
 	// FallbackFunc generates a synthetic fallback [aoni.Response] when a request execution permanently fails.
-	FallbackFunc = core.FallbackFunc
+	FallbackFunc = aoni.FallbackFunc
 
 	// CacheStore defines the persistence contract for HTTP response caching backends (e.g. Memory, Redis).
 	CacheStore[K comparable, V any] = cache.Store[K, V]

@@ -7,20 +7,18 @@ package mod
 import (
 	"net/http"
 	"time"
-
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-// WithRetryPolicy assigns a granular [core.RetryOverride] retry and backoff policy to this specific request.
+// WithRetryPolicy assigns a granular [RetryOverride] retry and backoff policy to this specific request.
 //
 // # Example
 //
 //	resp, err := client.Get(ctx, "/flakey-api",
-//	    mod.WithRetryPolicy(core.RetryOverride{
+//	    mod.WithRetryPolicy(mod.RetryOverride{
 //	        MaxAttempts: 5,
 //	    }),
 //	)
-func WithRetryPolicy(override core.RetryOverride) RequestModifier {
+func WithRetryPolicy(override RetryOverride) RequestModifier {
 	policy := override
 	if policy.MaxAttempts < 1 {
 		policy.MaxAttempts = 1
@@ -39,7 +37,7 @@ func WithRetryPolicy(override core.RetryOverride) RequestModifier {
 //	    mod.WithRetry(3),
 //	)
 func WithRetry(attempts int) RequestModifier {
-	return WithRetryPolicy(core.RetryOverride{MaxAttempts: attempts})
+	return WithRetryPolicy(RetryOverride{MaxAttempts: attempts})
 }
 
 // WithAllowNonReadOnlyHedging permits speculative request hedging for mutating HTTP methods (POST, PUT, DELETE).
@@ -53,7 +51,7 @@ func WithAllowNonReadOnlyHedging(allow bool) RequestModifier {
 }
 
 // WithFallback registers a fallback generator function called to provide a synthetic response when remote execution fails.
-func WithFallback(f core.FallbackFunc) RequestModifier {
+func WithFallback(f FallbackFunc) RequestModifier {
 	return Custom(func(req Request) {
 		getOrInitRequestConfig(req).Fallback = f
 	})
@@ -75,7 +73,7 @@ func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier {
 // without draining or consuming the response stream.
 //
 //nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
-func WithSoftErrorDetector(detectors ...core.SoftErrorDetector) RequestModifier {
+func WithSoftErrorDetector(detectors ...SoftErrorDetector) RequestModifier {
 	return Custom(func(req Request) {
 		cfg := getOrInitRequestConfig(req)
 		for _, det := range detectors {

@@ -5,10 +5,12 @@
 package aoni
 
 import (
+	"iter"
 	"net/http"
 
 	"github.com/lemon4ksan/foundation/generic"
 
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
@@ -18,7 +20,7 @@ import (
 // into a unified, type-safe, profile-driven architecture conforming strictly to RFC 9110.
 type (
 	// CookieJar defines a context-aware HTTP cookie storage interface supporting RFC 6265bis CHIPS.
-	CookieJar = core.CookieJar
+	CookieJar = cookie.CookieJar
 
 	// Request represents a unified, HTTP request abstraction conforming to RFC 9110.
 	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
@@ -77,9 +79,48 @@ type (
 	// The peek buffer is captured non-destructively. If detector returns a non-nil error,
 	// request execution is aborted with that error without draining the body stream.
 	SoftErrorDetector func(resp *http.Response, peek []byte) error
+
+	// RetryCondition evaluates whether a failed transaction attempt should trigger a retry.
+	RetryCondition = core.RetryCondition
+
+	// RetryOverride overrides default client retry behavior for a specific request execution.
+	RetryOverride = core.RetryOverride
+
+	// RetryOptions configures backoff, jitter, and idempotency constraints for request retries.
+	RetryOptions = core.RetryOptions
+
+	// JitterStrategy defines randomized delay distribution algorithms for retries.
+	JitterStrategy = core.JitterStrategy
+
+	// FallbackFunc generates a synthetic fallback [Response] when a request execution permanently fails.
+	FallbackFunc = core.FallbackFunc
+
+	// Logger specifies the structured diagnostic logging interface.
+	Logger = core.Logger
+
+	// LoggerProvider provides access to the diagnostic Logger instance.
+	LoggerProvider = core.LoggerProvider
+
+	// BodyRewinder is implemented by request payloads supporting reproducible body re-reads.
+	BodyRewinder = core.BodyRewinder
+
+	// ContentTyper is implemented by request payloads or models that declare their own MIME Content-Type.
+	ContentTyper = core.ContentTyper
+
+	// BodyProvider is implemented by types capable of providing their own payload stream.
+	BodyProvider = core.BodyProvider
+
+	// DirectConsumer is implemented by response targets that consume the raw response stream directly.
+	DirectConsumer = core.DirectConsumer
+
+	// ModifierType specifies the discrete operation type of a [RequestModifier] value.
+	ModifierType = core.ModifierType
 )
 
 const (
+	// ModCustom executes a custom closure mutating the outgoing [Request].
+	ModCustom = core.ModCustom
+
 	// PhaseUnknown indicates the failure occurred outside tracked request phases.
 	PhaseUnknown = core.PhaseUnknown
 
@@ -106,6 +147,15 @@ const (
 
 	// PhaseReadBody indicates failure while reading the incoming response stream payload.
 	PhaseReadBody = core.PhaseReadBody
+
+	// JitterNone disables randomized delay distribution.
+	JitterNone = core.JitterNone
+
+	// JitterFull scales delay uniformly in [0, backoff].
+	JitterFull = core.JitterFull
+
+	// JitterEqual scales delay uniformly in [backoff/2, backoff].
+	JitterEqual = core.JitterEqual
 )
 
 // Execution & Middleware Contracts.
@@ -131,6 +181,25 @@ type (
 	}
 )
 
+// UnwrapSeq returns an iterator yielding each unwrapped layer in a decorator chain.
+// It stops when a layer cannot be unwrapped further or when a cycle is detected.
+func UnwrapSeq(target any) iter.Seq[any] {
+	return func(yield func(any) bool) {
+		for curr := target; curr != nil; {
+			if !yield(curr) {
+				return
+			}
+
+			next := unwrapNext(curr)
+			if next == nil || next == curr {
+				return
+			}
+
+			curr = next
+		}
+	}
+}
+
 // UnwrapAs traverses nested decorator chains until an instance of target type T is discovered.
 //
 // Onion-Peeling Mechanics:
@@ -138,17 +207,10 @@ type (
 // UnwrapAs unwinds layers recursively via type assertions,
 // returning the inner instance and true if found, or the zero value of T and false.
 func UnwrapAs[T any](target any) (T, bool) {
-	for curr := target; curr != nil; {
+	for curr := range UnwrapSeq(target) {
 		if typed, ok := curr.(T); ok {
 			return typed, true
 		}
-
-		next := unwrapNext(curr)
-		if next == nil || next == curr {
-			break
-		}
-
-		curr = next
 	}
 
 	return generic.Zero[T](), false
@@ -171,7 +233,13 @@ func unwrapNext(curr any) any {
 	switch u := curr.(type) {
 	case interface{ Unwrap() *Client }:
 		return u.Unwrap()
+	case interface{ Unwrap() *http.Client }:
+		return u.Unwrap()
+	case interface{ Unwrap() *http.Transport }:
+		return u.Unwrap()
 	case interface{ Unwrap() HTTPDoer }:
+		return u.Unwrap()
+	case interface{ Unwrap() RequestDoer }:
 		return u.Unwrap()
 	case interface{ Unwrap() http.RoundTripper }:
 		return u.Unwrap()
@@ -179,6 +247,10 @@ func unwrapNext(curr any) any {
 		return u.Unwrap()
 	case interface{ Unwrap() error }:
 		return u.Unwrap()
+	case interface{ Rest() any }:
+		return u.Rest()
+	case interface{ Requester() any }:
+		return u.Requester()
 	default:
 		return nil
 	}

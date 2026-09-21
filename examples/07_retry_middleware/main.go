@@ -28,26 +28,49 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil,
+	// 1. Configure retry on any error via option.WithMiddleware
+	retryClient := aoni.NewClient(nil,
 		option.WithBaseURL("https://httpbin.org"),
-	)
-
-	// Retry on any error
-	retryOnErr := middleware.Chain(
-		client,
-		middleware.Retry(
-			middleware.RetryOptions{
-				MaxRetries:     3,
-				Backoff:        1 * time.Second,
-				JitterStrategy: middleware.JitterFull,
-			},
-			middleware.RetryOnErr(),
+		option.WithMiddleware(
+			middleware.Retry(
+				middleware.RetryOptions{
+					MaxRetries:     3,
+					Backoff:        1 * time.Second,
+					JitterStrategy: middleware.JitterFull,
+				},
+				middleware.RetryOnErr(),
+			),
 		),
 	)
 
-	// Retry on transient errors (network errors, 502, 503, 504)
-	retryOnTransient := middleware.Chain(
-		client,
+	res, err := retryClient.GetTo[Response](ctx, "/status/200")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Success: %s %s\n", res.URL, res.Status)
+
+	// 2. Fluent chaining via client.Use with custom retry condition
+	customClient := aoni.NewClient(nil,
+		option.WithBaseURL("https://httpbin.org"),
+	).Use(
+		middleware.Retry(
+			middleware.RetryOptions{MaxRetries: 3, Backoff: 2 * time.Second},
+			func(resp aoni.Response, err error) bool {
+				if resp != nil && resp.StatusCode() == 429 {
+					fmt.Println("Rate limited, will retry...")
+					return true
+				}
+				return false
+			},
+		),
+	)
+
+	_, _ = customClient.GetTo[Response](ctx, "/status/429")
+
+	// 3. Transient errors retry client for unreliable network paths
+	transientClient := aoni.NewClient(nil,
+		option.WithBaseURL("https://httpbin.org"),
+	).Use(
 		middleware.Retry(
 			middleware.RetryOptions{
 				MaxRetries: 5,
@@ -56,44 +79,7 @@ func main() {
 			middleware.RetryOnTransientErrors(),
 		),
 	)
-
-	// Custom retry condition: retry on specific status codes
-	customRetry := middleware.Chain(
-		client,
-		middleware.Retry(
-			middleware.RetryOptions{MaxRetries: 3, Backoff: 2 * time.Second},
-			func(resp aoni.Response, err error) bool {
-				if resp != nil && resp.StatusCode() == 429 {
-					fmt.Println("Rate limited, will retry...")
-					return true
-				}
-
-				return false
-			},
-		),
-	)
-
-	// Use retryOnErr client
-	retryClient := aoni.NewClient(retryOnErr,
-		option.WithBaseURL("https://httpbin.org"),
-	)
-
-	res, err := retryClient.GetTo[Response](ctx, "/status/200")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Success: %s %s\n", res.URL, res.Status)
-
-	// Use customRetry client
-	customClient := aoni.NewClient(customRetry,
-		option.WithBaseURL("https://httpbin.org"),
-	)
-
-	_, _ = customClient.GetTo[Response](ctx, "/status/429")
-
-	// Use retryOnTransient client for unreliable endpoints
-	_ = retryOnTransient
+	_ = transientClient
 
 	fmt.Println("Retry middleware examples completed")
 }

@@ -10,12 +10,11 @@ import (
 	"net/http"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-// RetryCondition returns a [core.RetryCondition] that retries when
+// RetryCondition returns a [aoni.RetryCondition] that retries when
 // rotator considers the response or error a proxy fault.
-func RetryCondition(rotator *Rotator) core.RetryCondition {
+func RetryCondition(rotator *Rotator) aoni.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		var httpResp *http.Response
 		if resp != nil {
