@@ -168,11 +168,9 @@ func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfi
 		return nil, err
 	}
 
-	if cs, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
-		if cs.ConnectionState().NegotiatedProtocol != "h2" {
-			_ = conn.Close()
-			return nil, ErrServerH2NotSupported
-		}
+	if proto := getNegotiatedProtocol(conn); proto != "" && proto != "h2" {
+		_ = conn.Close()
+		return nil, ErrServerH2NotSupported
 	}
 
 	return conn, nil

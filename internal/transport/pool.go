@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -292,10 +293,7 @@ func (p *Pool) doTLS(
 				tlsConn = stdTLS
 			}
 
-			var negotiated string
-			if cs, ok := tlsConn.(interface{ ConnectionState() tls.ConnectionState }); ok {
-				negotiated = cs.ConnectionState().NegotiatedProtocol
-			}
+			negotiated := getNegotiatedProtocol(tlsConn)
 
 			if negotiated == "h2" || p.ForceH2 {
 				h2Conn := h2.NewConn(tlsConn, p.H2Opts)
@@ -490,4 +488,38 @@ func (p *Pool) CloseIdleConnections() {
 
 	p.h3Conns = make(map[string]*h3.ClientConn)
 	p.h3Dials = make(map[string]*dialPromise)
+}
+
+func getNegotiatedProtocol(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+
+	if cs, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
+		return cs.ConnectionState().NegotiatedProtocol
+	}
+
+	val := reflect.ValueOf(conn)
+	m := val.MethodByName("ConnectionState")
+	if m.IsValid() && m.Type().NumIn() == 0 && m.Type().NumOut() == 1 {
+		res := m.Call(nil)[0]
+		if res.IsValid() {
+			if res.Kind() == reflect.Struct {
+				f := res.FieldByName("NegotiatedProtocol")
+				if f.IsValid() && f.Kind() == reflect.String {
+					return f.String()
+				}
+			} else if res.Kind() == reflect.Pointer && !res.IsNil() {
+				elem := res.Elem()
+				if elem.Kind() == reflect.Struct {
+					f := elem.FieldByName("NegotiatedProtocol")
+					if f.IsValid() && f.Kind() == reflect.String {
+						return f.String()
+					}
+				}
+			}
+		}
+	}
+
+	return ""
 }
