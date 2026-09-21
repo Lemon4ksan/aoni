@@ -160,6 +160,9 @@ func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
 	if tr := c.Transport(); tr != nil {
 		base = tr.TLSClientConfig
 	}
+	if base == nil && c.cfg.Network.TLSConfig != nil {
+		base = c.cfg.Network.TLSConfig
+	}
 
 	return TLSConfigWithOverride(ctx, base)
 }

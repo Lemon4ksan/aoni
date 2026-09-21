@@ -23,26 +23,35 @@ type Client struct {
 }
 
 // NewClient creates a new high-performance baremetal fast.Client.
-// It accepts both [fast.Option] and [aoni.ClientOption].
-func NewClient(opts ...any) *Client {
+// It accepts composable [aoni.ClientOption] functional layers.
+func NewClient(opts ...aoni.ClientOption) *Client {
 	c := aoni.Config{}
 	client := &Client{
 		engine: transport.NewPool(),
 	}
 
 	for _, opt := range opts {
-		switch o := opt.(type) {
-		case aoni.ClientOption:
-			o(&c)
-		case Option:
-			o(client)
-		case func(*Client):
-			o(client)
+		if opt != nil {
+			opt(&c)
 		}
 	}
 
+	if c.Network.TLSConfig != nil {
+		client.engine.TLSConfig = c.Network.TLSConfig
+	}
 	if c.Ext.WrapTLSClient != nil {
 		client.engine.WrapTLSClient = c.Ext.WrapTLSClient
+	}
+	if c.Engine.EnableH2 {
+		client.engine.EnableH2 = true
+		client.engine.ForceH2 = true
+	}
+	if c.Engine.EnableH3 {
+		client.engine.EnableH3 = true
+		client.engine.ForceH3 = true
+	}
+	if c.Engine.H3Settings != nil {
+		client.engine.H3Settings = c.Engine.H3Settings
 	}
 
 	client.cfg = c

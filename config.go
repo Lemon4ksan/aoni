@@ -19,6 +19,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/http/header"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
+	coreh3 "github.com/lemon4ksan/mach/proto/h3"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/transport"
@@ -257,6 +258,7 @@ func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 
 	return transport.DialConfig{
 		Network:            netProto,
+		BaseTLSConfig:      c.Network.TLSConfig,
 		DialTLSContext:     c.Ext.DialTLSContext,
 		WrapTLSClient:      c.Ext.WrapTLSClient,
 		DNSResolver:        c.Network.DNSResolver,
@@ -340,6 +342,15 @@ type EngineConfig struct {
 
 	// DigestAuth configures RFC 7616 HTTP Digest Access Authentication credentials for automatic 401 challenge resolution.
 	DigestAuth *DigestAuthConfig
+
+	// EnableH2 enables and forces HTTP/2 transport.
+	EnableH2 bool
+
+	// EnableH3 enables and forces HTTP/3 QUIC transport.
+	EnableH3 bool
+
+	// H3Settings configures low-level HTTP/3 protocol parameters.
+	H3Settings *coreh3.Settings
 }
 
 // DigestAuthConfig holds RFC 7616 HTTP Digest Access Authentication credentials.
@@ -370,6 +381,15 @@ func (e EngineConfig) Clone() EngineConfig {
 	cloned.ConnectionPool = clonePtr(e.ConnectionPool)
 	cloned.HTTP2Config = clonePtr(e.HTTP2Config)
 	cloned.DigestAuth = clonePtr(e.DigestAuth)
+
+	if e.H3Settings != nil {
+		sCopy := *e.H3Settings
+		if e.H3Settings.Other != nil {
+			sCopy.Other = make(map[uint64]uint64, len(e.H3Settings.Other))
+			maps.Copy(sCopy.Other, e.H3Settings.Other)
+		}
+		cloned.H3Settings = &sCopy
+	}
 
 	return cloned
 }
@@ -574,6 +594,9 @@ type NetworkConfig struct {
 
 	// ExperimentalFlags consolidates opt-in hardware and OS experimental accelerations (io_uring, SIMD, RIO, TCP Fast Open).
 	ExperimentalFlags ExperimentalFlag
+
+	// TLSConfig specifies the default TLS client configuration.
+	TLSConfig *tls.Config
 }
 
 // HasExperimental returns true if the specified experimental flag is enabled.
@@ -591,6 +614,10 @@ func (n NetworkConfig) Clone() NetworkConfig {
 		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
 		maps.Copy(rulesCopy, n.HostRewrite.Rules)
 		cloned.HostRewrite = &netutil.HostRewriteConfig{Rules: rulesCopy}
+	}
+
+	if n.TLSConfig != nil {
+		cloned.TLSConfig = n.TLSConfig.Clone()
 	}
 
 	return cloned

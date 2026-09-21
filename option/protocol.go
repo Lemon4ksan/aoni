@@ -5,10 +5,26 @@
 package option
 
 import (
+	"crypto/tls"
+
 	"github.com/lemon4ksan/mach/client/h3"
 
 	"github.com/lemon4ksan/aoni"
 )
+
+// WithTLSConfig configures the TLS client configuration.
+func WithTLSConfig(tlsConf *tls.Config) aoni.ClientOption {
+	return func(c *aoni.Config) {
+		c.Network.TLSConfig = tlsConf
+	}
+}
+
+// WithH2 enables and forces HTTP/2 transport.
+func WithH2() aoni.ClientOption {
+	return func(c *aoni.Config) {
+		c.Engine.EnableH2 = true
+	}
+}
 
 // WithHTTP2Config configures low-level HTTP/2 connection parameters (ping timeouts, strict errors).
 func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
