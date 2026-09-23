@@ -160,7 +160,7 @@ user, err := fastClient.GetTo[User](ctx, "/users/42")
 ### 1. Публичный API и транспорт
 * **Стабильный интерфейс:** Базовые методы RFC 9110 (`client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, `option.With...`, `mod.With...`) зафиксированы в рамках v1.x.
 * **Транспорт:** Поддерживает согласование протоколов (HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3 с ML-KEM, MASQUE), алгоритм Happy Eyeballs и переиспользование буферов.
-* **Модульность экосистемы:** Сторонние протокольные интеграции вынесены в [`aoni-x`](https://github.com/lemon4ksan/aoni-x), а маскировка отпечатков TLS и браузерные профили — в [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser).
+* **Модульность экосистемы:** Сторонние протокольные интеграции вынесены в [`aoni-contrib`](https://github.com/lemon4ksan/aoni-contrib), а маскировка отпечатков TLS и браузерные профили — в [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser).
 
 ### 2. Безопасность памяти (Zero-Copy) и линтер Vortex
 При интенсивном переиспользовании буферов (`sync.Pool`) случайная передача заимствованных срезов в фоновые горутины может приводить к race condition. Для проверки корректности работы со срезами в экосистеме используется анализатор [**`vortex`**](https://github.com/lemon4ksan/vortex):
@@ -355,8 +355,8 @@ client := aoni.NewClient(nil,
 | **Эмуляция TLS (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (через [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser))** |
 | **Unix Domain Sockets** | ⚠️ (Вручную) | ✗ | **✓ (Схема `unix://`)** |
 | **L3/L4 & MASQUE Туннели** | ✗ | ✗ | **✓ (Wintun, Darwin utun, /dev/net/tun, MASQUE RFC 9298)** |
-| **OpenTelemetry и W3C Трейсинг** | ✗ | ✗ | **✓ (через [`aoni-x/otel`](https://github.com/lemon4ksan/aoni-x))** |
-| **Клиент Socket.IO / Engine.IO v4** | ✗ | ✗ | **✓ (через [`aoni-x/socketio`](https://github.com/lemon4ksan/aoni-x))** |
+| **OpenTelemetry и W3C Трейсинг** | ✗ | ✗ | **✓ (через [`aoni-contrib/otel`](https://github.com/lemon4ksan/aoni-contrib))** |
+| **Клиент Socket.IO / Engine.IO v4** | ✗ | ✗ | **✓ (через [`aoni-contrib/socketio`](https://github.com/lemon4ksan/aoni-contrib))** |
 | **Изоляция сессий и кук по прокси** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
 ## 📦 Структура репозитория

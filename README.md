@@ -166,7 +166,7 @@ Tested under parallel load across 12 CPU cores (`b.RunParallel`, PGO-Optimized):
 ### 1. Public API & Transport
 * **Stable Public Surface:** RFC 9110 methods (`client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, `option.With...`, `mod.With...`) are maintained across v1.x releases.
 * **Transport:** Handles protocol negotiation (HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3 with ML-KEM, MASQUE), Happy Eyeballs connection racing, and buffer management.
-* **Ecosystem Modularization:** Third-party integrations live in [`aoni-x`](https://github.com/lemon4ksan/aoni-x), while browser evasion and TLS fingerprinting live in [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser).
+* **Ecosystem Modularization:** Third-party integrations live in [`aoni-contrib`](https://github.com/lemon4ksan/aoni-contrib), while browser evasion and TLS fingerprinting live in [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser).
 
 ### 2. Memory Safety & Static Verification
 When pooling buffers (`sync.Pool`), escaping borrowed slices can lead to data races. The companion [**`vortex`**](https://github.com/lemon4ksan/vortex) static analyzer provides compile-time verification:
@@ -361,8 +361,8 @@ client := aoni.NewClient(nil,
 | **TLS Evasion (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (via [`aoni-browser`](https://github.com/lemon4ksan/aoni-browser))** |
 | **Unix Domain Socket Support** | ⚠️ (Manual) | ✗ | **✓ (Native `unix://`)** |
 | **L3/L4 & MASQUE Tunnels** | ✗ | ✗ | **✓ (Wintun, utun, /dev/net/tun, MASQUE RFC 9298)** |
-| **OpenTelemetry & W3C Tracing** | ✗ | ✗ | **✓ (via [`aoni-x/otel`](https://github.com/lemon4ksan/aoni-x))** |
-| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (via [`aoni-x/socketio`](https://github.com/lemon4ksan/aoni-x))** |
+| **OpenTelemetry & W3C Tracing** | ✗ | ✗ | **✓ (via [`aoni-contrib/otel`](https://github.com/lemon4ksan/aoni-contrib))** |
+| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (via [`aoni-contrib/socketio`](https://github.com/lemon4ksan/aoni-contrib))** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
 ## 📦 Repository Layout

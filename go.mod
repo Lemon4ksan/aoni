@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
-	github.com/lemon4ksan/foundation v0.0.0-20260922043230-8cce1a5e6865
-	github.com/lemon4ksan/mach v0.0.0-20260920191812-bb7ae0771871
+	github.com/lemon4ksan/foundation v0.0.0-20260923050528-dc5d9a8c9c6b
+	github.com/lemon4ksan/mach v0.0.0-20260923050623-74d65af4cf4a
 	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/protobuf v1.36.12
