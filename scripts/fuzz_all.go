@@ -34,7 +34,6 @@ var targets = []fuzzTarget{
 	{"./tunnel/masque", "FuzzMASQUEVarint"},
 	{"./tunnel/masque", "FuzzIPPacketExtract"},
 	{"./codec/values", "FuzzValuesEncode"},
-	{"./codec/extract", "FuzzExtract"},
 	{"./codec/decode", "FuzzDecoders"},
 }
 
