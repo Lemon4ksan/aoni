@@ -22,8 +22,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/aoni/netutil/proxy"
-	"github.com/lemon4ksan/aoni/x/codec/decode"
+	"github.com/lemon4ksan/aoni/proxy"
+	"github.com/lemon4ksan/aoni/codec/decode"
 )
 
 var (

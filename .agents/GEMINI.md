@@ -10,7 +10,7 @@ This document outlines the architecture, coding standards, build/test commands, 
 > _«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»_
 
 > **The "aoni v1" Compatibility & Forever-Frozen Core Manifesto**:
-> _"Code written for **aoni v1.0.0** is guaranteed to compile and run unchanged on any **v1.x** version 5, 10, and 20 years from now. The entire core is permanently locked to the immutable IETF RFC and W3C/Chromium standards. All experiments, protocol shifts, and third-party adapters live exclusively in the **aoni/x/...** packages."_
+> _"Code written for **aoni v1.0.0** is guaranteed to compile and run unchanged on any **v1.x** version 5, 10, and 20 years from now. The entire core is permanently locked to the immutable IETF RFC and W3C/Chromium standards."_
 
 ### Key Capabilities & Architectural Pillars
 - **Dual Engines under a Single Interface**:
@@ -28,7 +28,7 @@ This document outlines the architecture, coding standards, build/test commands, 
 - **Generics-First Ergonomics & Codecs**:
   - Type-safe single-line calls via `client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, and `aoni.GetTo[T]`.
   - Native decoders for JSON, XML, Protobuf, and gRPC-Web (5-byte framing & trailer validation).
-- **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streaming (Socket.IO v5 / Engine.IO v4 in `aoni/x/socketio`).
+- **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streaming.
 - **Proxy Isolation & Utilities**: Proxy-isolated Cookie Jars (`ProxyIsolatedCookieJar`), proxy rotators, IPv6 subnet rotators, and DoH/DoT/DoQ DNS resolvers.
 
 ## 2. Repository Layout
@@ -40,12 +40,16 @@ aoni/
 ├── mod/                               // Per-request modifiers (mod.WithVar, mod.WithHeader, mod.WithQuery...)
 ├── fast/                              // Ultra-fast client engine built on fasthttp
 ├── cookie/                            // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
+├── dns/                               // DNS resolvers (DoH, DoQ, DoT, stale cache, bootstrap)
+├── tls/                               // TLS evasion, JA4, ECH, GREASE
 ├── fingerprint/                       // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
-├── netutil/                           // Proxy rotators, DoH/DoT/DoQ resolvers, ECH, IPv6 subnet rotators
+├── proxy/                             // Proxy rotators, PAC engine, sticky sessions, adaptive timeout
+├── netutil/                           // Multi-NIC binding, io_uring, network probes, compression dictionaries
 ├── codec/                             // Response decoders (JSON, Proto, gRPC-Web, XML) & url.Values encoders
-├── realtime/                          // WebSockets, Socket.IO v5, SSE & NDJSON streams
+├── realtime/                          // WebSockets, SSE & NDJSON streams
 ├── resiliency/                        // Response caching, WAF challenge solvers, Circuit Breakers, Load Balancers
 ├── telemetry/                         // HAR generators, EWMA latency trackers, embedded web inspector
+├── tunnel/                            // MASQUE CONNECT-UDP/IP tunnels and TUN adapter bindings
 ├── cmd/                               // CLI utilities (coverage analyzer, OpenAPI code generator)
 ├── docs/                              // Technical architecture docs (NETWORK_STACK.md, VOODOO.md, COOKBOOK.md)
 ├── examples/                          // Runnable usage & evasion examples

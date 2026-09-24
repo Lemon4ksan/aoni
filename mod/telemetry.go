@@ -14,7 +14,7 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/mach/proto/http/header"
 
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // WithCorrelationID constructs an [RequestModifier] setting an end-to-end tracing correlation ID header ("X-Correlation-ID").

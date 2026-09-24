@@ -22,7 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // AsReplayable wraps an [io.ReadCloser] into a replayable stream ([iokit.ReplayableBody])

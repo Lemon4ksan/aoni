@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
-	"github.com/lemon4ksan/aoni/netutil/proxy"
+	"github.com/lemon4ksan/aoni/proxy"
 	"github.com/lemon4ksan/aoni/option"
 )
 

@@ -21,9 +21,9 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/download"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/x/codec"
-	"github.com/lemon4ksan/aoni/x/codec/decode"
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 var (

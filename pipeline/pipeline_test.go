@@ -27,7 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type mockDoer struct {

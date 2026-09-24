@@ -2,7 +2,7 @@
 
 ## 1. Proxy Rotation with Sticky Sessions
 
-Session affinity requires consistent routing through proxy exit nodes. `netutil/proxy.Rotator` provides session affinity via sticky key extractors.
+Session affinity requires consistent routing through proxy exit nodes. `proxy.Rotator` provides session affinity via sticky key extractors.
 
 ```go
 rotator, err := proxy.NewRotatorFromStrings(proxy.RotatorConfig{

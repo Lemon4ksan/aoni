@@ -15,7 +15,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 var txStorage = pool.NewPerPStorage(func() *Tx {

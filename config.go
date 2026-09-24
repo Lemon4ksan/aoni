@@ -27,7 +27,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
-	"github.com/lemon4ksan/aoni/x/telemetry"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // ============================================================================
