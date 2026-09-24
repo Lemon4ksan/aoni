@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/mach/proto/http/header"
 )
 
 // CurlOptions controls header redaction and secrets masking for cURL command generation.

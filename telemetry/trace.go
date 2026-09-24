@@ -20,12 +20,12 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/aoni/tls/ja4"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
+	"github.com/lemon4ksan/aoni/tls/ja4"
 )
 
 // TrafficInspector captures and records fine-grained request traces, headers, and JA4 signatures

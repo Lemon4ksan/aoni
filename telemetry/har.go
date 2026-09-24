@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/timekit"
 	"github.com/lemon4ksan/mach/proto/headkit"
 	"github.com/lemon4ksan/mach/proto/http/header"
-	"github.com/lemon4ksan/foundation/timekit"
 
 	"github.com/lemon4ksan/aoni/internal/version"
 )

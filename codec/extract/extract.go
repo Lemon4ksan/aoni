@@ -6,6 +6,7 @@ package extract
 
 import (
 	"github.com/lemon4ksan/foundation/generic"
+
 	fextract "github.com/lemon4ksan/aoni/extract"
 )
 
