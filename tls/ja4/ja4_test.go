@@ -7,9 +7,10 @@ package ja4_test
 import (
 	"testing"
 
+	"github.com/lemon4ksan/foundation/testing/assert"
+
 	"github.com/lemon4ksan/aoni/tls/grease"
 	"github.com/lemon4ksan/aoni/tls/ja4"
-	"github.com/lemon4ksan/foundation/testing/assert"
 )
 
 func TestIsGREASE(t *testing.T) {

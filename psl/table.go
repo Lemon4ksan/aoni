@@ -50,6 +50,7 @@ type uint32String string
 func (u uint32String) get(i uint32) uint32 {
 	off := i * 4
 	u = u[off:]
+
 	return uint32(u[3]) |
 		uint32(u[2])<<8 |
 		uint32(u[1])<<16 |
@@ -61,6 +62,7 @@ type uint40String string
 func (u uint40String) get(i uint32) uint64 {
 	off := uint64(i * (nodesBits / 8))
 	u = u[off:]
+
 	return uint64(u[4]) |
 		uint64(u[3])<<8 |
 		uint64(u[2])<<16 |

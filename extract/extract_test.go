@@ -10,6 +10,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+
 	"github.com/lemon4ksan/aoni/extract"
 )
 
@@ -123,6 +124,7 @@ func TestBetweenAll(t *testing.T) {
 	for match := range extract.BetweenAll(src, "<item>", "</item>") {
 		items = append(items, string(match))
 	}
+
 	require.Equal(t, 3, len(items))
 	assert.Equal(t, "apple", items[0])
 	assert.Equal(t, "banana", items[1])
@@ -136,6 +138,7 @@ func TestBetweenAll(t *testing.T) {
 			break
 		}
 	}
+
 	assert.Equal(t, 2, count)
 
 	// Missing boundaries
@@ -143,6 +146,7 @@ func TestBetweenAll(t *testing.T) {
 	for range extract.BetweenAll(src, "<notfound>", "</item>") {
 		count++
 	}
+
 	assert.Equal(t, 0, count)
 
 	// Empty prefix and suffix
@@ -150,6 +154,7 @@ func TestBetweenAll(t *testing.T) {
 	for range extract.BetweenAll(src, "", "") {
 		count++
 	}
+
 	assert.Equal(t, 0, count)
 }
 
@@ -162,6 +167,7 @@ func TestBetweenAllString(t *testing.T) {
 	for match := range extract.BetweenAllString(src, "tag:", ";") {
 		items = append(items, match)
 	}
+
 	require.Equal(t, 3, len(items))
 	assert.Equal(t, "val1", items[0])
 	assert.Equal(t, "val2", items[1])
@@ -175,6 +181,7 @@ func TestBetweenAllString(t *testing.T) {
 			break
 		}
 	}
+
 	assert.Equal(t, 1, count)
 }
 
@@ -189,6 +196,7 @@ func TestRegexAll(t *testing.T) {
 	for m := range extract.RegexAll(src, rxWithGroup) {
 		vals = append(vals, string(m))
 	}
+
 	require.Equal(t, 3, len(vals))
 	assert.Equal(t, "10", vals[0])
 	assert.Equal(t, "20", vals[1])
@@ -198,6 +206,7 @@ func TestRegexAll(t *testing.T) {
 	for m := range extract.RegexAll(src, rxWithoutGroup) {
 		fullVals = append(fullVals, string(m))
 	}
+
 	require.Equal(t, 3, len(fullVals))
 	assert.Equal(t, "item:10", fullVals[0])
 
@@ -206,6 +215,7 @@ func TestRegexAll(t *testing.T) {
 	for sm := range extract.RegexAllSubmatch(src, rxWithGroup) {
 		submatches = append(submatches, sm)
 	}
+
 	require.Equal(t, 3, len(submatches))
 	assert.Equal(t, "item:10", string(submatches[0][0]))
 	assert.Equal(t, "10", string(submatches[0][1]))
@@ -214,6 +224,7 @@ func TestRegexAll(t *testing.T) {
 	for range extract.RegexAll(src, nil) {
 		t.Fatal("expected no matches for nil regex")
 	}
+
 	for range extract.RegexAllSubmatch(src, nil) {
 		t.Fatal("expected no matches for nil regex")
 	}
@@ -228,6 +239,7 @@ func TestAttrsAll(t *testing.T) {
 	for h := range extract.AttrsAll(src, "href") {
 		hrefs = append(hrefs, string(h))
 	}
+
 	require.Equal(t, 2, len(hrefs))
 	assert.Equal(t, "https://example.com", hrefs[0])
 	assert.Equal(t, "https://foo.bar", hrefs[1])
@@ -236,6 +248,7 @@ func TestAttrsAll(t *testing.T) {
 	for id := range extract.AttrsAll(src, "data-id") {
 		ids = append(ids, string(id))
 	}
+
 	require.Equal(t, 2, len(ids))
 	assert.Equal(t, "1", ids[0])
 	assert.Equal(t, "2", ids[1])
@@ -246,6 +259,7 @@ func TestAttrsAll(t *testing.T) {
 		count++
 		break
 	}
+
 	assert.Equal(t, 1, count)
 
 	// Empty attr
@@ -256,6 +270,7 @@ func TestAttrsAll(t *testing.T) {
 
 func BenchmarkBetweenAll_ZeroAlloc(b *testing.B) {
 	src := []byte("<val>one</val><val>two</val><val>three</val><val>four</val><val>five</val>")
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -270,6 +285,7 @@ func BenchmarkBetweenAll_ZeroAlloc(b *testing.B) {
 
 func BenchmarkBetweenAllString_ZeroAlloc(b *testing.B) {
 	src := "<val>one</val><val>two</val><val>three</val><val>four</val><val>five</val>"
+
 	b.ReportAllocs()
 	b.ResetTimer()
 

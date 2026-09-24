@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/nik"
-
 	"github.com/lemon4ksan/aoni/pipeline"
 )
 

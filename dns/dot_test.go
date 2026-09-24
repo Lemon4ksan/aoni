@@ -17,11 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/dns"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/net/tls/cert"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
+
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 func generateTestCert(t *testing.T, dnsNames ...string) (tls.Certificate, string) {
@@ -95,6 +96,7 @@ func startMockDoTServer(t *testing.T, tlsCert tls.Certificate) (string, func()) 
 
 	cleanup := func() {
 		close(stop)
+
 		_ = listener.Close()
 	}
 
@@ -111,6 +113,7 @@ func handleDoTConn(conn net.Conn) {
 		}
 
 		reqLen := int(binary.BigEndian.Uint16(lenBuf[:]))
+
 		reqBuf := make([]byte, reqLen)
 		if _, err := io.ReadFull(conn, reqBuf); err != nil {
 			return
@@ -124,6 +127,7 @@ func handleDoTConn(conn net.Conn) {
 
 		// Craft response: Question + Answer (127.0.0.1)
 		resp := make([]byte, 0, 128)
+
 		var h [12]byte
 		binary.BigEndian.PutUint16(h[0:2], txID)
 		binary.BigEndian.PutUint16(h[2:4], 0x8180) // NOERROR
@@ -136,10 +140,12 @@ func handleDoTConn(conn net.Conn) {
 		if err != nil || qEnd+4 > len(reqBuf) {
 			return
 		}
+
 		resp = append(resp, reqBuf[12:qEnd+4]...)
 
 		// Answer record (A: 127.0.0.1 / TTL 300)
 		resp = append(resp, 0xc0, 0x0c) // Compression pointer to question
+
 		var anH [10]byte
 		binary.BigEndian.PutUint16(anH[0:2], wire.TypeA)
 		binary.BigEndian.PutUint16(anH[2:4], wire.ClassIN)
@@ -151,6 +157,7 @@ func handleDoTConn(conn net.Conn) {
 		// Send 2-octet length + response
 		var respLenBuf [2]byte
 		binary.BigEndian.PutUint16(respLenBuf[:], uint16(len(resp)))
+
 		if _, err := conn.Write(append(respLenBuf[:], resp...)); err != nil {
 			return
 		}
@@ -161,6 +168,7 @@ func TestRFC7858_RFC8310_DoTProfilesAndADN(t *testing.T) {
 	t.Parallel()
 
 	tlsCert, validPin := generateTestCert(t, "dns.example.com", "localhost")
+
 	serverAddr, cleanup := startMockDoTServer(t, tlsCert)
 	defer cleanup()
 

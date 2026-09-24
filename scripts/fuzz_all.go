@@ -25,17 +25,17 @@ var targets = []fuzzTarget{
 	{"./netutil/dict", "FuzzParseAvailableDictionary"},
 	{"./netutil/dict", "FuzzMatchURLPattern"},
 	{"./netutil/hints", "FuzzParseLinkHeader"},
-	{"./x/realtime/stream", "FuzzSSEStream"},
-	{"./x/realtime/stream", "FuzzNDJSONStream"},
-	{"./x/realtime/ws", "FuzzWSFrameParse"},
-	{"./x/realtime/ws", "FuzzWSCloseMessage"},
-	{"./x/realtime/ws", "FuzzWSMask"},
-	{"./x/realtime/ws", "FuzzWSAcceptKey"},
-	{"./x/tunnel/masque", "FuzzMASQUEVarint"},
-	{"./x/tunnel/masque", "FuzzIPPacketExtract"},
-	{"./x/codec/values", "FuzzValuesEncode"},
-	{"./x/codec/extract", "FuzzExtract"},
-	{"./x/codec/decode", "FuzzDecoders"},
+	{"./realtime/stream", "FuzzSSEStream"},
+	{"./realtime/stream", "FuzzNDJSONStream"},
+	{"./realtime/ws", "FuzzWSFrameParse"},
+	{"./realtime/ws", "FuzzWSCloseMessage"},
+	{"./realtime/ws", "FuzzWSMask"},
+	{"./realtime/ws", "FuzzWSAcceptKey"},
+	{"./tunnel/masque", "FuzzMASQUEVarint"},
+	{"./tunnel/masque", "FuzzIPPacketExtract"},
+	{"./codec/values", "FuzzValuesEncode"},
+	{"./codec/extract", "FuzzExtract"},
+	{"./codec/decode", "FuzzDecoders"},
 }
 
 func main() {
@@ -54,25 +54,14 @@ func main() {
 
 		start := time.Now()
 
-		var dir string
-
-		pkg := tgt.pkg
-		if strings.HasPrefix(pkg, "./x/") {
-			dir = "x"
-			pkg = "." + strings.TrimPrefix(pkg, "./x")
-		}
-
 		// #nosec G204
 		cmd := exec.CommandContext(
 			context.Background(),
 			"go", "test",
 			"-fuzz=^"+tgt.name+"$",
 			"-fuzztime="+*fuzzDuration,
-			pkg,
+			tgt.pkg,
 		)
-		if dir != "" {
-			cmd.Dir = dir
-		}
 
 		var outBuf bytes.Buffer
 

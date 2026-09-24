@@ -7,8 +7,9 @@ package trie_test
 import (
 	"testing"
 
-	"github.com/lemon4ksan/aoni/trie"
 	"github.com/lemon4ksan/foundation/testing/assert"
+
+	"github.com/lemon4ksan/aoni/trie"
 )
 
 func TestReverseDomainTrie(t *testing.T) {

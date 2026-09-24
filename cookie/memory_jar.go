@@ -11,8 +11,9 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/aoni/psl"
 	"github.com/lemon4ksan/foundation/silicon/clock"
+
+	"github.com/lemon4ksan/aoni/psl"
 )
 
 // MemoryJar is a fully RFC 6265 and RFC 6265bis (CHIPS) compliant in-memory cookie jar.

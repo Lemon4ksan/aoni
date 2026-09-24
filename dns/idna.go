@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lemon4ksan/mach/proto/dns/wire"
+
 	"github.com/lemon4ksan/aoni/idna"
 )
 
@@ -114,10 +115,12 @@ func ClassifyLabel(label string) LabelType {
 		if !utf8.ValidString(label) {
 			return LabelTypeNonLDH
 		}
+
 		// Validate U-label via IDNA2008 conversion
 		if _, err := idna.Lookup.ToASCII(label); err == nil {
 			return LabelTypeULabel
 		}
+
 		return LabelTypeNonLDH
 	}
 
@@ -134,8 +137,10 @@ func ClassifyLabel(label string) LabelType {
 			if _, err := idna.Lookup.ToUnicode(label); err == nil {
 				return LabelTypeALabel
 			}
+
 			return LabelTypeFakeALabel
 		}
+
 		return LabelTypeRLDH
 	}
 
@@ -188,6 +193,7 @@ func EqualFoldASCII(s1, s2 string) bool {
 		if c1 >= 'A' && c1 <= 'Z' {
 			c1 += 'a' - 'A'
 		}
+
 		if c2 >= 'A' && c2 <= 'Z' {
 			c2 += 'a' - 'A'
 		}
@@ -213,6 +219,7 @@ func CanonicalDomainName(domain string) string {
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'
 		}
+
 		sb.WriteByte(c)
 	}
 

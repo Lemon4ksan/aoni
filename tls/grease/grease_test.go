@@ -8,9 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/tls/grease"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+
+	"github.com/lemon4ksan/aoni/tls/grease"
 )
 
 func TestRFC8701_16BitValues(t *testing.T) {

@@ -82,6 +82,7 @@ loop:
 		}
 
 		u >>= childrenBitsNodeType
+
 		wildcard = u&(1<<childrenBitsWildcard-1) != 0
 		if !wildcard {
 			icann = icannNode
@@ -107,6 +108,7 @@ func isLikelyIP(b []byte) bool {
 	}
 
 	c := b[0]
+
 	return (c >= '0' && c <= '9') || c == ':'
 }
 
@@ -156,6 +158,7 @@ loop:
 		}
 
 		u >>= childrenBitsNodeType
+
 		wildcard = u&(1<<childrenBitsWildcard-1) != 0
 		if !wildcard {
 			icann = icannNode
@@ -198,7 +201,8 @@ func EffectiveTLDPlusOne(domain string) (string, error) {
 // EffectiveTLDPlusOneBytes returns the effective top level domain plus one more label
 // as a subslice of domain bytes with zero heap allocations.
 func EffectiveTLDPlusOneBytes(domain []byte) ([]byte, error) {
-	if bytes.HasPrefix(domain, []byte(".")) || bytes.HasSuffix(domain, []byte(".")) || bytes.Contains(domain, []byte("..")) {
+	if bytes.HasPrefix(domain, []byte(".")) || bytes.HasSuffix(domain, []byte(".")) ||
+		bytes.Contains(domain, []byte("..")) {
 		return nil, ErrEmptyLabel
 	}
 
@@ -222,11 +226,12 @@ func find(label string, lo, hi uint32) uint32 {
 		mid := lo + (hi-lo)/2
 		s := nodeLabel(mid)
 
-		if s < label {
+		switch {
+		case s < label:
 			lo = mid + 1
-		} else if s == label {
+		case s == label:
 			return mid
-		} else {
+		default:
 			hi = mid
 		}
 	}
@@ -240,11 +245,12 @@ func findBytes(label []byte, lo, hi uint32) uint32 {
 		s := nodeLabel(mid)
 
 		cmp := compareStringBytes(s, label)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			lo = mid + 1
-		} else if cmp == 0 {
+		case cmp == 0:
 			return mid
-		} else {
+		default:
 			hi = mid
 		}
 	}

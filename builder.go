@@ -14,15 +14,15 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/mach/proto/http/header"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/download"
-	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/download"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 

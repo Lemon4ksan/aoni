@@ -13,8 +13,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/async/dedup"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/silicon/clock"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
 )
 
 // Standard DNS caching and resiliency constants defined in RFC 8767 and RFC 2308.
@@ -93,6 +93,7 @@ func WithNegativeTTL(d time.Duration) CacheOption {
 		if d > MaxNegativeTTLCap {
 			d = MaxNegativeTTLCap
 		}
+
 		c.negativeTTL = d
 	}
 }
@@ -103,6 +104,7 @@ func WithMaxStaleTTL(d time.Duration) CacheOption {
 		if d > MaxTTLCap {
 			d = MaxTTLCap
 		}
+
 		c.maxStaleTTL = d
 	}
 }
@@ -180,10 +182,12 @@ func (c *InMemoryDNSCache) checkAncestorNXDOMAIN(host string, now time.Time) (er
 		if nextDot == -1 {
 			break
 		}
+
 		idx += nextDot + 1
 		if idx >= len(host) {
 			break
 		}
+
 		ancestor := host[idx:]
 		if entry, ok := c.cache.Load(ancestor); ok {
 			if entry.isNegative && now.Before(entry.freshUntil) && IsNXDomain(entry.negErr) {
@@ -191,6 +195,7 @@ func (c *InMemoryDNSCache) checkAncestorNXDOMAIN(host string, now time.Time) (er
 			}
 		}
 	}
+
 	return nil, false
 }
 
@@ -198,6 +203,7 @@ func (c *InMemoryDNSCache) checkAncestorNXDOMAIN(host string, now time.Time) (er
 // Adheres to RFC 8767 (serve-stale resilience), RFC 2308 (negative caching), and RFC 8020 (NXDOMAIN cut).
 func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	now := time.Now()
+
 	entry, ok := c.cache.Load(host)
 	if ok {
 		// Fresh negative cache hit (RFC 2308 §5 & §8)
@@ -226,11 +232,13 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 
 	ips, err := c.sflight.Do(ctx, host, func(ctx context.Context) ([]net.IPAddr, error) {
 		currentNow := time.Now()
+
 		cachedEntry, cachedOK := c.cache.Load(host)
 		if cachedOK {
 			if cachedEntry.isNegative && currentNow.Before(cachedEntry.freshUntil) {
 				return nil, cachedEntry.negErr
 			}
+
 			if !cachedEntry.isNegative && currentNow.Before(cachedEntry.freshUntil) {
 				return cachedEntry.ips, nil
 			}
@@ -245,11 +253,13 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 
 		// Perform upstream lookup with client response timer (RFC 8767 §5)
 		var cancel context.CancelFunc
+
 		resolveCtx := ctx
 		if c.serveStale && cachedOK && !cachedEntry.isNegative && currentNow.Before(cachedEntry.staleUntil) &&
 			c.clientResponseTimeout > 0 {
 			resolveCtx, cancel = context.WithTimeout(ctx, c.clientResponseTimeout)
 		}
+
 		if cancel != nil {
 			defer cancel()
 		}
@@ -261,6 +271,7 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 			if extErr == nil && len(records) > 0 {
 				return c.storeRecords(host, records)
 			}
+
 			if extErr != nil && c.serveStale && cachedOK && !cachedEntry.isNegative &&
 				currentNow.Before(cachedEntry.staleUntil) {
 				cachedEntry.lastFailure = currentNow
@@ -277,6 +288,7 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 				if negTTL <= 0 {
 					negTTL = DefaultNegativeTTL
 				}
+
 				negFreshUntil := currentNow.Add(negTTL)
 				c.cache.Store(host, dnsCacheEntry{
 					isNegative: true,

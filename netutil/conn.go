@@ -60,4 +60,3 @@ func ResolveStdSessionCache(cache any) tls.ClientSessionCache {
 
 	return nil
 }
-

@@ -111,6 +111,7 @@ func TestIDNAErrors(t *testing.T) {
 		if got, err := ToASCII(tc); err == nil {
 			t.Errorf("ToASCII(%q) = %q, want error", tc, got)
 		}
+
 		if got, err := ToUnicode(tc); err == nil {
 			t.Errorf("ToUnicode(%q) = %q, want error", tc, got)
 		}

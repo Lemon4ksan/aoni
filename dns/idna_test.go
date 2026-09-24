@@ -7,8 +7,9 @@ package dns_test
 import (
 	"testing"
 
-	"github.com/lemon4ksan/aoni/dns"
 	"github.com/lemon4ksan/foundation/testing/assert"
+
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 func TestIDNA_IsLDH(t *testing.T) {

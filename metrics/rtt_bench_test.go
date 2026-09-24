@@ -14,6 +14,7 @@ import (
 func BenchmarkRTTTracker_Record(b *testing.B) {
 	tracker := metrics.NewRTTTracker(100)
 	sample := 15 * time.Millisecond
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -27,6 +28,7 @@ func BenchmarkRTTTracker_Percentile(b *testing.B) {
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -40,6 +42,7 @@ func BenchmarkRTTTracker_P95(b *testing.B) {
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -53,6 +56,7 @@ func BenchmarkRTTTracker_AverageRTT(b *testing.B) {
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -66,7 +70,9 @@ func BenchmarkRTTTracker_RecordAndPercentile(b *testing.B) {
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
+
 	sample := 42 * time.Millisecond
+
 	b.ReportAllocs()
 	b.ResetTimer()
 

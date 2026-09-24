@@ -10,9 +10,9 @@ import (
 
 	furl "github.com/lemon4ksan/foundation/net/urlkit"
 
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/pipeline"
-	"github.com/lemon4ksan/aoni/codec/values"
 )
 
 // WithVar replaces a single URI template variable placeholder (e.g. "{id}") in the request path (RFC 6570 Level 1).

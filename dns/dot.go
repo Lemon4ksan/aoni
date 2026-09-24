@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/net/tls/cert"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
 )
 
 // RFC 7858 & RFC 8310 Standard DNS over TLS Port and Service Name constants.
@@ -126,6 +126,7 @@ func (d *DoTResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 func (d *DoTResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error) {
 	if d.Timeout > 0 {
 		var cancel context.CancelFunc
+
 		ctx, cancel = context.WithTimeout(ctx, d.Timeout)
 		defer cancel()
 	}
@@ -135,6 +136,7 @@ func (d *DoTResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 		if d.Profile == PrivacyProfileStrict {
 			return nil, fmt.Errorf("%w: %w", ErrStrictPrivacyFailed, err)
 		}
+
 		return nil, err
 	}
 	defer conn.Close()
@@ -163,6 +165,7 @@ func (d *DoTResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 func (d *DoTResolver) LookupWireRecord(ctx context.Context, qname string, qtype uint16) ([]byte, error) {
 	if d.Timeout > 0 {
 		var cancel context.CancelFunc
+
 		ctx, cancel = context.WithTimeout(ctx, d.Timeout)
 		defer cancel()
 	}
@@ -172,6 +175,7 @@ func (d *DoTResolver) LookupWireRecord(ctx context.Context, qname string, qtype 
 		if d.Profile == PrivacyProfileStrict {
 			return nil, fmt.Errorf("%w: %w", ErrStrictPrivacyFailed, err)
 		}
+
 		return nil, err
 	}
 	defer conn.Close()
@@ -232,11 +236,13 @@ func (d *DoTResolver) dialTLS(ctx context.Context) (net.Conn, error) {
 			if origVerify != nil {
 				return origVerify(cs)
 			}
+
 			return nil
 		}
 	}
 
 	dialer := tls.Dialer{Config: tlsCfg}
+
 	conn, err := dialer.DialContext(ctx, "tcp", d.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("aoni/dns: dot tls dial %s: %w", d.Endpoint, err)
@@ -317,5 +323,6 @@ func (d *DoTResolver) queryWireRecords(conn net.Conn, host string, qtype uint16)
 	}
 
 	respID := binary.BigEndian.Uint16(respBuf[0:2])
+
 	return wire.ParseDNSResponseRecords(respBuf, respID)
 }

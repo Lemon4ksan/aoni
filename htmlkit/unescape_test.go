@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lemon4ksan/foundation/testing/assert"
+
 	"github.com/lemon4ksan/aoni/htmlkit"
 )
 
@@ -169,6 +170,7 @@ func TestUnescape_NumericAndEdgeCases(t *testing.T) {
 	assert.Equal(t, []byte("&"), htmlkit.Unescape([]byte("&")))
 	assert.Equal(t, []byte("&;"), htmlkit.Unescape([]byte("&;")))
 	assert.Equal(t, []byte("&#;"), htmlkit.Unescape([]byte("&#;")))
+
 	longEntity := []byte("&verylongentitynameexceedinglimit;")
 	assert.Equal(t, longEntity, htmlkit.Unescape(longEntity))
 	assert.Equal(t, []byte("&unknownentity;"), htmlkit.Unescape([]byte("&unknownentity;")))

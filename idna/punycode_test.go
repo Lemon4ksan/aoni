@@ -188,10 +188,12 @@ func TestPunycodeErrors(t *testing.T) {
 		case strings.HasPrefix(tc, "encode "):
 			_, err = encode("", tc[7:])
 		}
+
 		if err == nil {
 			if len(tc) > 256 {
 				tc = tc[:100] + "..." + tc[len(tc)-100:]
 			}
+
 			t.Errorf("no error for %s", tc)
 		}
 	}

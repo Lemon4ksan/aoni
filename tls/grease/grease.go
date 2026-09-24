@@ -139,6 +139,7 @@ func FilterALPN(alpns []string) []string {
 // RandomUint16 selects a cryptographically secure random 16-bit GREASE value from [All16BitValues] (RFC 8701 §5).
 func RandomUint16() uint16 {
 	var b [1]byte
+
 	_, _ = rand.Read(b[:])
 	idx := int(b[0]) % len(All16BitValues)
 
@@ -148,6 +149,7 @@ func RandomUint16() uint16 {
 // RandomUint8 selects a cryptographically secure random 8-bit GREASE value from [AllPskModes] (RFC 8701 §5).
 func RandomUint8() uint8 {
 	var b [1]byte
+
 	_, _ = rand.Read(b[:])
 	idx := int(b[0]) % len(AllPskModes)
 

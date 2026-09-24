@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/fragment"
-
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )

@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	"github.com/lemon4ksan/mach/proto/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.

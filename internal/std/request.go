@@ -17,9 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/mach/proto/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )

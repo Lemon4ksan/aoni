@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/dns"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
+
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 type counterResolver struct {
@@ -27,9 +28,11 @@ type counterResolver struct {
 
 func (c *counterResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	c.calls.Add(1)
+
 	if c.err != nil {
 		return nil, c.err
 	}
+
 	return c.ips, nil
 }
 
@@ -117,10 +120,12 @@ func TestCache_ServeStale_RFC8767(t *testing.T) {
 	t.Parallel()
 
 	var failUpstream atomic.Bool
+
 	res := dns.ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
 		if failUpstream.Load() {
 			return nil, errors.New("upstream timeout")
 		}
+
 		return []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}}, nil
 	})
 

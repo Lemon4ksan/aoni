@@ -14,8 +14,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/tls/grease"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
+	"github.com/lemon4ksan/aoni/tls/grease"
 )
 
 // ErrInvalidJA4Input indicates corrupted or truncated ClientHello byte payloads.
@@ -259,6 +260,7 @@ func computeLanguage(lang string) string {
 	}
 
 	var buf [4]byte
+
 	count := 0
 
 	for i := range lang {
@@ -371,6 +373,7 @@ func hash12Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 
 	var dst [12]byte
+
 	_ = hexTable[15]
 
 	dst[0] = hexTable[sum[0]>>4]
@@ -525,6 +528,7 @@ func computeALPN(protocols []string) string {
 	}
 
 	var buf [2]byte
+
 	buf[0] = first[0]
 	buf[1] = first[len(first)-1]
 

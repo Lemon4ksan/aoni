@@ -30,7 +30,9 @@ var (
 // utilizing the full 0-65535 ID space per RFC 5452 §9.2 and RFC 4086.
 func GenerateQueryID() uint16 {
 	var b [2]byte
+
 	_, _ = rand.Read(b[:])
+
 	return binary.BigEndian.Uint16(b[:])
 }
 
@@ -48,6 +50,7 @@ func ValidateQueryMatch(
 	}
 
 	expClean := strings.TrimSuffix(strings.ToLower(expectedQName), ".")
+
 	actClean := strings.TrimSuffix(strings.ToLower(actualQName), ".")
 	if expClean != actClean {
 		return fmt.Errorf("%w: got %q, expected %q", ErrSpoofedQName, actualQName, expectedQName)

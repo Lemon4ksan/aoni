@@ -7,10 +7,11 @@ package dns_test
 import (
 	"testing"
 
-	"github.com/lemon4ksan/aoni/dns"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
+
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 func TestSecurity_GenerateQueryID_RFC5452(t *testing.T) {

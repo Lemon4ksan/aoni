@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/dns"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
+
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 type mockResolver struct {
@@ -24,6 +25,7 @@ func (m *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPA
 	if m.fn != nil {
 		return m.fn(ctx, host)
 	}
+
 	return nil, errors.New("mock not implemented")
 }
 
@@ -58,6 +60,7 @@ func TestStaticResolver(t *testing.T) {
 			if host == "fallback.local" {
 				return []net.IPAddr{{IP: net.ParseIP("192.168.1.1")}}, nil
 			}
+
 			return nil, dns.ErrNXDomain
 		},
 	}
@@ -149,6 +152,7 @@ func TestLookupResultAndOptional(t *testing.T) {
 		if host == "found.com" {
 			return []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}}, nil
 		}
+
 		return nil, errors.New("not found")
 	}}
 

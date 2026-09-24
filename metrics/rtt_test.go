@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/metrics"
 	"github.com/lemon4ksan/foundation/testing/assert"
+
+	"github.com/lemon4ksan/aoni/metrics"
 )
 
 func TestRTTTracker_SlidingWindow_And_Percentiles(t *testing.T) {

@@ -23,6 +23,7 @@ func IsNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	if errors.Is(err, ErrNXDomain) || errors.Is(err, ErrNODATA) {
 		return true
 	}
@@ -43,6 +44,7 @@ func IsNXDomain(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	if errors.Is(err, ErrNXDomain) {
 		return true
 	}

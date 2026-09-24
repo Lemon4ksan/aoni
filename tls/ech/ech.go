@@ -161,7 +161,9 @@ func ParseConfigList(raw []byte) ([]*Config, error) {
 	}
 
 	data := raw[2 : 2+totalLen]
+
 	var configs []*Config
+
 	offset := 0
 
 	for offset < len(data) {
@@ -193,11 +195,14 @@ func MarshalConfigList(configs []*Config) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		payload.Write(b)
 	}
 
-	var buf bytes.Buffer
-	var lenBuf [2]byte
+	var (
+		buf    bytes.Buffer
+		lenBuf [2]byte
+	)
 	binary.BigEndian.PutUint16(lenBuf[:], uint16(payload.Len()))
 	buf.Write(lenBuf[:])
 	buf.Write(payload.Bytes())
@@ -251,8 +256,10 @@ func (c *Config) Marshal() ([]byte, error) {
 		return nil, err
 	}
 
-	var buf bytes.Buffer
-	var hdr [4]byte
+	var (
+		buf bytes.Buffer
+		hdr [4]byte
+	)
 	binary.BigEndian.PutUint16(hdr[0:2], c.Version)
 	binary.BigEndian.PutUint16(hdr[2:4], uint16(len(contentsBytes)))
 	buf.Write(hdr[:])
@@ -302,10 +309,12 @@ func ValidatePublicName(name string) error {
 		for i := 0; i < len(l); i++ {
 			c := l[i]
 			isAlphaNum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+
 			isHyphen := c == '-'
 			if !isAlphaNum && !isHyphen {
 				return ErrInvalidPublicName
 			}
+
 			if isHyphen && (i == 0 || i == len(l)-1) {
 				return ErrInvalidPublicName
 			}
@@ -321,6 +330,7 @@ func ValidatePublicName(name string) error {
 			break
 		}
 	}
+
 	if allDigits {
 		return ErrInvalidPublicName
 	}
@@ -366,18 +376,21 @@ func parseContents(data []byte) (ConfigContents, error) {
 	if offset+2 > len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	pubKeyLen := int(binary.BigEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
 	if offset+pubKeyLen > len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	pubKey := slices.Clone(data[offset : offset+pubKeyLen])
 	offset += pubKeyLen
 
 	if offset+2 > len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	csLen := int(binary.BigEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
@@ -391,23 +404,27 @@ func parseContents(data []byte) (ConfigContents, error) {
 		aead := binary.BigEndian.Uint16(data[offset+i+2 : offset+i+4])
 		cipherSuites = append(cipherSuites, CipherSuite{KDFID: kdf, AEADID: aead})
 	}
+
 	offset += csLen
 
 	if offset >= len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	maxNameLen := data[offset]
 	offset++
 
 	if offset >= len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	nameLen := int(data[offset])
 	offset++
 
 	if offset+nameLen > len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	publicName := string(data[offset : offset+nameLen])
 	offset += nameLen
 
@@ -418,6 +435,7 @@ func parseContents(data []byte) (ConfigContents, error) {
 	if offset+2 > len(data) {
 		return c, ErrTruncatedECHConfig
 	}
+
 	extLen := int(binary.BigEndian.Uint16(data[offset : offset+2]))
 	offset += 2
 
@@ -426,12 +444,15 @@ func parseContents(data []byte) (ConfigContents, error) {
 	}
 
 	var extensions []Extension
+
 	extOffset := offset
+
 	extEnd := offset + extLen
 	for extOffset < extEnd {
 		if extOffset+4 > extEnd {
 			return c, ErrTruncatedECHConfig
 		}
+
 		extType := binary.BigEndian.Uint16(data[extOffset : extOffset+2])
 		extDataLen := int(binary.BigEndian.Uint16(data[extOffset+2 : extOffset+4]))
 		extOffset += 4
@@ -439,6 +460,7 @@ func parseContents(data []byte) (ConfigContents, error) {
 		if extOffset+extDataLen > extEnd {
 			return c, ErrTruncatedECHConfig
 		}
+
 		extData := slices.Clone(data[extOffset : extOffset+extDataLen])
 		extensions = append(extensions, Extension{Type: extType, Data: extData})
 		extOffset += extDataLen
@@ -481,6 +503,7 @@ func marshalContents(c ConfigContents) ([]byte, error) {
 		binary.BigEndian.PutUint16(csBuf[2:4], cs.AEADID)
 		csBytes.Write(csBuf[:])
 	}
+
 	var csLen [2]byte
 	binary.BigEndian.PutUint16(csLen[:], uint16(csBytes.Len()))
 	buf.Write(csLen[:])
@@ -499,6 +522,7 @@ func marshalContents(c ConfigContents) ([]byte, error) {
 		extBytes.Write(extHdr[:])
 		extBytes.Write(ext.Data)
 	}
+
 	var extLen [2]byte
 	binary.BigEndian.PutUint16(extLen[:], uint16(extBytes.Len()))
 	buf.Write(extLen[:])
