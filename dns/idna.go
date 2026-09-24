@@ -11,8 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lemon4ksan/mach/proto/dns/wire"
-
-	"github.com/lemon4ksan/aoni/idna"
+	"golang.org/x/net/idna"
 )
 
 // IDNA2008 Constants defined in RFC 5890.

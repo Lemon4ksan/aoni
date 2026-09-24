@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package trie provides a thread-safe, right-to-left domain matching radix tree.
 package trie
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -40,14 +43,13 @@ func (t *ReverseDomainTrie[V]) Insert(pattern string, val V) {
 	}
 
 	labels := splitDomainLabels(pattern)
-	// Right-to-left traversal: reverse labels slice
-	reverseLabels(labels)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	curr := &t.root
-	for _, label := range labels {
+	// Right-to-left traversal: reverse labels slice
+	for _, label := range slices.Backward(labels) {
 		if label == "*" {
 			if curr.wildcard == nil {
 				curr.wildcard = &domainNode[V]{}
@@ -80,13 +82,11 @@ func (t *ReverseDomainTrie[V]) Insert(pattern string, val V) {
 func (t *ReverseDomainTrie[V]) Match(domain string) (V, bool) {
 	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
 	if domain == "" {
-		var zero V
-
-		return zero, false
+		return generic.Zero[V](), false
 	}
 
 	labels := splitDomainLabels(domain)
-	reverseLabels(labels)
+	slices.Reverse(labels)
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -101,9 +101,7 @@ func matchDomainNode[V any](curr *domainNode[V], labels []string, idx int) (V, b
 			return curr.value, true
 		}
 
-		var zero V
-
-		return zero, false
+		return generic.Zero[V](), false
 	}
 
 	label := labels[idx]
@@ -129,9 +127,7 @@ func matchDomainNode[V any](curr *domainNode[V], labels []string, idx int) (V, b
 		}
 	}
 
-	var zero V
-
-	return zero, false
+	return generic.Zero[V](), false
 }
 
 // splitDomainLabels splits a domain string into individual dot-separated label strings.
@@ -142,11 +138,4 @@ func splitDomainLabels(domain string) []string {
 	}
 
 	return labels
-}
-
-// reverseLabels reverses a slice of domain label strings in-place.
-func reverseLabels(labels []string) {
-	for i, j := 0, len(labels)-1; i < j; i, j = i+1, j-1 {
-		labels[i], labels[j] = labels[j], labels[i]
-	}
 }
