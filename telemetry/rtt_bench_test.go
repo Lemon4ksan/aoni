@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package metrics_test
+package telemetry_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/metrics"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 func BenchmarkRTTTracker_Record(b *testing.B) {
-	tracker := metrics.NewRTTTracker(100)
+	tracker := telemetry.NewRTTTracker(100)
 	sample := 15 * time.Millisecond
 
 	b.ReportAllocs()
@@ -24,7 +24,7 @@ func BenchmarkRTTTracker_Record(b *testing.B) {
 }
 
 func BenchmarkRTTTracker_Percentile(b *testing.B) {
-	tracker := metrics.NewRTTTracker(100)
+	tracker := telemetry.NewRTTTracker(100)
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
@@ -38,7 +38,7 @@ func BenchmarkRTTTracker_Percentile(b *testing.B) {
 }
 
 func BenchmarkRTTTracker_P95(b *testing.B) {
-	tracker := metrics.NewRTTTracker(100)
+	tracker := telemetry.NewRTTTracker(100)
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
@@ -52,7 +52,7 @@ func BenchmarkRTTTracker_P95(b *testing.B) {
 }
 
 func BenchmarkRTTTracker_AverageRTT(b *testing.B) {
-	tracker := metrics.NewRTTTracker(100)
+	tracker := telemetry.NewRTTTracker(100)
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
@@ -66,7 +66,7 @@ func BenchmarkRTTTracker_AverageRTT(b *testing.B) {
 }
 
 func BenchmarkRTTTracker_RecordAndPercentile(b *testing.B) {
-	tracker := metrics.NewRTTTracker(100)
+	tracker := telemetry.NewRTTTracker(100)
 	for i := 1; i <= 100; i++ {
 		tracker.Record(time.Duration(i) * time.Millisecond)
 	}
