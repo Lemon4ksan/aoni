@@ -7,7 +7,7 @@ package cookie
 import (
 	"net/http"
 
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/mach/proto/http/header"
 )
 
 // Transport intercepts HTTP responses to extract and store Set-Cookie headers,

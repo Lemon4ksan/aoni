@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/iokit"
-	"github.com/lemon4ksan/foundation/net/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"

@@ -7,7 +7,7 @@ package telemetry
 import (
 	"time"
 
-	"github.com/lemon4ksan/foundation/silicon/metrics"
+	"github.com/lemon4ksan/aoni/metrics"
 )
 
 // DynamicHedgingConfig configures percentile-based dynamic request hedging.
@@ -78,7 +78,7 @@ func (c DynamicHedgingConfig) ComputeDelay() time.Duration {
 }
 
 // RTTTracker maintains a sliding window of network round-trip time measurements.
-// Core implementation is located in [github.com/lemon4ksan/foundation/silicon/metrics].
+// Core implementation is located in [github.com/lemon4ksan/aoni/metrics].
 type RTTTracker = metrics.RTTTracker
 
 // NewRTTTracker instantiates an [RTTTracker] with sample window capacity.

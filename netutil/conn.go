@@ -5,6 +5,7 @@
 package netutil
 
 import (
+	"crypto/tls"
 	"net"
 	"sync/atomic"
 )
@@ -42,3 +43,21 @@ func (c *WriteTrackingConn) BytesWritten() int64 {
 func (c *WriteTrackingConn) ResetBytesWritten() {
 	c.written.Store(0)
 }
+
+// ResolveStdSessionCache adapts an aoni SessionCache into a standard [tls.ClientSessionCache].
+func ResolveStdSessionCache(cache any) tls.ClientSessionCache {
+	if cache == nil {
+		return nil
+	}
+
+	if provider, ok := cache.(interface{ StdTLSSessionCache() tls.ClientSessionCache }); ok {
+		return provider.StdTLSSessionCache()
+	}
+
+	if stdCache, ok := cache.(tls.ClientSessionCache); ok {
+		return stdCache
+	}
+
+	return nil
+}
+

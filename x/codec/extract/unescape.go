@@ -5,17 +5,17 @@
 package extract
 
 import (
-	"github.com/lemon4ksan/foundation/text/htmlkit"
+	"github.com/lemon4ksan/aoni/htmlkit"
 )
 
 // HTMLUnescape converts HTML entities within src into their unescaped UTF-8 byte representation.
-// Core implementation is located in [github.com/lemon4ksan/foundation/text/htmlkit].
+// Core implementation is located in [github.com/lemon4ksan/aoni/htmlkit].
 func HTMLUnescape(src []byte) []byte {
 	return htmlkit.Unescape(src)
 }
 
 // AppendHTMLUnescape parses HTML entities in src and appends the decoded UTF-8 bytes into dst.
-// Core implementation is located in [github.com/lemon4ksan/foundation/text/htmlkit].
+// Core implementation is located in [github.com/lemon4ksan/aoni/htmlkit].
 func AppendHTMLUnescape(dst, src []byte) []byte {
 	return htmlkit.AppendUnescape(dst, src)
 }

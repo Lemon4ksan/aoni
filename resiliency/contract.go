@@ -5,7 +5,7 @@
 package resiliency
 
 import (
-	"github.com/lemon4ksan/foundation/net/http/etag"
+	"github.com/lemon4ksan/mach/proto/http/etag"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"

@@ -5,7 +5,7 @@
 package health
 
 import (
-	"github.com/lemon4ksan/foundation/sync/limiter"
+	"github.com/lemon4ksan/sein/sync/limiter"
 )
 
 // VegasEngine is a pure control-theory TCP Vegas adaptive concurrency regulator.

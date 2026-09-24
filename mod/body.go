@@ -12,7 +12,7 @@ import (
 	"net/url"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"

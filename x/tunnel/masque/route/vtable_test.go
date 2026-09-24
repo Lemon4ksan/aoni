@@ -7,7 +7,7 @@ package route_test
 import (
 	"testing"
 
-	"github.com/lemon4ksan/foundation/net/packet/icmp"
+	"github.com/lemon4ksan/mach/proto/packet/icmp"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 

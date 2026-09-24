@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lemon4ksan/aoni/netutil/dns"
+	"github.com/lemon4ksan/aoni/dns"
 )
 
 type mockStaleResolver struct {

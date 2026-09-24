@@ -13,8 +13,8 @@ import (
 	"net/url"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	auth "github.com/lemon4ksan/foundation/net/http/auth"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	auth "github.com/lemon4ksan/mach/proto/http/auth"
+	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 

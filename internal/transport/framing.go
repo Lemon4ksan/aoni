@@ -5,7 +5,7 @@
 package transport
 
 import (
-	fgrpcweb "github.com/lemon4ksan/foundation/net/grpcweb"
+	fgrpcweb "github.com/lemon4ksan/mach/proto/grpcweb"
 )
 
 var (

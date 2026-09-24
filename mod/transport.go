@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/http/nik"
+	"github.com/lemon4ksan/aoni/nik"
 
 	"github.com/lemon4ksan/aoni/pipeline"
 )

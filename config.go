@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/fragment"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/aoni/fragment"
+	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"

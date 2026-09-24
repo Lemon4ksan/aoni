@@ -14,10 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/dns"
-	"github.com/lemon4ksan/foundation/net/dns/svcb"
-	"github.com/lemon4ksan/foundation/net/dns/wire"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/mach/proto/dns/svcb"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
+	"github.com/lemon4ksan/mach/proto/http/header"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 
 	"github.com/lemon4ksan/aoni"
@@ -129,7 +128,7 @@ func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 	wg.Wait()
 
 	if err4 != nil && err6 != nil {
-		return nil, dns.WrapDNSError(host, "DoH", r.Endpoint, err4)
+		return nil, WrapDNSError(host, "DoH", r.Endpoint, err4)
 	}
 
 	records := make([]wire.DNSRecord, 0, len(v4Records)+len(v6Records))
@@ -145,7 +144,7 @@ func (r *DoHResolver) LookupHTTPS(ctx context.Context, host string, port uint16)
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeHTTPS)
 	if err != nil {
-		return nil, dns.WrapDNSError(host, "DoH", r.Endpoint, err)
+		return nil, WrapDNSError(host, "DoH", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeHTTPS)
@@ -157,7 +156,7 @@ func (r *DoHResolver) LookupSVCB(ctx context.Context, scheme, service string, po
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeSVCB)
 	if err != nil {
-		return nil, dns.WrapDNSError(service, "DoH", r.Endpoint, err)
+		return nil, WrapDNSError(service, "DoH", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeSVCB)

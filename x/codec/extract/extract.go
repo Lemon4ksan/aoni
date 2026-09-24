@@ -6,7 +6,7 @@ package extract
 
 import (
 	"github.com/lemon4ksan/foundation/generic"
-	fextract "github.com/lemon4ksan/foundation/text/extract"
+	fextract "github.com/lemon4ksan/aoni/extract"
 )
 
 var (

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/mach/proto/http/header"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/x/tunnel/masque"

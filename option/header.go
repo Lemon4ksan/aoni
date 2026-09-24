@@ -12,9 +12,9 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/codec/json"
-	auth "github.com/lemon4ksan/foundation/net/http/auth"
-	"github.com/lemon4ksan/foundation/net/http/header"
-	"github.com/lemon4ksan/foundation/net/http/priority"
+	auth "github.com/lemon4ksan/mach/proto/http/auth"
+	"github.com/lemon4ksan/mach/proto/http/header"
+	"github.com/lemon4ksan/mach/proto/http/priority"
 	"github.com/lemon4ksan/foundation/types/secret"
 
 	"github.com/lemon4ksan/aoni"

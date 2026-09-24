@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	"github.com/lemon4ksan/foundation/net/http/header"
+	"github.com/lemon4ksan/mach/proto/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )

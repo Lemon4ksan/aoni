@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/psl"
+	"github.com/lemon4ksan/aoni/psl"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 

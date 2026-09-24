@@ -15,9 +15,8 @@ import (
 	"sync"
 	"time"
 
-	fdns "github.com/lemon4ksan/foundation/net/dns"
-	"github.com/lemon4ksan/foundation/net/dns/svcb"
-	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/mach/proto/dns/svcb"
+	"github.com/lemon4ksan/mach/proto/dns/wire"
 	"github.com/lemon4ksan/foundation/net/quic"
 )
 
@@ -65,7 +64,7 @@ func NewDoQResolver(endpoint, host string) *DoQResolver {
 func (r *DoQResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	records, err := r.LookupDNSRecords(ctx, host)
 	if err != nil {
-		return nil, fdns.WrapDNSError(host, "DoQ", r.Endpoint, err)
+		return nil, WrapDNSError(host, "DoQ", r.Endpoint, err)
 	}
 
 	addrs := make([]net.IPAddr, len(records))
@@ -116,7 +115,7 @@ func (r *DoQResolver) LookupHTTPS(ctx context.Context, host string, port uint16)
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeHTTPS)
 	if err != nil {
-		return nil, fdns.WrapDNSError(host, "DoQ", r.Endpoint, err)
+		return nil, WrapDNSError(host, "DoQ", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeHTTPS)
@@ -128,7 +127,7 @@ func (r *DoQResolver) LookupSVCB(ctx context.Context, scheme, service string, po
 
 	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeSVCB)
 	if err != nil {
-		return nil, fdns.WrapDNSError(service, "DoQ", r.Endpoint, err)
+		return nil, WrapDNSError(service, "DoQ", r.Endpoint, err)
 	}
 
 	return svcb.ParseResponseRecords(wireBytes, svcb.TypeSVCB)

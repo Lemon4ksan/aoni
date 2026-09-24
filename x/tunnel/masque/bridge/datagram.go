@@ -12,7 +12,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/lemon4ksan/foundation/net/packet/tcp"
+	"github.com/lemon4ksan/mach/proto/packet/tcp"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni/x/tunnel/masque"
