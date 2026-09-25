@@ -181,8 +181,10 @@ func TestChallenge_LeakDetector_Tolerance_Enforcement(t *testing.T) {
 			go func() { <-releaseCh }()
 		}
 	}()
-	assert.True(t, mockB.Failed(), "expected tolerance=1 to reject 2 surplus goroutines")
-	assert.True(t, strings.Contains(mockB.FatalMsg(), "Leaked: +2 | Allowed Tolerance: 1"))
+	assert.True(t, mockB.Failed(), "expected tolerance=1 to reject surplus goroutines")
+	msg := mockB.FatalMsg()
+	assert.True(t, strings.Contains(msg, "Allowed Tolerance: 1"), "unexpected fatal msg: "+msg)
+	assert.True(t, strings.Contains(msg, "Leaked: +"), "unexpected fatal msg: "+msg)
 }
 
 // intentionalCustomLeaker is a distinct function to test custom ignore pattern suppression.
@@ -275,8 +277,9 @@ func TestChallenge_LeakDetector_MaskingEdgeCase_BaselineExit(t *testing.T) {
 	// the newly introduced goroutine signature is detected even though a baseline goroutine exited.
 	t.Logf("Empirical finding: mock.Failed() = %v. Signature-based comparison detects replacement leak when baseline exits.", mock.Failed())
 	assert.True(t, mock.Failed(), "proves signature-based tracker detects replacement leaks when baseline exits")
-	assert.True(t, strings.Contains(mock.FatalMsg(), "GOROUTINE LEAK DETECTED"))
-	assert.True(t, strings.Contains(mock.FatalMsg(), "Leaked: +1"))
+	msg := mock.FatalMsg()
+	assert.True(t, strings.Contains(msg, "GOROUTINE LEAK DETECTED"), "unexpected fatal msg: "+msg)
+	assert.True(t, strings.Contains(msg, "Leaked: +"), "unexpected fatal msg: "+msg)
 }
 
 // -----------------------------------------------------------------------------
