@@ -220,7 +220,13 @@ func (s *stdReqAdapter) Path() string {
 
 func (s *stdReqAdapter) SetPath(p string) {
 	if s.req.URL != nil {
-		s.req.URL.Path = p
+		if unescaped, err := url.PathUnescape(p); err == nil && unescaped != p {
+			s.req.URL.Path = unescaped
+			s.req.URL.RawPath = p
+		} else {
+			s.req.URL.Path = p
+			s.req.URL.RawPath = ""
+		}
 	}
 }
 

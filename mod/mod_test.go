@@ -119,6 +119,18 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		assert.Equal(t, "/v1/item/42", req.Path())
 	})
 
+	t.Run("with_var_special_characters_no_double_escape", func(t *testing.T) {
+		t.Parallel()
+
+		stdReq, _ := http.NewRequestWithContext(context.Background(), "GET", "https://example.com/api/item/{sku}", nil)
+		mod.WithVar("sku", "5021;6").ApplyStd(stdReq)
+
+		assert.Equal(t, "/api/item/5021;6", stdReq.URL.Path)
+		assert.Equal(t, "/api/item/5021%3B6", stdReq.URL.RawPath)
+		assert.Equal(t, "/api/item/5021%3B6", stdReq.URL.EscapedPath())
+		assert.NotContains(t, stdReq.URL.EscapedPath(), "%25")
+	})
+
 	t.Run("with_vars_multiple_pairs", func(t *testing.T) {
 		t.Parallel()
 

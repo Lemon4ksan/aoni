@@ -178,8 +178,13 @@ func (s *Request) SetPath(path string) {
 		return
 	}
 
-	s.req.URL.Path = path
-	s.req.URL.RawPath = ""
+	if unescaped, err := url.PathUnescape(path); err == nil && unescaped != path {
+		s.req.URL.Path = unescaped
+		s.req.URL.RawPath = path
+	} else {
+		s.req.URL.Path = path
+		s.req.URL.RawPath = ""
+	}
 }
 
 // RawQuery returns the unescaped raw URL query string.
