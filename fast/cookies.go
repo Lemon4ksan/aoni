@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/lemon4ksan/foundation/net/netutil"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	mach "github.com/lemon4ksan/mach/proto/http"
@@ -180,7 +179,7 @@ func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *zerocopy.URI)
 
 // isSameDomainOrSubdomain reports whether h1 and h2 belong to the same domain or subdomain hierarchy.
 func isSameDomainOrSubdomain(h1, h2 string) bool {
-	return urlkit.IsSameDomainOrSubdomain(netutil.CleanHost(h1), netutil.CleanHost(h2))
+	return urlkit.IsSameDomainOrSubdomain(urlkit.CleanHost(h1), urlkit.CleanHost(h2))
 }
 
 func uriToURL(uri *zerocopy.URI) *url.URL {

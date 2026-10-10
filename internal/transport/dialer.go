@@ -16,7 +16,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/ip"
-	"github.com/lemon4ksan/foundation/net/netutil"
+	"github.com/lemon4ksan/foundation/net/urlkit"
 
 	"github.com/lemon4ksan/aoni/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -228,19 +228,19 @@ func resolveServerName(customName, host string) string {
 func splitHostPortDefault(addr string) (host, port string) {
 	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
-		return netutil.CleanHost(addr), "80"
+		return urlkit.CleanHost(addr), "80"
 	}
 
-	return netutil.CleanHost(h), p
+	return urlkit.CleanHost(h), p
 }
 
 func splitHostPortTLS(addr string) (host, port string) {
 	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
-		return netutil.CleanHost(addr), "443"
+		return urlkit.CleanHost(addr), "443"
 	}
 
-	return netutil.CleanHost(h), p
+	return urlkit.CleanHost(h), p
 }
 
 func applyRewriteRules(host, port string, rules map[string]string) (string, string) {
