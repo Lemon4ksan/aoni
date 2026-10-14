@@ -20,11 +20,10 @@ This document outlines the architecture, coding standards, build/test commands, 
   - **Happy Eyeballs v3**: Protocol racing across H3/H2/H1.
   - **Auto-Recovery**: Automatic connection re-routing on HTTP 421 (Misdirected Request), HTTP 408 (Request Timeout), HTTP 425 (Too Early / 0-RTT rejection).
   - **Dynamic Backoff**: Cooldown mechanisms for broken `Alt-Svc` endpoints.
-- **TLS Evasion & Stealth Fingerprinting**:
-  - Full browser impersonation (Chrome, Firefox, Safari).
-  - TLS 1.3 Encrypted Client Hello (ECH / RFC 9460 via DoH/DoQ).
-  - Pure-Go JA3/JA4/JA4H fingerprint calculation and emulation.
-  - TCP/IP p0f stack spoofing and HPACK framing control.
+- **TLS Evasion Primitives** (browser impersonation itself lives in the satellite repo `aoni-browser`):
+  - TLS 1.3 Encrypted Client Hello (ECH / RFC 9460 via DoH/DoQ) and GREASE (RFC 8701).
+  - Pure-Go JA4/JA4H fingerprint calculation.
+  - L4 TCP payload fragmentation (`fragment`) and extension hooks (`option.WithConnFilter`, `option.WithSocketController`, `Config.Ext`) used by `aoni-browser` for uTLS, HTTP/2 framing, p0f spoofing and browser profiles.
 - **Generics-First Ergonomics & Codecs**:
   - Type-safe single-line calls via `client.GetTo[T]`, `client.PostTo[T]`, `client.Get`, `client.R()`, and `aoni.GetTo[T]`.
   - Native decoders for JSON, XML, Protobuf, and gRPC-Web (5-byte framing & trailer validation).
@@ -36,25 +35,30 @@ This document outlines the architecture, coding standards, build/test commands, 
 ```text
 aoni/
 ├── client.go, config.go, dial.go ...  // Core standard aoni client (net/http compatible)
-├── option/                            // Functional client options (option.WithBaseURL, option.WithChrome...)
+├── option/                            // Functional client options (option.WithBaseURL, option.WithTimeout...)
 ├── mod/                               // Per-request modifiers (mod.WithVar, mod.WithHeader, mod.WithQuery...)
 ├── fast/                              // Ultra-fast client engine built on fasthttp
-├── cookie/                            // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
+├── cookie/                            // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting, PublicSuffixList interface
 ├── dns/                               // DNS resolvers (DoH, DoQ, DoT, stale cache, bootstrap)
-├── tls/                               // TLS evasion, JA4, ECH, GREASE
-├── fingerprint/                       // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
+├── tls/                               // ECH, GREASE, JA4/JA4H computation
+├── fragment/                          // TCP payload write chunking (L4 DPI evasion)
+├── nik/                               // Network Isolation Keys (context DTOs for cache/cookie partitioning)
+├── privacypass/                       // Privacy Pass (RFC 9576/9577/9578)
 ├── proxy/                             // Proxy rotators, PAC engine, sticky sessions, adaptive timeout
 ├── netutil/                           // Multi-NIC binding, io_uring, network probes, compression dictionaries
 ├── codec/                             // Response decoders (JSON, Proto, gRPC-Web, XML) & url.Values encoders
 ├── realtime/                          // WebSockets, SSE & NDJSON streams
-├── resiliency/                        // Response caching, WAF challenge solvers, Circuit Breakers, Load Balancers
-├── telemetry/                         // HAR generators, EWMA latency trackers, embedded web inspector
+├── resiliency/                        // Response caching, Retries, Request coalescing, Backoff, Load Balancers
+├── telemetry/                         // HAR generators, EWMA latency trackers, traffic inspector hook
 ├── tunnel/                            // MASQUE CONNECT-UDP/IP tunnels and TUN adapter bindings
-├── cmd/                               // CLI utilities (coverage analyzer, OpenAPI code generator)
 ├── docs/                              // Technical architecture docs (NETWORK_STACK.md, VOODOO.md, COOKBOOK.md)
-├── examples/                          // Runnable usage & evasion examples
-└── scripts/                           // TLS spec comparison & browser version update scripts
-```
+├── examples/                          // Runnable RFC-level usage examples
+└── scripts/                           // Benchmark & fuzzing scripts
+```n
+> **Satellite repositories** (outside the frozen core):
+> - `aoni-browser` — browser impersonation: uTLS profiles, HTTP/2 framing, p0f/`sysnet`, `psl` (Public Suffix List), `power` (OS sleep/wake watcher), Playwright examples.
+> - `aoni-contrib` — third-party integrations and WAF recipes (e.g. `waf/anubis`).
+> - `ao` — the `curl` fork that also hosts the `libaoni` C bridge (`lib/libaoni`, `include/aoni.h`).
 
 ## 3. Core Architectural Principles & Technical Constraints
 
@@ -104,12 +108,10 @@ make format
 | :--- | :--- |
 | `make test` | Run fast unit tests across all library packages |
 | `make race` | Run full unit test suite with race detector (`-race -timeout 60s`) |
-| `make cover` | Calculate exact core library coverage report (`cmd/coverage`) |
+| `make cover` | Calculate exact core library coverage report (`vortex cover`) |
 | `make cover-html` | Generate coverage report and open interactive HTML report in browser |
 | `make lint` | Execute `golangci-lint` code quality checks |
 | `make format` | Auto-format Go code (`go fmt`, `addlicense`, `golangci-lint --fix`) |
-| `make check-tls-spec` | Validate local TLS ClientHello profiles against `utls` specifications |
-| `make update-browsers-apply` | Apply browser version and fingerprint updates |
 
 For benchmarking:
 ```bash

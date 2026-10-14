@@ -307,7 +307,7 @@ client := aoni.NewClient(nil,
 | Subsystem / Operation | Go Standard / `x/...` | `aoni` | Latency Delta | Memory (`B / op`) |
 | :--- | :---: | :---: | :---: | :---: |
 | **URL Parsing (`net/url.Parse`)** | 295.1 ns | **85.2 ns** (`net/url`) | **3.5x Faster** | L1 CRC32 Cache |
-| **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`net/psl`) | **1.9x Faster** | **0 B / 0 allocs** |
+| **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`aoni-browser/psl`) | **1.9x Faster** | **0 B / 0 allocs** |
 | **QPACK RFC 9204 Block Codec** | 2,500+ ns (`quic-go/qpack`) | **461.3 ns** (`internal/fast/h3engine`) | **5.4x Faster** | **0 B / 0 allocs** |
 | **HPACK Field Decoder** | 391.9 ns (`x/net/http2/hpack`) | **329.2 ns** (`internal/fast/h2engine`) | **1.19x Faster** | **0 B / 0 allocs** |
 | **HPACK Huffman Encoder** | 18.5 ns | **13.99 ns** (`internal/fast/h2engine`) | **1.32x Faster** | **0 B / 0 allocs** |
