@@ -9,8 +9,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
-	"github.com/lemon4ksan/mach/proto/packet/icmp"
 
+	"github.com/lemon4ksan/aoni/internal/masque"
 	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 )
 
@@ -67,7 +67,7 @@ func TestIPProtocolVTable(t *testing.T) {
 
 	// Truncated packet error
 	err = vt.DispatchIPPacket([]byte{0x45})
-	assert.ErrorIs(t, err, icmp.ErrInvalidIPHeader)
+	assert.ErrorIs(t, err, masque.ErrInvalidIPHeader)
 
 	// Unhandled protocol
 	ipv4RAW := make([]byte, 20)

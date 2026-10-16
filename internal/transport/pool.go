@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/quic"
+	"github.com/lemon4ksan/mach/net/quic"
 	"github.com/lemon4ksan/mach/client/h1"
 	"github.com/lemon4ksan/mach/client/h2"
 	"github.com/lemon4ksan/mach/client/h3"

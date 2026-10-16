@@ -17,7 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-var responseStorage = pool.NewPerPStorage(func() *Response {
+var responseStorage = pool.NewPerCorePool(func() *Response {
 	return &Response{}
 })
 

@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/types/secret"
-	auth "github.com/lemon4ksan/mach/proto/http/auth"
-	"github.com/lemon4ksan/mach/proto/http/header"
-	"github.com/lemon4ksan/mach/proto/http/priority"
+	auth "github.com/lemon4ksan/mach/proto/semantic/auth"
+	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/priority"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"

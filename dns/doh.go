@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/randkit"
-	"github.com/lemon4ksan/mach/proto/dns/svcb"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	"github.com/lemon4ksan/foundation/net/dns/svcb"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"

@@ -13,7 +13,7 @@ import (
 	"strconv"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )

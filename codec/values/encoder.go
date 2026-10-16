@@ -5,12 +5,14 @@
 package values
 
 import (
+	"encoding"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -169,8 +171,8 @@ func serializeValue[S valueSink](sink S, f *mapper.FieldSchema, fieldValue refle
 		return nil
 	}
 
-	if refkit.ValueHasTextRepresentation(fieldValue) {
-		str, err := refkit.ValueToString(fieldValue)
+	if valueHasTextRepresentation(fieldValue) {
+		str, err := valueToString(fieldValue)
 		if err != nil {
 			return &ValueError{Field: f.Name, Err: err}
 		}
@@ -195,7 +197,7 @@ func serializeValue[S valueSink](sink S, f *mapper.FieldSchema, fieldValue refle
 		return encodeSlice(sink, f, fieldValue)
 	}
 
-	str, err := refkit.ValueToString(fieldValue)
+	str, err := valueToString(fieldValue)
 	if err != nil {
 		return &ValueError{Field: f.Name, Err: ErrUnsupportedType}
 	}
@@ -212,12 +214,12 @@ func encodeSlice[S valueSink](sink S, f *mapper.FieldSchema, fieldValue reflect.
 	}
 
 	for j := range fieldValue.Len() {
-		val := refkit.DerefPointer(fieldValue.Index(j))
+		val := refkit.DerefValue(fieldValue.Index(j))
 		if !val.IsValid() {
 			continue
 		}
 
-		strValue, err := refkit.ValueToString(val)
+		strValue, err := valueToString(val)
 		if err != nil {
 			return &ValueError{Field: f.Name, Index: j, Err: ErrUnsupportedType}
 		}
@@ -240,12 +242,12 @@ func encodeDelimitedSlice[S valueSink](sink S, f *mapper.FieldSchema, fieldValue
 
 	var sb strings.Builder
 	for j := range fieldValue.Len() {
-		val := refkit.DerefPointer(fieldValue.Index(j))
+		val := refkit.DerefValue(fieldValue.Index(j))
 		if !val.IsValid() {
 			continue
 		}
 
-		str, err := refkit.ValueToString(val)
+		str, err := valueToString(val)
 		if err != nil {
 			return &ValueError{Field: f.Name, Index: j, Err: ErrUnsupportedType}
 		}
@@ -266,7 +268,7 @@ func encodeDelimitedSlice[S valueSink](sink S, f *mapper.FieldSchema, fieldValue
 func encodeMap[S valueSink](sink S, val reflect.Value) error {
 	iter := val.MapRange()
 	for iter.Next() {
-		keyStr, err := refkit.ValueToString(iter.Key())
+		keyStr, err := valueToString(iter.Key())
 		if err != nil {
 			return &ValueError{Type: "map", Err: ErrUnsupportedType}
 		}
@@ -278,7 +280,7 @@ func encodeMap[S valueSink](sink S, val reflect.Value) error {
 
 		if elemVal.Kind() == reflect.Slice || elemVal.Kind() == reflect.Array {
 			for j := range elemVal.Len() {
-				valStr, err := refkit.ValueToString(elemVal.Index(j))
+				valStr, err := valueToString(elemVal.Index(j))
 				if err != nil {
 					return &ValueError{Field: keyStr, Index: j, Err: ErrUnsupportedType}
 				}
@@ -286,7 +288,7 @@ func encodeMap[S valueSink](sink S, val reflect.Value) error {
 				sink.Add(keyStr, valStr)
 			}
 		} else {
-			valStr, err := refkit.ValueToString(elemVal)
+			valStr, err := valueToString(elemVal)
 			if err != nil {
 				return &ValueError{Field: keyStr, Err: ErrUnsupportedType}
 			}
@@ -342,4 +344,112 @@ func protoToValues(pm proto.Message) (url.Values, error) {
 	}
 
 	return res, nil
+}
+
+func valueHasTextRepresentation(v reflect.Value) bool {
+	if !v.IsValid() || !v.CanInterface() {
+		return false
+	}
+
+	val := v.Interface()
+	_, hasText := val.(encoding.TextMarshaler)
+	_, hasStringer := val.(fmt.Stringer)
+
+	return hasText || hasStringer
+}
+
+func valueToString(v reflect.Value) (string, error) {
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "", nil
+		}
+
+		v = v.Elem()
+	}
+
+	if !v.IsValid() {
+		return "", nil
+	}
+
+	switch v.Kind() {
+	case reflect.String:
+		return v.String(), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10), nil
+	case reflect.Bool:
+		return strconv.FormatBool(v.Bool()), nil
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
+	}
+
+	if v.CanInterface() {
+		val := v.Interface()
+
+		if tm, ok := val.(encoding.TextMarshaler); ok {
+			b, err := tm.MarshalText()
+			if err != nil {
+				return "", err
+			}
+
+			return bytesconv.B2S(b), nil
+		}
+
+		if s, ok := val.(fmt.Stringer); ok {
+			return s.String(), nil
+		}
+	}
+
+	return "", ErrUnsupportedType
+}
+
+// ToString converts v into its string representation.
+func ToString(v any) (string, error) {
+	if v == nil {
+		return "", nil
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val, nil
+	case int:
+		return strconv.FormatInt(int64(val), 10), nil
+	case int64:
+		return strconv.FormatInt(val, 10), nil
+	case int32:
+		return strconv.FormatInt(int64(val), 10), nil
+	case int16:
+		return strconv.FormatInt(int64(val), 10), nil
+	case int8:
+		return strconv.FormatInt(int64(val), 10), nil
+	case uint:
+		return strconv.FormatUint(uint64(val), 10), nil
+	case uint64:
+		return strconv.FormatUint(val, 10), nil
+	case uint32:
+		return strconv.FormatUint(uint64(val), 10), nil
+	case uint16:
+		return strconv.FormatUint(uint64(val), 10), nil
+	case uint8:
+		return strconv.FormatUint(uint64(val), 10), nil
+	case bool:
+		return strconv.FormatBool(val), nil
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64), nil
+	case float32:
+		return strconv.FormatFloat(float64(val), 'f', -1, 32), nil
+	case []byte:
+		return bytesconv.B2S(val), nil
+	case encoding.TextMarshaler:
+		b, err := val.MarshalText()
+		if err != nil {
+			return "", err
+		}
+		return bytesconv.B2S(b), nil
+	case fmt.Stringer:
+		return val.String(), nil
+	default:
+		return valueToString(reflect.ValueOf(v))
+	}
 }

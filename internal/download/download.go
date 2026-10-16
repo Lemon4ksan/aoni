@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	"github.com/lemon4ksan/mach/proto/http/contentdisposition"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	"github.com/lemon4ksan/mach/proto/semantic/contentdisposition"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )

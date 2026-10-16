@@ -15,7 +15,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/urlkit"
 	mach "github.com/lemon4ksan/mach/proto/http"
 
 	"github.com/lemon4ksan/aoni"
@@ -271,12 +270,7 @@ func (c *Client) resolveURL(path string) (string, error) {
 	}
 
 	if c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Scheme != "" {
-		u, err := urlkit.Resolve(c.cfg.Defaults.BaseURL, path)
-		if err != nil {
-			return "", &aoni.Error{Op: "resolve_url", Err: err}
-		}
-
-		return u.String(), nil
+		return c.cfg.Defaults.BaseURL.JoinPath(path).String(), nil
 	}
 
 	return path, nil

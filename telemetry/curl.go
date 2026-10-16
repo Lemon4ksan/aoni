@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // CurlOptions controls header redaction and secrets masking for cURL command generation.

@@ -22,12 +22,12 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/tests/testutil"
-	"github.com/lemon4ksan/mach/proto/headkit"
-	"github.com/lemon4ksan/mach/qpack"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	mach "github.com/lemon4ksan/mach/proto/http"
+	"github.com/lemon4ksan/mach/proto/codec/qpack"
 )
 
 // -----------------------------------------------------------------------------

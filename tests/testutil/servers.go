@@ -30,7 +30,7 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/lemon4ksan/foundation/net/quic"
+	"github.com/lemon4ksan/mach/net/quic"
 	h3client "github.com/lemon4ksan/mach/client/h3"
 	machh3server "github.com/lemon4ksan/mach/server/h3"
 )

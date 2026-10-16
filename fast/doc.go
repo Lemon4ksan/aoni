@@ -15,7 +15,7 @@
 // synthesis), the entire public API is completely clean and high-level:
 //
 //	client := fast.NewClient(
-//	    option.WithChrome(),
+//	    browser.WithChrome(), // github.com/lemon4ksan/aoni-browser/option
 //	    option.WithTimeout(5 * time.Second),
 //	)
 //	defer client.Close()

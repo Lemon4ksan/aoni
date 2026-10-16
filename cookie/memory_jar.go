@@ -12,27 +12,40 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-
-	"github.com/lemon4ksan/aoni/psl"
 )
 
 // MemoryJar is a fully RFC 6265 and RFC 6265bis (CHIPS) compliant in-memory cookie jar.
 // It implements the context-aware [cookie.core.CookieJar] interface to natively support Partitioned cookies.
 type MemoryJar struct {
-	cookies generic.Safe[map[cookieKey]Cookie]
+	cookies generic.Guarded[map[cookieKey]Cookie]
+	psl     generic.Guarded[PublicSuffixList]
 }
 
 // NewMemoryJar creates a new [MemoryJar].
-func NewMemoryJar() *MemoryJar {
-	return &MemoryJar{
-		cookies: *generic.NewSafe(make(map[cookieKey]Cookie)),
+//
+// Pass [WithPublicSuffixList] to enable RFC 6265 §5.3 step 5 public suffix rejection.
+func NewMemoryJar(opts ...MemoryJarOption) *MemoryJar {
+	mj := &MemoryJar{
+		cookies: *generic.NewGuarded(make(map[cookieKey]Cookie)),
 	}
+
+	for _, opt := range opts {
+		opt(mj)
+	}
+
+	return mj
+}
+
+// SetPublicSuffixList replaces the [PublicSuffixList] used by the jar. A nil list disables suffix checks.
+func (mj *MemoryJar) SetPublicSuffixList(list PublicSuffixList) {
+	mj.psl.Set(list)
 }
 
 // SetCookies handles the receipt of the cookies in a reply for the given URL.
 func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http.Cookie) {
 	now := clock.CoarseTime()
 	partitionKey := GetPartitionKey(ctx)
+	suffixList := mj.psl.Get()
 
 	mj.cookies.Mutate(func(m *map[cookieKey]Cookie) {
 		for _, c := range cookies {
@@ -45,7 +58,7 @@ func (mj *MemoryJar) SetCookies(ctx context.Context, u *url.URL, cookies []*http
 
 			// If cookie explicitly specified a domain, check public suffix
 			if c.Domain != "" {
-				if suffix := psl.List.PublicSuffix(domain); suffix == domain {
+				if suffixList != nil && suffixList.PublicSuffix(domain) == domain {
 					continue // RFC 6265 §5.3 step 5
 				}
 

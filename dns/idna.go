@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/lemon4ksan/mach/proto/dns/wire"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"golang.org/x/net/idna"
 )
 

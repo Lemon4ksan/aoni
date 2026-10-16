@@ -16,7 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec"
@@ -41,12 +41,12 @@ var (
 )
 
 type requestPool struct {
-	storage *pool.PerPStorage[*RequestBuilder]
+	storage *pool.PerCorePool[*RequestBuilder]
 }
 
 func newRequestPool() *requestPool {
 	return &requestPool{
-		storage: pool.NewPerPStorage(func() *RequestBuilder {
+		storage: pool.NewPerCorePool(func() *RequestBuilder {
 			return &RequestBuilder{
 				appliedMods:      make([]RequestModifier, 0, 8),
 				expectedStatuses: make([]int, 0, 4),
@@ -85,7 +85,7 @@ func acquireRequestBuilder(doer HTTPRequester) *RequestBuilder {
 
 // RequestBuilder provides a chainable API for configuring and executing HTTP requests.
 //
-// DANGER: RequestBuilder instances are acquired from a thread-local object pool ([pool.PerPStorage]).
+// DANGER: RequestBuilder instances are acquired from a thread-local object pool ([pool.PerCorePool]).
 // They are NOT safe for concurrent use across multiple goroutines.
 // The instance is automatically recycled upon execution (e.g. Execute) or explicit Release.
 // Do not retain or mutate references to a RequestBuilder after it has been executed or released.

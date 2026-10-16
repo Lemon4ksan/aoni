@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lemon4ksan/mach/hpack"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	"github.com/lemon4ksan/mach/proto/codec/hpack"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // EncodeConnectHeaders encodes HTTP/2 Extended CONNECT pseudo-headers and request headers into HPACK block bytes.

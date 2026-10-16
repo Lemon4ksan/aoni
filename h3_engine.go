@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/quic"
+	"github.com/lemon4ksan/mach/net/quic"
 	"github.com/lemon4ksan/mach/client/h3"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
 	mach "github.com/lemon4ksan/mach/proto/http"

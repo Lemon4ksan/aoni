@@ -21,14 +21,14 @@ import (
 	"github.com/lemon4ksan/aoni"
 )
 
-var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
+var requestAdapterStorage = pool.NewPerCorePool(func() *Request {
 	return &Request{}
 })
 
 // Request adapts a high-performance [*mach.Request] to the unified [aoni.Request] contract.
 //
 // Thread Safety & Memory Lifetime Invariants:
-// Request instances are recycled via sharded [pool.PerPStorage] for zero-lock execution.
+// Request instances are recycled via sharded [pool.PerCorePool] for zero-lock execution.
 // Callers acquiring requests via [NewRequest] or [Client.AcquireRequest] MUST release them
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {

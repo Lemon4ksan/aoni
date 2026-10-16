@@ -14,7 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/lemon4ksan/foundation/borrow"
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/pool"
@@ -26,10 +26,10 @@ import (
 )
 
 var (
-	responseAdapterStorage = pool.NewPerPStorage(func() *Response {
+	responseAdapterStorage = pool.NewPerCorePool(func() *Response {
 		return &Response{}
 	})
-	pooledResponseStorage = pool.NewPerPStorage(func() *PooledResponse {
+	pooledResponseStorage = pool.NewPerCorePool(func() *PooledResponse {
 		return &PooledResponse{}
 	})
 )

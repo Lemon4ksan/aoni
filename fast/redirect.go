@@ -12,8 +12,8 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	mach "github.com/lemon4ksan/mach/proto/http"
-	"github.com/lemon4ksan/mach/proto/http/header"
-	"github.com/lemon4ksan/mach/proto/http/zerocopy"
+	header "github.com/lemon4ksan/mach/proto/headkit"
+	uri "github.com/lemon4ksan/mach/proto/semantic/uri"
 )
 
 func (c *Client) executeWithRedirects(
@@ -35,11 +35,11 @@ func (c *Client) executeWithRedirects(
 		return trailers, err, autoReleased
 	}
 
-	currentURI := zerocopy.AcquireURI()
-	defer zerocopy.ReleaseURI(currentURI)
+	currentURI := uri.AcquireURI()
+	defer uri.ReleaseURI(currentURI)
 
-	nextURI := zerocopy.AcquireURI()
-	defer zerocopy.ReleaseURI(nextURI)
+	nextURI := uri.AcquireURI()
+	defer uri.ReleaseURI(nextURI)
 
 	var redirectsFollowed int
 
@@ -112,11 +112,11 @@ func isRedirectStatus(code int) bool {
 		code == http.StatusPermanentRedirect
 }
 
-func isSameHost(u1, u2 *zerocopy.URI) bool {
+func isSameHost(u1, u2 *uri.URI) bool {
 	return bytes.EqualFold(u1.Host(), u2.Host())
 }
 
-func isHTTPSDowngrade(u1, u2 *zerocopy.URI) bool {
+func isHTTPSDowngrade(u1, u2 *uri.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 

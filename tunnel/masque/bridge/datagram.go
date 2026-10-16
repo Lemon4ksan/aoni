@@ -13,8 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/lemon4ksan/foundation/silicon/offheap"
-	"github.com/lemon4ksan/mach/proto/packet/tcp"
-
+	imasque "github.com/lemon4ksan/aoni/internal/masque"
 	"github.com/lemon4ksan/aoni/tunnel/masque"
 	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
@@ -69,7 +68,7 @@ func forwardAdapterToSession(
 	// Register fast-path handler for TCP (6) to enforce MSS Clamping
 	vtable.Register(6, func(packet []byte) error {
 		if opts.MaxMTU > 0 {
-			tcp.ClampMSSInPlace(packet, opts.MaxMTU)
+			imasque.ClampMSSInPlace(packet, opts.MaxMTU)
 		}
 
 		return nil

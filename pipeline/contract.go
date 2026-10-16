@@ -229,5 +229,5 @@ type BrowserProfile struct {
 
 // RefererState maintains the state for automatic Referer header injection.
 type RefererState struct {
-	LastURL generic.Safe[string]
+	LastURL generic.Guarded[string]
 }

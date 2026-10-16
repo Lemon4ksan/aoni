@@ -10,32 +10,32 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/foundation/borrow"
-	"github.com/lemon4ksan/foundation/codec/compress/flate"
+	"github.com/lemon4ksan/seal/codec/compress/flate"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 var (
 	wsTail = [9]byte{0x00, 0x00, 0xff, 0xff, 0x01, 0x00, 0x00, 0xff, 0xff}
 
-	flateReaderStorage = pool.NewPerPStorage(func() flate.Resetter {
+	flateReaderStorage = pool.NewPerCorePool(func() flate.Resetter {
 		return flate.NewReader(nil).(flate.Resetter)
 	})
 
-	flateWriterStorage = pool.NewPerPStorage(func() *flate.Writer {
+	flateWriterStorage = pool.NewPerCorePool(func() *flate.Writer {
 		w, _ := flate.NewWriter(nil, flate.DefaultCompression)
 		return w
 	})
 
-	compressBufferStorage = pool.NewPerPStorage(func() *bytes.Buffer {
+	compressBufferStorage = pool.NewPerCorePool(func() *bytes.Buffer {
 		return bytes.NewBuffer(make([]byte, 0, 4096))
 	})
 
-	decompressBufferStorage = pool.NewPerPStorage(func() *[]byte {
+	decompressBufferStorage = pool.NewPerCorePool(func() *[]byte {
 		buf := make([]byte, 0, 4096)
 		return &buf
 	})
 
-	twoSliceReaderStorage = pool.NewPerPStorage(func() *twoSliceReader {
+	twoSliceReaderStorage = pool.NewPerCorePool(func() *twoSliceReader {
 		return new(twoSliceReader)
 	})
 )

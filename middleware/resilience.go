@@ -43,8 +43,8 @@ type CircuitBreakerConfig struct {
 // CircuitBreaker manages host-isolated circuit breakers using thread-safe key locks.
 type CircuitBreaker struct {
 	cfg      CircuitBreakerConfig
-	breakers generic.ConcurrentMap[string, *breaker.CircuitBreaker[any]]
-	km       keylock.KeyMutex[string]
+	breakers generic.ConcurrentMap[string, *breaker.Breaker[any]]
+	km       keylock.Mutex[string]
 }
 
 // NewCircuitBreaker initializes a new host-isolated circuit breaker registry.
@@ -70,8 +70,8 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 	}
 }
 
-// getBreaker retrieves or lazily instantiates a host-isolated [breaker.CircuitBreaker].
-func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
+// getBreaker retrieves or lazily instantiates a host-isolated [breaker.Breaker].
+func (cb *CircuitBreaker) getBreaker(host string) *breaker.Breaker[any] {
 	if val, ok := cb.breakers.Load(host); ok {
 		return val
 	}
@@ -137,7 +137,7 @@ func CircuitBreak(cb *CircuitBreaker, isFailure func(aoni.Response, error) bool)
 				return nil, nil
 			})
 			if execErr != nil {
-				if errors.Is(execErr, breaker.ErrCircuitOpen) ||
+				if errors.Is(execErr, breaker.ErrOpen) ||
 					strings.Contains(execErr.Error(), "circuit breaker is open") {
 					return resp, fmt.Errorf("aoni: circuit breaker open for host %s", host)
 				}

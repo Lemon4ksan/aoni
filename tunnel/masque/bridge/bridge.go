@@ -13,9 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/lemon4ksan/foundation/silicon/offheap"
-	"github.com/lemon4ksan/mach/proto/packet/icmp"
-	"github.com/lemon4ksan/mach/proto/packet/tcp"
-
+	"github.com/lemon4ksan/aoni/internal/masque"
 	"github.com/lemon4ksan/aoni/tunnel/masque/route"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
@@ -62,17 +60,17 @@ func TUNWithOptions(
 // BuildICMPPacketTooBig automatically creates an IPv4 (RFC 1191) or IPv6 (RFC 4443) ICMP Packet Too Big error.
 func BuildICMPPacketTooBig(packet []byte, mtu uint32) ([]byte, error) {
 	if len(packet) == 0 {
-		return nil, icmp.ErrInvalidIPHeader
+		return nil, masque.ErrInvalidIPHeader
 	}
 
 	version := packet[0] >> 4
 	switch version {
 	case 4:
-		return icmp.BuildPacketTooBig4(packet, uint16(mtu)) //nolint:gosec
+		return masque.BuildPacketTooBig4(packet, uint16(mtu)) //nolint:gosec
 	case 6:
-		return icmp.BuildPacketTooBig6(packet, mtu)
+		return masque.BuildPacketTooBig6(packet, mtu)
 	default:
-		return nil, icmp.ErrInvalidIPHeader
+		return nil, masque.ErrInvalidIPHeader
 	}
 }
 
@@ -89,7 +87,7 @@ func forwardAdapterToMasque(
 	// Register fast-path handlers for TCP (6), UDP (17), and ICMP (1/58)
 	vtable.Register(6, func(packet []byte) error {
 		if opts.MaxMTU > 0 {
-			tcp.ClampMSSInPlace(packet, opts.MaxMTU)
+			masque.ClampMSSInPlace(packet, opts.MaxMTU)
 		}
 
 		return nil

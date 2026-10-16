@@ -153,16 +153,17 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	browser "github.com/lemon4ksan/aoni-browser/option"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// Инициализация fast-клиента с TLS-отпечатками Chrome
+	// Инициализация fast-клиента с профилем Chrome из aoni-browser
 	client := fast.NewClient(
 		option.WithBaseURL("https://api.example.com"),
 		option.WithTimeout(10*time.Second),
-		option.WithTLSFingerprint(aoni.BrowserChrome),
+		browser.WithChrome(),
 	)
 
 	resp, err := client.Request(ctx, "GET", "/users/123",
@@ -188,11 +189,12 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
+	browser "github.com/lemon4ksan/aoni-browser/option"
 )
 
 func main() {
 	fastClient := fast.NewClient(
-		option.WithTLSFingerprint(aoni.BrowserChrome),
+		browser.WithChrome(),
 		option.WithProxyString("socks5://127.0.0.1:1080"),
 	)
 

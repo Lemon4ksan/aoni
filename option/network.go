@@ -114,7 +114,7 @@ func WithL2Device(device netdial.L2Device) aoni.ClientOption {
 //	)
 func WithLocalAddr(addr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		rotator, err := ip.NewSourceIPRotator([]string{addr})
+		rotator, err := ip.NewSourceRotator([]string{addr})
 		if err == nil {
 			cfg.Network.SourceRotator = rotator
 		}
@@ -130,7 +130,7 @@ func WithLocalAddr(addr string) aoni.ClientOption {
 //	)
 func WithLocalAddrPool(addrs []string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		rotator, err := ip.NewSourceIPRotator(addrs)
+		rotator, err := ip.NewSourceRotator(addrs)
 		if err == nil {
 			cfg.Network.SourceRotator = rotator
 		}

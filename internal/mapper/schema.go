@@ -71,7 +71,7 @@ func BuildStructSchema(t reflect.Type) *StructSchema {
 	for i := range numField {
 		field := t.Field(i)
 		defaultVal := field.Tag.Get("default")
-		tag := refkit.GetTag(field, "query", "url", "json")
+		tag := refkit.TagOf(field, "query", "url", "json")
 
 		fSchema := FieldSchema{
 			Index:       i,

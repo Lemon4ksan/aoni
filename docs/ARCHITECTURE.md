@@ -10,7 +10,7 @@ This document describes the layered architecture, package boundaries, and concur
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
     │              Layer 3: Policies, Codecs & Features                │
-    │   resiliency • cookie • codec • realtime • fingerprint • tunnel  │
+    │   resiliency • cookie • codec • realtime • tls • tunnel • nik    │
     └─────────────────────────────────┬────────────────────────────────┘
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
@@ -35,12 +35,13 @@ The repository is structured into four layers with strict unidirectional depende
 * **`package mod`**: Request-level modifiers (`mod.WithHeader`, `mod.WithBearer`, `mod.WithJSON`).
 
 ### Layer 3: Policies, Codecs & Extensions
-* **`cookie`**: RFC 6265bis compliant cookie storage and proxy-isolated jars.
+* **`cookie`**: RFC 6265bis compliant cookie storage, proxy-isolated jars, and [cookie.PublicSuffixList] interface.
 * **`codec`**: Decoders for JSON, XML, Protocol Buffers, and gRPC-Web framing.
 * **`resiliency`**: Retries, backoff strategies, circuit breakers, caching (RFC 9111), and connection hedging.
-* **`fingerprint`**: Browser impersonation profiles (Chrome, Firefox, Safari), JA4 hashing, and TLS ClientHello customization.
-* **`realtime`**: WebSockets, Server-Sent Events (SSE), and NDJSON streaming.
-* **`tunnel`**: SOCKS5, HTTP CONNECT, and MASQUE (RFC 9298) encapsulation.
+* **`tls` & `fragment`**: ECH (RFC 9460), GREASE (RFC 8701), pure-Go JA4/JA4H computation, and TCP payload chunking (L4 DPI evasion). Full browser impersonation (uTLS, HTTP/2 frame forge, p0f) lives in satellite repo `aoni-browser`.
+* **`realtime`**: WebSockets (RFC 8441), Server-Sent Events (SSE), and NDJSON streaming.
+* **`tunnel`**: SOCKS5, HTTP CONNECT, and MASQUE (RFC 9298 / RFC 9484) encapsulation.
+* **`nik`**: Network Isolation Keys (W3C / RFC 6265bis partitioned network state).
 
 ### Layer 2: Execution Engines & Pipeline
 * **`internal/pipeline`**: 5-stage middleware pipeline (pre-flight, mutation, transport execution, post-flight, validation).
@@ -59,7 +60,7 @@ The repository is structured into four layers with strict unidirectional depende
 ### Rule 1: QUIC Encapsulation
 * `internal/quic` is a private protocol implementation.
 * Neither `aoni` nor `fast` may import `internal/quic`.
-* HTTP/3 configuration is handled through `internal/fast/h3engine.NewClientFromSettings()`, utilizing `fingerprint/h3.Settings`.
+* HTTP/3 configuration is handled through `internal/fast/h3engine.NewClientFromSettings()`.
 * Only protocol drivers (`h3engine`, `x/webtransport`, `tunnel/masque`, `netutil/dns/doq`) may import QUIC.
 
 ### Rule 2: Engine Decoupling

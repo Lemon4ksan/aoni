@@ -12,14 +12,14 @@ import (
 
 // BufferPool manages reusable byte buffers to achieve zero-allocation operation during response processing.
 type BufferPool struct {
-	storage *pool.PerPStorage[*bytes.Buffer]
+	storage *pool.PerCorePool[*bytes.Buffer]
 	size    int
 }
 
 // GlobalBufferPool is the singleton zero-allocation buffer pool for engine routines.
 var GlobalBufferPool = NewBufferPool(32 * 1024)
 
-// NewBufferPool instantiates a [BufferPool] with initial capacity using core-pinned PerPStorage.
+// NewBufferPool instantiates a [BufferPool] with initial capacity using core-pinned PerCorePool.
 func NewBufferPool(size int) *BufferPool {
 	if size <= 0 {
 		size = 32 * 1024
@@ -27,7 +27,7 @@ func NewBufferPool(size int) *BufferPool {
 
 	return &BufferPool{
 		size: size,
-		storage: pool.NewPerPStorage(func() *bytes.Buffer {
+		storage: pool.NewPerCorePool(func() *bytes.Buffer {
 			return bytes.NewBuffer(make([]byte, 0, size))
 		}),
 	}

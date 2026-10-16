@@ -62,6 +62,11 @@ func BuildICMPPacketTooBig4(packet []byte, nextHopMTU uint16) ([]byte, error) {
 	return out, nil
 }
 
+// BuildPacketTooBig4 is an alias for BuildICMPPacketTooBig4.
+func BuildPacketTooBig4(packet []byte, nextHopMTU uint16) ([]byte, error) {
+	return BuildICMPPacketTooBig4(packet, nextHopMTU)
+}
+
 // BuildICMPPacketTooBig6 constructs an ICMPv6 Packet Too Big packet (RFC 4443 §3.2 / RFC 8200 / RFC 9484 §7.2.1).
 func BuildICMPPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
 	if len(packet) < 40 || (packet[0]>>4) != 6 {
@@ -99,6 +104,11 @@ func BuildICMPPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
 	binary.BigEndian.PutUint16(out[42:44], csum)
 
 	return out, nil
+}
+
+// BuildPacketTooBig6 is an alias for BuildICMPPacketTooBig6.
+func BuildPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
+	return BuildICMPPacketTooBig6(packet, nextHopMTU)
 }
 
 // CalculateInternetChecksum calculates standard 16-bit 1's complement Internet Checksum (RFC 1071).

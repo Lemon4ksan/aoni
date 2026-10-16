@@ -21,12 +21,11 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/urlkit"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/pipeline"
-	"github.com/lemon4ksan/aoni/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -62,8 +61,8 @@ type Client struct {
 	// prepared caches precomputed URL prefixes and default header slices to achieve path resolution.
 	prepared pipeline.PreparedConfig
 
-	// powerWatcher monitors OS sleep/wake cycles to proactively flush stale TCP keep-alive sockets upon wake-up.
-	powerWatcher *power.Watcher
+	// closeHooks holds extension teardown callbacks registered via [option.WithOnClose]; drained by [Client.Close].
+	closeHooks []func()
 
 	// referer maintains an atomic navigation state for realistic browser Referer header automation.
 	referer *pipeline.RefererState
@@ -89,7 +88,7 @@ type Client struct {
 // Concurrency & Lifecycle:
 //
 // The returned [Client] is safe for concurrent use across multiple goroutines.
-// Background resources (such as power watchers or custom engines) should
+// Background resources (such as extension workers registered via [option.WithOnClose] or custom engines) should
 // be released via [Client.Close] when the client lifecycle terminates.
 func NewClient(doer any, opts ...ClientOption) *Client {
 	if opt, ok := doer.(ClientOption); ok { // seamless transition from fast client
@@ -99,7 +98,7 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 
 	cfg := Config{
 		Defaults: ClientDefaults{
-			BaseURL:         &url.URL{},
+			BaseURL:         nil,
 			Headers:         make(http.Header),
 			MaxResponseSize: 10 * 1024 * 1024,
 			DictionaryStore: dict.NewStore(),
@@ -556,9 +555,15 @@ func (c *Client) Close() {
 		c.coreEngine.Close()
 	}
 
-	if c.powerWatcher != nil {
-		c.powerWatcher.Close()
-		c.powerWatcher = nil
+	c.mu.Lock()
+	hooks := c.closeHooks
+	c.closeHooks = nil
+	c.mu.Unlock()
+
+	for _, hook := range hooks {
+		if hook != nil {
+			hook()
+		}
 	}
 }
 
@@ -841,12 +846,15 @@ func (c *Client) ensureUserAgent() {
 
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
-	u, err := urlkit.Resolve(c.prepared.BaseURL, path)
-	if err != nil {
-		return nil, &Error{Op: "resolve_url", Err: err}
+	if c.prepared.BaseURL == nil || c.prepared.BaseURLString == "" {
+		return urlkit.Parse(path)
 	}
 
-	return u, nil
+	if urlkit.IsAbsURL(path) {
+		return urlkit.Parse(path)
+	}
+
+	return c.prepared.BaseURL.JoinPath(path), nil
 }
 
 func (c *Client) applyConfig(cfg Config) {
@@ -867,34 +875,11 @@ func (c *Client) applyConfig(cfg Config) {
 
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
-	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
+	c.closeHooks = slices.Clone(cfg.Ext.OnClose)
 
 	c.pipeline = pipeline.New(
 		c.toPipelineDefaults(),
 	)
-}
-
-// applyPowerManagement manages the lifecycle of OS power suspend/resume watchers.
-// When laptops sleep and wake, existing TCP keep-alives silently rot. Flushing the pool
-// on wake-up prevents insidious "connection reset by peer" or 15s write timeout stalls.
-func (c *Client) applyPowerManagement(enable bool) {
-	if !enable {
-		if c.powerWatcher != nil {
-			c.powerWatcher.Close()
-			c.powerWatcher = nil
-		}
-
-		return
-	}
-
-	if c.powerWatcher == nil {
-		watcher := power.NewWatcher(5 * time.Second)
-		watcher.OnSuspend(func() {
-			c.CloseIdleConnections()
-		})
-
-		c.powerWatcher = watcher
-	}
 }
 
 func (c *Client) applyDefaultHTTPHeader() http.Header {

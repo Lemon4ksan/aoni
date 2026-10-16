@@ -34,11 +34,11 @@ func RateLimit(requestsPerSecond float64, burst int) aoni.Middleware {
 }
 
 // SlidingWindowLimiter implements a thread-safe sliding window log rate limiter.
-type SlidingWindowLimiter = limiter.SlidingWindowLimiter
+type SlidingWindowLimiter = limiter.SlidingWindow
 
 // NewSlidingWindowLimiter constructs a new sliding window rate limiter instance.
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
-	return limiter.NewSlidingWindowLimiter(limit, window)
+	return limiter.NewSlidingWindow(limit, window)
 }
 
 // LimitEnforcer constructs an [aoni.Middleware] wrapping a [SlidingWindowLimiter].
@@ -75,8 +75,8 @@ func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 	}
 }
 
-// AdaptiveLimit constructs an [aoni.Middleware] wrapping a [limiter.AdaptiveLimiter] concurrency controller.
-func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
+// AdaptiveLimit constructs an [aoni.Middleware] wrapping a [limiter.Adaptive] concurrency controller.
+func AdaptiveLimit(limiter *limiter.Adaptive) aoni.Middleware {
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			ctx := req.Context()

@@ -32,13 +32,13 @@ type refererState struct {
 
 // RefererAutomaton tracks and calculates Referer headers across sequential requests.
 type RefererAutomaton struct {
-	state generic.Safe[refererState]
+	state generic.Guarded[refererState]
 }
 
 // NewRefererAutomaton constructs a [RefererAutomaton].
 func NewRefererAutomaton(policy RefererPolicy) *RefererAutomaton {
 	return &RefererAutomaton{
-		state: *generic.NewSafe(refererState{policy: policy}),
+		state: *generic.NewGuarded(refererState{policy: policy}),
 	}
 }
 

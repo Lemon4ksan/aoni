@@ -11,13 +11,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
 )
 
 // MockEngine is an in-memory, zero-network mock HTTP doer for unit testing aoni applications.
 type MockEngine struct {
-	routes generic.Safe[[]*MockRoute]
+	routes generic.Guarded[[]*MockRoute]
 }
 
 // NewMockEngine creates a new in-memory [MockEngine].
@@ -116,7 +117,14 @@ func (r *MockRoute) matches(req *http.Request) bool {
 		return false
 	}
 
-	if r.path != "" && r.path != req.URL.Path && r.path != req.URL.String() {
+	if r.path != "" {
+		if r.path == req.URL.Path || r.path == req.URL.String() {
+			return true
+		}
+		if strings.TrimPrefix(r.path, "/") == strings.TrimPrefix(req.URL.Path, "/") ||
+			strings.TrimPrefix(r.path, "/") == strings.TrimPrefix(req.URL.String(), "/") {
+			return true
+		}
 		return false
 	}
 

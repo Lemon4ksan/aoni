@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/seal/codec/compress"
 	"github.com/lemon4ksan/foundation/iokit"
 
 	"github.com/lemon4ksan/aoni/netutil/dict"

@@ -3,8 +3,8 @@
 This document defines coding standards, package layout, memory allocation guidelines, and the versioning policy for the `aoni` repository.
 
 ## 1. Principles
-* **Progressive Disclosure**: Advanced resilience (Happy Eyeballs, WAF solving) is enabled via options without altering base call contracts.
-* **Zero-Allocation Hot Paths**: `fast`, `codec`, `fingerprint` paths must maintain minimal heap footprint via `sync.Pool` and pre-allocation.
+* **Progressive Disclosure**: Advanced resilience (Happy Eyeballs, HTTP 421/425 auto-recovery, ECH) is enabled via options without altering base call contracts.
+* **Zero-Allocation Hot Paths**: `fast`, `codec`, `tls`, `netutil` paths must maintain minimal heap footprint via `sync.Pool` and pre-allocation.
 * **RFC Compliance**: Specifications (RFC 9460, 6265bis, 9112) take precedence in protocol framing and fallbacks.
 
 ## 2. Initialization & Memory

@@ -7,7 +7,7 @@ package decode
 import (
 	"io"
 
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 
 	"github.com/lemon4ksan/aoni/internal/arena"
 )

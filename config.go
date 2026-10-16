@@ -18,7 +18,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	coreh3 "github.com/lemon4ksan/mach/proto/h3"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/fragment"
 	"github.com/lemon4ksan/aoni/internal/transport"
@@ -548,7 +548,7 @@ type NetworkConfig struct {
 	L2Device netdial.L2Device
 
 	// SourceRotator manages round-robin or least-used rotation across multiple local egress IP addresses.
-	SourceRotator *ip.SourceIPRotator
+	SourceRotator *ip.SourceRotator
 
 	// DynamicHedging configures real-time EWMA latency-based speculative request hedging to eliminate tail latency.
 	DynamicHedging *telemetry.DynamicHedgingConfig
@@ -596,10 +596,6 @@ type NetworkConfig struct {
 
 	// TCPQuickACK enables the TCP_QUICKACK socket option on Linux, disabling delayed ACKs for lower latency.
 	TCPQuickACK bool
-
-	// EnablePowerManagement attaches an OS power lifecycle watcher ([netutil/power.Watcher]) that purges stale keep-alive connections
-	// upon laptop sleep/wake transitions, preventing silent 15-second write timeouts on dead sockets.
-	EnablePowerManagement bool
 
 	// ExperimentalFlags consolidates opt-in hardware and OS experimental accelerations (io_uring, SIMD, RIO, TCP Fast Open).
 	ExperimentalFlags ExperimentalFlag
@@ -1475,6 +1471,11 @@ type ExtensionConfig struct {
 
 	// Extra stores extension-specific arbitrary state (e.g., *profile.BrowserTLSConfig) keyed by extension domain.
 	Extra map[string]any
+
+	// OnClose lists callbacks invoked once by [Client.Close], in registration order, so extensions can release
+	// background workers (e.g. an OS power watcher). Callbacks must be idempotent: a client derived through
+	// [Client.With] inherits them and may run them again.
+	OnClose []func()
 }
 
 // Clone creates a memory-isolated deep copy of the extension config.
@@ -1483,6 +1484,7 @@ func (e ExtensionConfig) Clone() ExtensionConfig {
 	cloned.HeaderOrder = slices.Clone(e.HeaderOrder)
 	cloned.PseudoHeaderOrder = slices.Clone(e.PseudoHeaderOrder)
 	cloned.OverrideH2Settings = maps.Clone(e.OverrideH2Settings)
+	cloned.OnClose = slices.Clone(e.OnClose)
 
 	if e.Extra != nil {
 		cloned.Extra = make(map[string]any, len(e.Extra))

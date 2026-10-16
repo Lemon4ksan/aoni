@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/generic"
-	fproxy "github.com/lemon4ksan/foundation/net/proxy"
+	fproxy "github.com/lemon4ksan/mach/net/proxy"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"

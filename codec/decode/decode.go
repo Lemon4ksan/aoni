@@ -14,7 +14,6 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/mach/proto/headkit"
-	"github.com/lemon4ksan/mach/proto/http/header"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/pipeline"
@@ -115,25 +114,25 @@ func LookupDecoder(contentType string) Decoder {
 	norm := headkit.BaseMediaType(contentType)
 
 	switch {
-	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationJSON),
+	case bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationJSON),
 		bytesconv.EqualFoldASCII(norm, "text/json"),
 		strings.HasSuffix(norm, "+json"):
 		return JSONDecoder
-	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWebProto),
-		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWeb),
-		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationGRPCWebText),
-		strings.HasPrefix(norm, header.MIMEApplicationGRPCWeb):
+	case bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationGRPCWebProto),
+		bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationGRPCWeb),
+		bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationGRPCWebText),
+		strings.HasPrefix(norm, headkit.MIMEApplicationGRPCWeb):
 		return GRPCWebDecoder
-	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationProtobuf),
+	case bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationProtobuf),
 		bytesconv.EqualFoldASCII(norm, "application/protobuf"),
 		strings.HasSuffix(norm, "+proto"):
 		return ProtoDecoder
-	case bytesconv.EqualFoldASCII(norm, header.MIMEApplicationXML),
+	case bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationXML),
 		bytesconv.EqualFoldASCII(norm, "text/xml"),
 		strings.HasSuffix(norm, "+xml"):
 		return XMLDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
-		bytesconv.EqualFoldASCII(norm, header.MIMEApplicationYAML),
+		bytesconv.EqualFoldASCII(norm, headkit.MIMEApplicationYAML),
 		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
 		bytesconv.EqualFoldASCII(norm, "text/yaml"),
 		strings.HasSuffix(norm, "+yaml"):

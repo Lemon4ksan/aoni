@@ -37,7 +37,7 @@ type DialConfig struct {
 	DNSResolver          netdial.DNSResolver
 	StackDriver          netdial.RawStackDriver
 	L2Device             netdial.L2Device
-	SourceRotator        *ip.SourceIPRotator
+	SourceRotator        *ip.SourceRotator
 	SocketController     netdial.SocketController
 	FragmentConfig       *fragment.Config
 	HostRewriteRules     map[string]string

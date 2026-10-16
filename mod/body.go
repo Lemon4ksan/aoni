@@ -11,9 +11,9 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 

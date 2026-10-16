@@ -19,12 +19,12 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-var stdRequestStorage = pool.NewPerPStorage(func() *Request {
+var stdRequestStorage = pool.NewPerCorePool(func() *Request {
 	return &Request{}
 })
 

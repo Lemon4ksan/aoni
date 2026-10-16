@@ -12,10 +12,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 	mach "github.com/lemon4ksan/mach/proto/http"
-	"github.com/lemon4ksan/mach/proto/http/auth"
-	"github.com/lemon4ksan/mach/proto/http/header"
-	"github.com/lemon4ksan/mach/proto/http/zerocopy"
+	"github.com/lemon4ksan/mach/proto/semantic/auth"
+	uri "github.com/lemon4ksan/mach/proto/semantic/uri"
 
 	"github.com/lemon4ksan/aoni/cookie"
 )
@@ -167,7 +167,7 @@ var sensitiveRedirectHeaders = [...]string{
 }
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
-func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *zerocopy.URI) {
+func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *uri.URI) {
 	for _, h := range sensitiveRedirectHeaders {
 		req.Header.Del(h)
 	}
@@ -182,7 +182,7 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	return urlkit.IsSameDomainOrSubdomain(urlkit.CleanHost(h1), urlkit.CleanHost(h2))
 }
 
-func uriToURL(uri *zerocopy.URI) *url.URL {
+func uriToURL(uri *uri.URI) *url.URL {
 	return &url.URL{
 		Scheme:   bytesconv.B2S(uri.Scheme()),
 		Host:     bytesconv.B2S(uri.Host()),

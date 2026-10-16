@@ -23,7 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {
+var requestConfigStorage = pool.NewPerCorePool(func() *RequestConfig {
 	return &RequestConfig{}
 })
 

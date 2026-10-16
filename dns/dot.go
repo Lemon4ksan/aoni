@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/tls/cert"
-	"github.com/lemon4ksan/mach/proto/dns/wire"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 )
 
 // RFC 7858 & RFC 8310 Standard DNS over TLS Port and Service Name constants.

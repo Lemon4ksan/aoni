@@ -18,7 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var txStorage = pool.NewPerPStorage(func() *Tx {
+var txStorage = pool.NewPerCorePool(func() *Tx {
 	return &Tx{}
 })
 

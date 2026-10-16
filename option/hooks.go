@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -161,12 +161,18 @@ func WithDecoders(decoders map[string]decode.Decoder) aoni.ClientOption {
 	}
 }
 
-// WithOSPowerManagement enables OS sleep and wake event monitoring.
+// WithOnClose registers teardown callbacks executed by [aoni.Client.Close] in registration order.
 //
-// Proactively flushes stale TCP keep-alive sockets and pool entries when the host OS wakes up from sleep.
-func WithOSPowerManagement(enable bool) aoni.ClientOption {
+// Extension modules use it to release background workers they started alongside the client,
+// for example the OS power watcher of github.com/lemon4ksan/aoni-browser/power. Callbacks must be
+// idempotent because clients derived via [aoni.Client.With] inherit them.
+func WithOnClose(hooks ...func()) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Network.EnablePowerManagement = enable
+		for _, hook := range hooks {
+			if hook != nil {
+				cfg.Ext.OnClose = append(cfg.Ext.OnClose, hook)
+			}
+		}
 	}
 }
 

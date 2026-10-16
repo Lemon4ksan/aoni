@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/ip"
-	"github.com/lemon4ksan/foundation/net/proxy"
+	"golang.org/x/net/proxy"
 
 	"github.com/lemon4ksan/aoni/fragment"
 )
@@ -115,7 +115,7 @@ type DialOptions struct {
 	DNSResolver          DNSResolver
 	StackDriver          RawStackDriver
 	L2Device             L2Device
-	SourceRotator        *ip.SourceIPRotator
+	SourceRotator        *ip.SourceRotator
 	SocketController     SocketController
 	FragmentConfig       *fragment.Config
 	InterfaceName        string

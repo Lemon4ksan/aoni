@@ -7,7 +7,7 @@ package fast
 import (
 	"io"
 
-	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/seal/codec/compress"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	mach "github.com/lemon4ksan/mach/proto/http"
 )

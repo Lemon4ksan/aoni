@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/pipeline"
@@ -308,7 +308,7 @@ func FetchTyped[T any](
 //
 //	user, err := aoni.Scoped(nil, func(c *aoni.Client) (*User, error) {
 //	    return c.GetTo[User](ctx, "/users/1")
-//	}, option.WithChrome(), option.WithTimeout(5*time.Second))
+//	}, browser.WithChrome(), option.WithTimeout(5*time.Second))
 func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOption) (T, error) {
 	base := generic.Coalesce(client, DefaultClient)
 

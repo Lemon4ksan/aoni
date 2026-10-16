@@ -32,7 +32,7 @@ func WithProxyAddress(ctx context.Context, addr string) context.Context {
 
 // GetProxyAddress retrieves the active proxy URL string stored in the context.
 func GetProxyAddress(ctx context.Context) string {
-	return ctxkit.GetOr(ctx, proxyCtxKey{}, "")
+	return ctxkit.ValueOr(ctx, proxyCtxKey{}, "")
 }
 
 // WithPartitionKey returns a Context carrying a CHIPS (RFC 6265bis) top-level site partition key.
@@ -42,7 +42,7 @@ func WithPartitionKey(ctx context.Context, key string) context.Context {
 
 // GetPartitionKey retrieves the active CHIPS top-level site partition key or Network Isolation Key from context.
 func GetPartitionKey(ctx context.Context) string {
-	if k := ctxkit.GetOr(ctx, partitionCtxKey{}, ""); k != "" {
+	if k := ctxkit.ValueOr(ctx, partitionCtxKey{}, ""); k != "" {
 		return k
 	}
 
@@ -63,7 +63,8 @@ type cookieKey struct {
 // ProxyIsolatedJar provides thread-safe, per-proxy and CHIPS partitioned cookie storage isolation.
 type ProxyIsolatedJar struct {
 	jars    *generic.LRU[string, CookieJar]
-	backend generic.Safe[Storage]
+	backend generic.Guarded[Storage]
+	psl     generic.Guarded[PublicSuffixList]
 }
 
 // NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar].
@@ -71,6 +72,19 @@ func NewProxyIsolatedJar() *ProxyIsolatedJar {
 	return &ProxyIsolatedJar{
 		jars: generic.NewLRU[string, CookieJar](10000),
 	}
+}
+
+// SetPublicSuffixList configures the [PublicSuffixList] given to every per-proxy [MemoryJar] created afterwards.
+// Configure it before the first request: jars already instantiated keep their previous list.
+func (p *ProxyIsolatedJar) SetPublicSuffixList(list PublicSuffixList) {
+	p.psl.Set(list)
+}
+
+// WithPublicSuffixList is the fluent form of [ProxyIsolatedJar.SetPublicSuffixList].
+func (p *ProxyIsolatedJar) WithPublicSuffixList(list PublicSuffixList) *ProxyIsolatedJar {
+	p.psl.Set(list)
+
+	return p
 }
 
 // SetCookies satisfies the context-aware [cookie.CookieJar] interface.
@@ -95,7 +109,7 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) CookieJar {
 		return jar
 	}
 
-	baseJar := NewMemoryJar()
+	baseJar := NewMemoryJar(WithPublicSuffixList(p.psl.Get()))
 
 	var jar CookieJar = baseJar
 
@@ -156,7 +170,7 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar CookieJar,
 		Inner:    baseJar,
 		proxyURL: proxyURL,
 		backend:  backend,
-		cookies:  *generic.NewSafe(initialMap),
+		cookies:  *generic.NewGuarded(initialMap),
 	}
 
 	cookies, err := backend.Load(proxyURL)
@@ -200,7 +214,7 @@ type PersistentJar struct {
 	Inner    CookieJar
 	proxyURL string
 	backend  Storage
-	cookies  generic.Safe[map[cookieKey]Cookie]
+	cookies  generic.Guarded[map[cookieKey]Cookie]
 	dirty    atomic.Bool
 }
 

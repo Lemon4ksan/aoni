@@ -78,7 +78,7 @@ func TestSourceIPRotator(t *testing.T) {
 	t.Parallel()
 
 	addrs := []string{"192.168.1.1", "192.168.1.2", "2001:db8::1"}
-	rotator, err := ip.NewSourceIPRotator(addrs)
+	rotator, err := ip.NewSourceRotator(addrs)
 	require.NoError(t, err)
 	assert.Equal(t, 3, rotator.Size())
 
@@ -104,7 +104,7 @@ func TestSourceIPRotator(t *testing.T) {
 func TestIPv6SubnetRotator(t *testing.T) {
 	t.Parallel()
 
-	rotator, err := ip.NewIPv6SubnetRotator("2001:db8::/64")
+	rotator, err := ip.NewSubnetRotator("2001:db8::/64")
 	require.NoError(t, err)
 
 	ip1 := rotator.Next()

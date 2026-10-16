@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // Preconnecter defines an interface for clients capable of proactive TCP/TLS preconnecting

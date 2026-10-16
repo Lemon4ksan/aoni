@@ -154,6 +154,28 @@ func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientO
 	}
 }
 
+// WithPublicSuffixList injects a [cookie.PublicSuffixList] into the configured cookie jar so that cookies
+// whose Domain attribute is a public suffix are rejected (RFC 6265 §5.3 step 5).
+//
+// The core module does not bundle a suffix dataset; use an implementation such as
+// github.com/lemon4ksan/aoni-browser/psl. Like [WithCookieJanitor], this option acts on the jar already
+// present in the configuration, so it must be listed after [WithCookieJar]. It is a no-op for jars that
+// do not support suffix lists.
+//
+// # Example
+//
+//	client := aoni.NewClient(nil,
+//	    option.WithCookieJar(cookie.NewProxyIsolatedJar()),
+//	    option.WithPublicSuffixList(psl.List),
+//	)
+func WithPublicSuffixList(list cookie.PublicSuffixList) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Engine.CookieJar != nil {
+			cookie.ApplyPublicSuffixList(cfg.Engine.CookieJar, list)
+		}
+	}
+}
+
 // WithCookieIndices enables selective cookie-based response caching, including only specified
 // cookie names in cache hash keys to maximize cache hit rates for anonymous users.
 func WithCookieIndices(cookieNames ...string) aoni.ClientOption {

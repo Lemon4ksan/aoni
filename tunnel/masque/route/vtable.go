@@ -7,7 +7,7 @@ package route
 import (
 	"errors"
 
-	"github.com/lemon4ksan/mach/proto/packet/icmp"
+	"github.com/lemon4ksan/aoni/internal/masque"
 )
 
 var ErrUnhandledProtocol = errors.New("aoni/masque: unhandled ip protocol")
@@ -34,7 +34,7 @@ func (v *IPProtocolVTable) Register(proto byte, handler PacketHandler) {
 // falling back to VTable jump-table lookup for cold protocols (ICMP, ICMPv6, IGMP, etc.).
 func (v *IPProtocolVTable) DispatchIPPacket(packet []byte) error {
 	if len(packet) < 20 {
-		return icmp.ErrInvalidIPHeader
+		return masque.ErrInvalidIPHeader
 	}
 
 	var proto byte
@@ -46,13 +46,13 @@ func (v *IPProtocolVTable) DispatchIPPacket(packet []byte) error {
 		proto = packet[9]
 	case 6:
 		if len(packet) < 40 {
-			return icmp.ErrInvalidIPHeader
+			return masque.ErrInvalidIPHeader
 		}
 
 		proto = packet[6]
 
 	default:
-		return icmp.ErrInvalidIPHeader
+		return masque.ErrInvalidIPHeader
 	}
 
 	// Monomorphic Hot-Path (99%+ of Layer 3 IP traffic): TCP (6) & UDP (17)

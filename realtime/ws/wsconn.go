@@ -23,7 +23,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 	"github.com/lemon4ksan/foundation/silicon/simd"
-	"github.com/lemon4ksan/mach/hpack"
+	"github.com/lemon4ksan/mach/proto/codec/hpack"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/internal/realtime/ws"

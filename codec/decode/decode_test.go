@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/codec/compress/gzip"
+	"github.com/lemon4ksan/seal/codec/compress/gzip"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"

@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/codec/compress"
+	"github.com/lemon4ksan/seal/codec/compress"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/iokit"
-	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
+	"github.com/lemon4ksan/seal/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
-	"github.com/lemon4ksan/mach/proto/http/header"
+	header "github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/netutil/dict"
 )

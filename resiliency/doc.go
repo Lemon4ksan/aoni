@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package resiliency provides industrial fault tolerance, load balancing, response caching, and WAF challenge solvers.
+// Package resiliency provides industrial fault tolerance, load balancing, response caching, and request coalescing.
 //
 // # Subpackages
 //

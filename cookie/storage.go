@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/generic"
 )
 
@@ -42,7 +42,7 @@ type Storage interface {
 //	jar := cookie.NewProxyIsolatedJar().WithStorageBackend(storage)
 type JSONFileStorage struct {
 	filePath string
-	data     generic.Safe[fileStorageData]
+	data     generic.Guarded[fileStorageData]
 }
 
 type fileStorageData map[string][]Cookie
@@ -58,7 +58,7 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 
 	s := &JSONFileStorage{
 		filePath: filePath,
-		data:     *generic.NewSafe(initialData),
+		data:     *generic.NewGuarded(initialData),
 	}
 
 	return s

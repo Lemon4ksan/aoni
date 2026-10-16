@@ -5,7 +5,7 @@
 package main
 
 import (
-	"github.com/lemon4ksan/mach/hpack"
+	"github.com/lemon4ksan/mach/proto/codec/hpack"
 
 	"bytes"
 	"encoding/binary"

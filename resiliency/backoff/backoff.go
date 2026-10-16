@@ -24,16 +24,16 @@ const (
 )
 
 // Strategy represents a stateful or stateless backoff delay generator.
-type Strategy = fbackoff.Strategy
+type Strategy = fbackoff.Policy
 
 // ExponentialBackoff computes backoff growing by factor with an optional jitter distribution.
-type ExponentialBackoff = fbackoff.ExponentialBackoff
+type ExponentialBackoff = fbackoff.Exponential
 
 // LinearBackoff computes backoff growing linearly by step on each attempt.
-type LinearBackoff = fbackoff.LinearBackoff
+type LinearBackoff = fbackoff.Linear
 
 // ConstantBackoff computes a fixed static delay with optional jitter.
-type ConstantBackoff = fbackoff.ConstantBackoff
+type ConstantBackoff = fbackoff.Constant
 
 // NewExponential creates an [ExponentialBackoff] with reasonable defaults.
 func NewExponential(initial, max time.Duration, factor float64) *ExponentialBackoff {

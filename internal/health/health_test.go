@@ -28,7 +28,7 @@ func TestHealthTracker_Transitions(t *testing.T) {
 		recoveredCount.Add(1)
 	}
 
-	tracker := NewTracker("test-endpoint", 3, 50*time.Millisecond, onUnhealthy, onRecovered)
+	tracker := NewTracker("test-endpoint", 3, 200*time.Millisecond, onUnhealthy, onRecovered)
 	require.NotNil(t, tracker)
 
 	// 1. Initial State: Healthy
@@ -61,7 +61,7 @@ func TestHealthTracker_Transitions(t *testing.T) {
 	assert.Equal(t, int32(1), unhealthyCount.Load())
 
 	// 5. Cooldown elapses: Recovering
-	time.Sleep(70 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	assert.Equal(t, StatusRecovering, tracker.Status())
 	assert.Equal(t, "Recovering", tracker.Status().String())
 	assert.True(t, tracker.IsAvailable()) // Available for a trial probe

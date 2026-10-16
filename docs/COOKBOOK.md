@@ -45,13 +45,24 @@ manifest, err := client.GetTo[Manifest](ctx, "/legacy-manifest")
 
 ## 5. TLS & HTTP Fingerprinting
 
-Configures uTLS profiles and exact browser header capitalization.
+Configures browser impersonation profiles from `aoni-browser` alongside core JA4 telemetry:
 
 ```go
+import (
+	"fmt"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/tls/ja4"
+	browser "github.com/lemon4ksan/aoni-browser/option"
+)
+
 client := aoni.NewClient(nil,
-	option.WithTLSFingerprint(aoni.BrowserChrome),
-	option.WithJA4Callback(func(r ja4.Report) {
-		fmt.Println("Handshake TLS JA4:", r.JA4)
+	browser.WithChrome(),
+	option.WithJA4Callback(func(r any) {
+		if rep, ok := r.(ja4.Report); ok {
+			fmt.Println("Handshake TLS JA4:", rep.JA4)
+		}
 	}),
 )
 ```
@@ -102,14 +113,13 @@ user, err := client.GetTo[User](ctx, "/users/1")
 | `https://api.com/v1` | `users/1` | `https://api.com/v1/users/1` | Boundary auto-append |
 | `https://api.com/v1/` | `https://other.com` | `https://other.com` | Absolute URL bypass |
 
-## 9. Packet Fragmentation & Padding
+## 9. Packet Fragmentation (L4 DPI Evasion)
 
-Segments TCP payloads and injects padding headers to obscure byte length signatures.
+Segments TCP payloads into micro-chunks to evade stateful DPI filters and middlebox inspections:
 
 ```go
 client := aoni.NewClient(nil,
 	option.WithFragmentation(fragment.Config{ChunkSize: 2, MaxDelay: 10 * time.Millisecond}),
-	option.WithPacketPadding(fingerprint.PaddingConfig{MinPaddingBytes: 16, MaxPaddingBytes: 64, HeaderPool: fingerprint.CloudflareHeaderPool}),
 )
 ```
 

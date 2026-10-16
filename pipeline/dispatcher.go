@@ -25,7 +25,7 @@ const (
 // Dispatcher determines the protocol version and routing strategy for outbound requests.
 type Dispatcher struct {
 	altSvcCache *AltSvcCache
-	queue       *ringbuf.RingBuffer[any]
+	queue       *ringbuf.Buffer[any]
 }
 
 // NewDispatcher constructs a [Dispatcher].
@@ -36,7 +36,7 @@ func NewDispatcher(altSvc *AltSvcCache) *Dispatcher {
 
 	return &Dispatcher{
 		altSvcCache: altSvc,
-		queue:       ringbuf.NewRingBuffer[any](1024),
+		queue:       ringbuf.New[any](1024),
 	}
 }
 
