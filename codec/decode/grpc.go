@@ -12,11 +12,11 @@ import (
 	"errors"
 	"io"
 
-	"github.com/lemon4ksan/seal/codec/compress"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/seal/codec/compress"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/transport"

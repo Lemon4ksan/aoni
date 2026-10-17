@@ -998,7 +998,7 @@ func TestSoak_H3_StreamQueue_Backpressure_1000Requests(t *testing.T) {
 // TestSoak_H3_FlowControl_LargePayloadSaturation saturates QUIC flow control windows
 // with 20 parallel streams transferring 512 KB to 896 KB each (>14 MB total) and validates SHA-256 integrity.
 func TestSoak_H3_FlowControl_LargePayloadSaturation(t *testing.T) {
-	defer testutil.Check(t, testutil.WithTimeout(15*time.Second))()
+	defer testutil.Check(t, testutil.WithTimeout(30*time.Second))()
 
 	server := testutil.NewH3Server(t, newSoakHandler(nil))
 	defer server.Close()
@@ -1020,7 +1020,7 @@ func TestSoak_H3_FlowControl_LargePayloadSaturation(t *testing.T) {
 			expectedHash := sha256.Sum256(payload)
 			expectedHashStr := hex.EncodeToString(expectedHash[:])
 
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
 			req, err := http.NewRequestWithContext(

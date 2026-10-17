@@ -10,8 +10,8 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/foundation/borrow"
-	"github.com/lemon4ksan/seal/codec/compress/flate"
 	"github.com/lemon4ksan/foundation/silicon/pool"
+	"github.com/lemon4ksan/seal/codec/compress/flate"
 )
 
 var (

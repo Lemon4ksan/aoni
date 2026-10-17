@@ -11,8 +11,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	mach "github.com/lemon4ksan/mach/proto/http"
 	"github.com/lemon4ksan/mach/proto/headkit"
+	mach "github.com/lemon4ksan/mach/proto/http"
 	"github.com/lemon4ksan/mach/proto/semantic/uri"
 )
 

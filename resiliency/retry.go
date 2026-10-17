@@ -8,10 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/lemon4ksan/aoni/resiliency/backoff"
-
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
+	"github.com/lemon4ksan/aoni/resiliency/backoff"
 )
 
 // RetryBuilder constructs a declarative, high-performance request retry and backoff policy.

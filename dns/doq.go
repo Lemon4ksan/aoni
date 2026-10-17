@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/mach/net/quic"
 	"github.com/lemon4ksan/foundation/net/dns/svcb"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/mach/net/quic"
 )
 
 var (

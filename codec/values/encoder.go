@@ -446,7 +446,9 @@ func ToString(v any) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		return bytesconv.B2S(b), nil
+
 	case fmt.Stringer:
 		return val.String(), nil
 	default:

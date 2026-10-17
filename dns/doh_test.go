@@ -18,10 +18,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lemon4ksan/foundation/testing/assert"
-	"github.com/lemon4ksan/foundation/testing/require"
 	"github.com/lemon4ksan/foundation/net/dns/svcb"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/foundation/testing/assert"
+	"github.com/lemon4ksan/foundation/testing/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/dns"

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // NewUnixTransport creates an [http.RoundTripper] bound to a local Unix domain socket path.
@@ -29,7 +31,9 @@ func parseUnixURI(path string) (string, string, bool) {
 	if idx == -1 {
 		return "", "", false
 	}
+
 	sockEnd := idx + 5
+
 	return path[:sockEnd], path[sockEnd:], true
 }
 
@@ -38,17 +42,18 @@ func parseNpipeURI(path string) (string, string, bool) {
 	if idx == -1 {
 		return "", "", false
 	}
+
 	pipePrefixEnd := idx + len("/pipe/")
 	slash := strings.IndexByte(path[pipePrefixEnd:], '/')
+
 	if slash == -1 {
 		return path, "/", true
 	}
+
 	pipeEnd := pipePrefixEnd + slash
 	reqURI := path[pipeEnd:]
-	if reqURI == "" {
-		reqURI = "/"
-	}
-	return path[:pipeEnd], reqURI, true
+
+	return path[:pipeEnd], generic.Coalesce(reqURI, "/"), true
 }
 
 // ParseIPCURI parses a URL carrying "unix://" or "npipe://" scheme,

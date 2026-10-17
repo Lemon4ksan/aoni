@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/foundation/generic"
 )
@@ -69,7 +70,7 @@ type MockRoute struct {
 	statusCode int
 	headers    http.Header
 	body       []byte
-	calls      int
+	calls      atomic.Int64
 }
 
 // Reply sets the HTTP response status code for this route.
@@ -109,7 +110,7 @@ func (r *MockRoute) Bytes(data []byte) *MockRoute {
 
 // Calls returns the number of times this route was matched.
 func (r *MockRoute) Calls() int {
-	return r.calls
+	return int(r.calls.Load())
 }
 
 func (r *MockRoute) matches(req *http.Request) bool {
@@ -121,10 +122,12 @@ func (r *MockRoute) matches(req *http.Request) bool {
 		if r.path == req.URL.Path || r.path == req.URL.String() {
 			return true
 		}
+
 		if strings.TrimPrefix(r.path, "/") == strings.TrimPrefix(req.URL.Path, "/") ||
 			strings.TrimPrefix(r.path, "/") == strings.TrimPrefix(req.URL.String(), "/") {
 			return true
 		}
+
 		return false
 	}
 
@@ -132,7 +135,7 @@ func (r *MockRoute) matches(req *http.Request) bool {
 }
 
 func (r *MockRoute) respond(req *http.Request) (*http.Response, error) {
-	r.calls++
+	r.calls.Add(1)
 
 	resp := &http.Response{
 		StatusCode:    r.statusCode,

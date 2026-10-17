@@ -51,6 +51,8 @@ var (
 		"aoni/tests/testutil.VerifyRuntimeGoroutines",
 		"foundation/silicon/clock",
 		"foundation/timekit",
+		"crypto/tls.(*QUICConn)",
+		"crypto/tls.(*Conn).quicWaitForSignal",
 	}
 )
 

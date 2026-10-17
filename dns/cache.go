@@ -13,8 +13,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/async/dedup"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
 // Standard DNS caching and resiliency constants defined in RFC 8767 and RFC 2308.

@@ -13,8 +13,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/types/secret"
-	"github.com/lemon4ksan/mach/proto/semantic/auth"
 	"github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/auth"
 	"github.com/lemon4ksan/mach/proto/semantic/priority"
 
 	"github.com/lemon4ksan/aoni"

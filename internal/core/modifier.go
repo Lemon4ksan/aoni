@@ -14,8 +14,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/lemon4ksan/mach/proto/semantic/auth"
 	"github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/auth"
 )
 
 // ModifierType specifies the discrete operation type of a [RequestModifier] value.
