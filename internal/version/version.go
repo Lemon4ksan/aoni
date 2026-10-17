@@ -9,4 +9,7 @@ package version
 const Current = "v" + Number
 
 // Number is the raw semantic release version without 'v' prefix.
+// x-release-please-start-version
 const Number = "0.7.0"
+
+// x-release-please-end

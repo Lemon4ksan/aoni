@@ -1,0 +1,11 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        "internal/version/version.go"
+      ]
+    }
+  }
+}

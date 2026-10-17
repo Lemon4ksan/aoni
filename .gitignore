@@ -29,6 +29,8 @@ profile.cov
 
 # Example output
 *.json
+!release-please-config.json
+!.release-please-manifest.json
 
 # Environment & secrets
 .env
