@@ -14,8 +14,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	auth "github.com/lemon4ksan/mach/proto/semantic/auth"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/auth"
+	"github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // ModifierType specifies the discrete operation type of a [RequestModifier] value.
@@ -60,14 +60,14 @@ func (m RequestModifier) Apply(req Request) {
 	case ModQuery, ModQueryAdd:
 		req.AddQueryParam(m.Key, m.Value)
 	case ModBearer:
-		req.SetHeader(header.Authorization, auth.FormatBearer(m.Value))
+		req.SetHeader(headkit.Authorization, auth.FormatBearer(m.Value))
 	case ModBasicAuth:
-		req.SetHeader(header.Authorization, auth.FormatBasic(m.Key, m.Value))
+		req.SetHeader(headkit.Authorization, auth.FormatBasic(m.Key, m.Value))
 	case ModBodyBytes:
 		req.SetBodyBytes(m.Bytes)
 
 		if m.ContentType != "" {
-			req.SetHeader(header.ContentType, m.ContentType)
+			req.SetHeader(headkit.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -81,7 +81,7 @@ func (m RequestModifier) Apply(req Request) {
 		req.SetBodyStream(m.Stream, lenVal)
 
 		if m.ContentType != "" {
-			req.SetHeader(header.ContentType, m.ContentType)
+			req.SetHeader(headkit.ContentType, m.ContentType)
 		}
 
 	case ModCustom:
@@ -127,14 +127,14 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(header.Authorization, auth.FormatBearer(m.Value))
+		req.Header.Set(headkit.Authorization, auth.FormatBearer(m.Value))
 
 	case ModBasicAuth:
 		if req.Header == nil {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set(header.Authorization, auth.FormatBasic(m.Key, m.Value))
+		req.Header.Set(headkit.Authorization, auth.FormatBasic(m.Key, m.Value))
 
 	case ModBodyBytes:
 		buf := m.Bytes
@@ -149,7 +149,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set(header.ContentType, m.ContentType)
+			req.Header.Set(headkit.ContentType, m.ContentType)
 		}
 
 	case ModBodyStream:
@@ -171,7 +171,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 				req.Header = make(http.Header)
 			}
 
-			req.Header.Set(header.ContentType, m.ContentType)
+			req.Header.Set(headkit.ContentType, m.ContentType)
 		}
 
 	case ModCustom:

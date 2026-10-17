@@ -12,8 +12,8 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	mach "github.com/lemon4ksan/mach/proto/http"
-	header "github.com/lemon4ksan/mach/proto/headkit"
-	uri "github.com/lemon4ksan/mach/proto/semantic/uri"
+	"github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/uri"
 )
 
 func (c *Client) executeWithRedirects(
@@ -60,7 +60,7 @@ func (c *Client) executeWithRedirects(
 			return trailers, nil, false
 		}
 
-		location := fastResp.Header.Peek(header.Location)
+		location := fastResp.Header.Peek(headkit.Location)
 		if len(location) == 0 {
 			return trailers, nil, false
 		}
@@ -121,12 +121,12 @@ func isHTTPSDowngrade(u1, u2 *uri.URI) bool {
 }
 
 var representationHeaders = [...]string{
-	header.ContentType,
-	header.ContentLength,
-	header.ContentEncoding,
-	header.ContentLanguage,
-	header.ContentLocation,
-	header.Digest,
+	headkit.ContentType,
+	headkit.ContentLength,
+	headkit.ContentEncoding,
+	headkit.ContentLanguage,
+	headkit.ContentLocation,
+	headkit.Digest,
 }
 
 // applyRedirectMethodAndBody changes request method to GET and scrubs representation/content headers

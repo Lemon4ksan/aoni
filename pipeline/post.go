@@ -21,7 +21,7 @@ import (
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/seal/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/netutil/dict"
 )
@@ -602,13 +602,13 @@ func stageDictionaryCapture(
 }
 
 func resetDecompressedHeader(resp *http.Response) {
-	resp.Header.Del(header.ContentEncoding)
-	resp.Header.Del(header.ContentLength)
+	resp.Header.Del(headkit.ContentEncoding)
+	resp.Header.Del(headkit.ContentLength)
 	resp.ContentLength = -1
 }
 
 func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadCloser {
-	contentType := resp.Header.Get(header.ContentType)
+	contentType := resp.Header.Get(headkit.ContentType)
 	if contentType == "" {
 		return body
 	}
@@ -652,7 +652,7 @@ func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadClo
 			off += copy(buf[off:], params[k])
 		}
 
-		resp.Header.Set(header.ContentType, string(buf[:off]))
+		resp.Header.Set(headkit.ContentType, string(buf[:off]))
 	} else {
 		var b strings.Builder
 		b.Grow(len(mediaType) + totalLen)
@@ -665,7 +665,7 @@ func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadClo
 			b.WriteString(params[k])
 		}
 
-		resp.Header.Set(header.ContentType, b.String())
+		resp.Header.Set(headkit.ContentType, b.String())
 	}
 
 	return &iokit.DecompressReadCloser{

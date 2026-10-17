@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -88,10 +88,10 @@ func stageAvailableDictionary(h *StdHandler, req *http.Request, _ *Tx) *http.Req
 	}
 
 	// RFC 9842 §6.1: Accept-Encoding
-	ae := req.Header.Get(header.AcceptEncoding)
+	ae := req.Header.Get(headkit.AcceptEncoding)
 	if ae != "" {
 		if !strings.Contains(strings.ToLower(ae), dict.ContentEncodingDCZ) {
-			req.Header.Set(header.AcceptEncoding, ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
+			req.Header.Set(headkit.AcceptEncoding, ae+", "+dict.ContentEncodingDCB+", "+dict.ContentEncodingDCZ)
 		}
 	}
 
@@ -352,11 +352,11 @@ func (h *StdHandler) applyRefererHeader(req *http.Request) {
 		req.Header = make(http.Header)
 	}
 
-	if req.Header.Get(header.Referer) != "" || h.defaults.RefererState == nil {
+	if req.Header.Get(headkit.Referer) != "" || h.defaults.RefererState == nil {
 		return
 	}
 
 	if lastURL := h.defaults.RefererState.LastURL.Get(); lastURL != "" {
-		req.Header.Set(header.Referer, lastURL)
+		req.Header.Set(headkit.Referer, lastURL)
 	}
 }

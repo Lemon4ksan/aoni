@@ -30,14 +30,12 @@
 //   - [github.com/lemon4ksan/aoni/option] - Functional client configuration options (e.g. WithProxy, WithTimeout, WithBaseURL).
 //   - [github.com/lemon4ksan/aoni/mod] - Per-request modifiers (e.g. WithJSONBody, WithHeader, WithQuery).
 //   - [github.com/lemon4ksan/aoni/fast] - Ultra-high-throughput fasthttp + H2/H3 client facade.
-//   - [github.com/lemon4ksan/aoni/grpc] - Native gRPC client (Invoke, ServerStream, DynamicInvoker).
 //   - [github.com/lemon4ksan/aoni/cookie] - Proxy-isolated cookie jars (ProxyIsolatedJar, SQLStorage, JSONFileStorage).
 //   - [github.com/lemon4ksan/aoni/codec] - Unified response body decoders and struct-to-values encoders.
-//   - [github.com/lemon4ksan/aoni/tls] - ECH (RFC 9460), GREASE (RFC 8701), and JA4/JA4H fingerprint computation.
+//   - [github.com/lemon4ksan/aoni/tls] - ECH (RFC 9460) and GREASE (RFC 8701) protocol primitives.
 //   - [github.com/lemon4ksan/aoni/resiliency] - Response caching, load balancing, circuit breakers, retries, and request coalescing.
 //   - [github.com/lemon4ksan/aoni/realtime] - WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streams.
 //   - [github.com/lemon4ksan/aoni/telemetry] - HAR generators, EWMA latency trackers, and the traffic inspector hook.
-//   - [github.com/lemon4ksan/aoni/tunnel] - MASQUE HTTP CONNECT-UDP tunnels and TUN adapter bindings.
 //   - [github.com/lemon4ksan/aoni/proxy] - Proxy rotators, PAC engine, sticky sessions, and adaptive limiters.
 //
 // # The "aoni v1" Compatibility & Forever-Frozen Core Manifesto

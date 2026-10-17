@@ -10,7 +10,7 @@ This document describes the layered architecture, package boundaries, and concur
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
     │              Layer 3: Policies, Codecs & Features                │
-    │   resiliency • cookie • codec • realtime • tls • tunnel • nik    │
+    │   resiliency • cookie • codec • realtime • tls • proxy • nik     │
     └─────────────────────────────────┬────────────────────────────────┘
                                       │
     ┌─────────────────────────────────▼────────────────────────────────┐
@@ -40,7 +40,6 @@ The repository is structured into four layers with strict unidirectional depende
 * **`resiliency`**: Retries, backoff strategies, circuit breakers, caching (RFC 9111), and connection hedging.
 * **`tls` & `fragment`**: ECH (RFC 9460), GREASE (RFC 8701), pure-Go JA4/JA4H computation, and TCP payload chunking (L4 DPI evasion). Full browser impersonation (uTLS, HTTP/2 frame forge, p0f) lives in satellite repo `aoni-browser`.
 * **`realtime`**: WebSockets (RFC 8441), Server-Sent Events (SSE), and NDJSON streaming.
-* **`tunnel`**: SOCKS5, HTTP CONNECT, and MASQUE (RFC 9298 / RFC 9484) encapsulation.
 * **`nik`**: Network Isolation Keys (W3C / RFC 6265bis partitioned network state).
 
 ### Layer 2: Execution Engines & Pipeline
@@ -61,7 +60,7 @@ The repository is structured into four layers with strict unidirectional depende
 * `internal/quic` is a private protocol implementation.
 * Neither `aoni` nor `fast` may import `internal/quic`.
 * HTTP/3 configuration is handled through `internal/fast/h3engine.NewClientFromSettings()`.
-* Only protocol drivers (`h3engine`, `x/webtransport`, `tunnel/masque`, `netutil/dns/doq`) may import QUIC.
+* Only protocol drivers (`h3engine`, `netutil/dns/doq`, satellite repo `aoni-contrib`) may import QUIC.
 
 ### Rule 2: Engine Decoupling
 * `aoni.Client` (`net/http`) and `fast.Client` (`fasthttp`) are independent.

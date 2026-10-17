@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -292,7 +292,7 @@ func (s *Request) SetHeader(key, value string) {
 		s.req.Header = make(http.Header)
 	}
 
-	if strings.EqualFold(key, header.Host) {
+	if strings.EqualFold(key, headkit.Host) {
 		s.req.Host = value
 	}
 

@@ -7,7 +7,7 @@ package cookie
 import (
 	"net/http"
 
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // Transport intercepts HTTP responses to extract and store Set-Cookie headers,
@@ -25,10 +25,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if jar := t.CookieJar; jar != nil {
 			if cookies := jar.Cookies(req.Context(), req.URL); len(cookies) > 0 {
 				if cookieHeader := BuildCookieHeader(cookies); cookieHeader != "" {
-					if existing := req.Header.Get(header.Cookie); existing != "" {
-						req.Header.Set(header.Cookie, existing+"; "+cookieHeader)
+					if existing := req.Header.Get(headkit.Cookie); existing != "" {
+						req.Header.Set(headkit.Cookie, existing+"; "+cookieHeader)
 					} else {
-						req.Header.Set(header.Cookie, cookieHeader)
+						req.Header.Set(headkit.Cookie, cookieHeader)
 					}
 				}
 			}

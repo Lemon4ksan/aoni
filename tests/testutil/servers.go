@@ -32,7 +32,7 @@ import (
 
 	"github.com/lemon4ksan/mach/net/quic"
 	h3client "github.com/lemon4ksan/mach/client/h3"
-	machh3server "github.com/lemon4ksan/mach/server/h3"
+	h3server "github.com/lemon4ksan/mach/server/h3"
 )
 
 // Server represents a generic multi-protocol in-process test server.
@@ -443,7 +443,7 @@ type H3TestServer struct {
 	addr      string
 	port      int
 	url       string
-	h3Handler machh3server.ServerHandlerFunc
+	h3Handler h3server.ServerHandlerFunc
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -452,7 +452,7 @@ type H3TestServer struct {
 	isClosed  atomic.Bool
 
 	mu          sync.Mutex
-	activeConns map[*quic.Conn]*machh3server.ServerConn
+	activeConns map[*quic.Conn]*h3server.ServerConn
 }
 
 // NewH3Server starts an in-process HTTP/3 test server on 127.0.0.1:0.
@@ -462,11 +462,11 @@ func NewH3Server(t testing.TB, handler any) *H3TestServer {
 
 	tlsPair := GenerateTestTLSPair(t, "h3")
 
-	var h3Handler machh3server.ServerHandlerFunc
+	var h3Handler h3server.ServerHandlerFunc
 	switch h := handler.(type) {
-	case machh3server.ServerHandlerFunc:
+	case h3server.ServerHandlerFunc:
 		h3Handler = h
-	case func(req *machh3server.ServerRequest, res *machh3server.ServerResponse) error:
+	case func(req *h3server.ServerRequest, res *h3server.ServerResponse) error:
 		h3Handler = h
 	case http.Handler:
 		h3Handler = AdaptHTTPHandlerToH3(h)
@@ -497,7 +497,7 @@ func NewH3Server(t testing.TB, handler any) *H3TestServer {
 		h3Handler:   h3Handler,
 		ctx:         ctx,
 		cancel:      cancel,
-		activeConns: make(map[*quic.Conn]*machh3server.ServerConn),
+		activeConns: make(map[*quic.Conn]*h3server.ServerConn),
 	}
 
 	s.wg.Add(1)
@@ -516,11 +516,11 @@ func (s *H3TestServer) acceptLoop() {
 			return
 		}
 
-		sc := machh3server.NewServerConn(conn, s.h3Handler)
+		sc := h3server.NewServerConn(conn, s.h3Handler)
 		s.registerConn(conn, sc)
 
 		s.wg.Add(1)
-		go func(c *quic.Conn, serverConn *machh3server.ServerConn) {
+		go func(c *quic.Conn, serverConn *h3server.ServerConn) {
 			defer s.wg.Done()
 			defer s.unregisterConn(c)
 			_ = serverConn.Serve()
@@ -528,7 +528,7 @@ func (s *H3TestServer) acceptLoop() {
 	}
 }
 
-func (s *H3TestServer) registerConn(c *quic.Conn, sc *machh3server.ServerConn) {
+func (s *H3TestServer) registerConn(c *quic.Conn, sc *h3server.ServerConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.isClosed.Load() {
@@ -576,12 +576,12 @@ func (s *H3TestServer) Close() error {
 		// Snapshot active connections under lock to avoid holding the mutex during I/O
 		s.mu.Lock()
 		activeConns := make([]*quic.Conn, 0, len(s.activeConns))
-		activeServerConns := make([]*machh3server.ServerConn, 0, len(s.activeConns))
+		activeServerConns := make([]*h3server.ServerConn, 0, len(s.activeConns))
 		for conn, sc := range s.activeConns {
 			activeConns = append(activeConns, conn)
 			activeServerConns = append(activeServerConns, sc)
 		}
-		s.activeConns = make(map[*quic.Conn]*machh3server.ServerConn)
+		s.activeConns = make(map[*quic.Conn]*h3server.ServerConn)
 		s.mu.Unlock()
 
 		// Send CONNECTION_CLOSE to all active connections BEFORE closing the UDP listener
@@ -598,8 +598,8 @@ func (s *H3TestServer) Close() error {
 }
 
 // AdaptHTTPHandlerToH3 adapts a standard net/http.Handler into a mach/server/h3.ServerHandlerFunc.
-func AdaptHTTPHandlerToH3(h http.Handler) machh3server.ServerHandlerFunc {
-	return func(req *machh3server.ServerRequest, res *machh3server.ServerResponse) error {
+func AdaptHTTPHandlerToH3(h http.Handler) h3server.ServerHandlerFunc {
+	return func(req *h3server.ServerRequest, res *h3server.ServerResponse) error {
 		reqURL, err := url.ParseRequestURI(req.Path)
 		if err != nil {
 			reqURL = &url.URL{Path: req.Path}

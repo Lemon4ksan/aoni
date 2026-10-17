@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
-	github.com/lemon4ksan/foundation v0.1.0
+	github.com/lemon4ksan/foundation v0.2.1
 	github.com/lemon4ksan/mach v0.2.0
 	github.com/lemon4ksan/seal v0.1.0
 	golang.org/x/net v0.61.0
@@ -20,10 +20,3 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
-
-replace (
-	github.com/lemon4ksan/foundation => ../foundation
-	github.com/lemon4ksan/mach => ../mach
-	github.com/lemon4ksan/seal => ../seal
-)
-

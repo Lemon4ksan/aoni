@@ -5,8 +5,12 @@
 package aoni
 
 import (
+	"context"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/lemon4ksan/foundation/testing/assert"
@@ -117,4 +121,130 @@ func TestApplyMSSLimit(t *testing.T) {
 		assert.NotNil(t, res)
 		assert.Equal(t, clientConn, res)
 	})
+}
+
+func TestClient_ResolveURL_VersionPreservation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		baseURL  string
+		path     string
+		expected string
+	}{
+		{
+			name:     "base without slash + leading slash path",
+			baseURL:  "https://api.example.com/v1",
+			path:     "/users",
+			expected: "https://api.example.com/v1/users",
+		},
+		{
+			name:     "base without slash + relative path",
+			baseURL:  "https://api.example.com/v1",
+			path:     "users",
+			expected: "https://api.example.com/v1/users",
+		},
+		{
+			name:     "base with slash + leading slash path",
+			baseURL:  "https://api.example.com/v1/",
+			path:     "/users",
+			expected: "https://api.example.com/v1/users",
+		},
+		{
+			name:     "base with slash + relative path",
+			baseURL:  "https://api.example.com/v1/",
+			path:     "users",
+			expected: "https://api.example.com/v1/users",
+		},
+		{
+			name:     "base without slash + path with query params",
+			baseURL:  "https://api.example.com/v1",
+			path:     "/users?limit=10&sort=asc",
+			expected: "https://api.example.com/v1/users?limit=10&sort=asc",
+		},
+		{
+			name:     "base with query + path with query",
+			baseURL:  "https://api.example.com/v1?api_key=secret",
+			path:     "/users?limit=10",
+			expected: "https://api.example.com/v1/users?api_key=secret&limit=10",
+		},
+		{
+			name:     "base without slash + query-only path",
+			baseURL:  "https://api.example.com/v1",
+			path:     "?filter=active",
+			expected: "https://api.example.com/v1?filter=active",
+		},
+		{
+			name:     "root base without slash + leading slash path",
+			baseURL:  "https://api.example.com",
+			path:     "/users/123",
+			expected: "https://api.example.com/users/123",
+		},
+		{
+			name:     "root base with slash + relative path",
+			baseURL:  "https://api.example.com/",
+			path:     "users/123",
+			expected: "https://api.example.com/users/123",
+		},
+		{
+			name:     "absolute URL overrides baseURL",
+			baseURL:  "https://api.example.com/v1",
+			path:     "https://other-service.internal/health",
+			expected: "https://other-service.internal/health",
+		},
+		{
+			name:     "protocol-relative URL adopts baseURL scheme",
+			baseURL:  "https://api.example.com/v1",
+			path:     "//cdn.example.com/bundle.js",
+			expected: "https://cdn.example.com/bundle.js",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			baseParsed, err := url.Parse(tc.baseURL)
+			require.NoError(t, err)
+
+			client := NewClient(nil, func(cfg *Config) {
+				cfg.Defaults.BaseURL = baseParsed
+			})
+			defer client.Close()
+
+			resolved, err := client.resolveURL(tc.path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, resolved.String())
+		})
+	}
+}
+
+func TestClient_Get_WithBaseURLWithoutTrailingSlash(t *testing.T) {
+	t.Parallel()
+
+	var receivedPath string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.RequestURI()
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// BaseURL has subpath without trailing slash (e.g. http://127.0.0.1:port/api/v1)
+	baseParsed, err := url.Parse(ts.URL + "/api/v1")
+	require.NoError(t, err)
+
+	client := NewClient(nil, func(cfg *Config) {
+		cfg.Defaults.BaseURL = baseParsed
+	})
+	defer client.Close()
+
+	resp, err := client.Get(context.Background(), "/users?page=2")
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "/api/v1/users?page=2", receivedPath)
 }

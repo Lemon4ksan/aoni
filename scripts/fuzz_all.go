@@ -31,8 +31,6 @@ var targets = []fuzzTarget{
 	{"./realtime/ws", "FuzzWSCloseMessage"},
 	{"./realtime/ws", "FuzzWSMask"},
 	{"./realtime/ws", "FuzzWSAcceptKey"},
-	{"./tunnel/masque", "FuzzMASQUEVarint"},
-	{"./tunnel/masque", "FuzzIPPacketExtract"},
 	{"./codec/values", "FuzzValuesEncode"},
 	{"./codec/decode", "FuzzDecoders"},
 }

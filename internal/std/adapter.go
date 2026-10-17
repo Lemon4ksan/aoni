@@ -13,7 +13,7 @@ import (
 	"strconv"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -199,7 +199,7 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	if clStr := resp.Header(header.ContentLength); clStr != "" {
+	if clStr := resp.Header(headkit.ContentLength); clStr != "" {
 		if cl, parseErr := strconv.ParseInt(clStr, 10, 64); parseErr == nil {
 			httpResp.ContentLength = cl
 		}
@@ -259,7 +259,7 @@ func ToHTTPRequest(req core.Request) (*http.Request, error) {
 		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 	}
 
-	if host := req.Header(header.Host); host != "" {
+	if host := req.Header(headkit.Host); host != "" {
 		httpReq.Host = host
 	}
 

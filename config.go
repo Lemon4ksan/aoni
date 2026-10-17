@@ -17,8 +17,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/urlkit"
-	coreh3 "github.com/lemon4ksan/mach/proto/h3"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/h3"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/fragment"
 	"github.com/lemon4ksan/aoni/internal/transport"
@@ -190,8 +190,8 @@ type DialConfig = transport.DialConfig
 // automatically scrubbed during cross-origin HTTP redirects (RFC 9110 §15.4)
 // to prevent security token leakage to untrusted third-party origins.
 var DefaultSensitiveHeaders = []string{
-	header.Authorization,
-	header.Cookie,
+	headkit.Authorization,
+	headkit.Cookie,
 	"X-Session-ID",
 	"X-Access-Token",
 	"X-Access-Key",
@@ -355,7 +355,7 @@ type EngineConfig struct {
 	EnableH3 bool
 
 	// H3Settings configures low-level HTTP/3 protocol parameters.
-	H3Settings *coreh3.Settings
+	H3Settings *h3.Settings
 }
 
 // DigestAuthConfig holds RFC 7616 HTTP Digest Access Authentication credentials.

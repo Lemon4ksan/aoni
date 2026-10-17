@@ -24,7 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/tests/testutil"
 	"github.com/lemon4ksan/foundation/testing/assert"
 	"github.com/lemon4ksan/foundation/testing/require"
-	coreh3 "github.com/lemon4ksan/mach/proto/h3"
+	"github.com/lemon4ksan/mach/proto/h3"
 	"github.com/lemon4ksan/mach/proto/headkit"
 	mach "github.com/lemon4ksan/mach/proto/http"
 	"github.com/lemon4ksan/mach/proto/codec/qpack"
@@ -323,7 +323,7 @@ func TestQPACK_F9_RFC9204_32ByteOverhead_ExactSizing(t *testing.T) {
 func TestQPACK_F9_ZeroCapacity_PureLiteralFallback(t *testing.T) {
 	t.Parallel()
 
-	codec := coreh3.NewQPACKCodecWithOptions(0, 0, nil)
+	codec := h3.NewQPACKCodecWithOptions(0, 0, nil)
 	assert.Equal(t, uint64(0), codec.Encoder().HeaderTable().MaximumDynamicTableCapacity())
 
 	headers := []qpack.HeaderField{
@@ -504,7 +504,7 @@ func TestQPACK_F10_HighTurnover_Roundtrip_ContinuousChurn(t *testing.T) {
 func TestQPACK_F10_ConcurrentCodecStress_GoroutineRaceSafety(t *testing.T) {
 	t.Parallel()
 
-	codec := coreh3.NewQPACKCodecWithOptions(4096, 100, nil)
+	codec := h3.NewQPACKCodecWithOptions(4096, 100, nil)
 
 	const (
 		numWorkers = 20
@@ -830,7 +830,7 @@ func TestQPACK_F11_LiteralFallback_WhenDynamicTableFull(t *testing.T) {
 func TestQPACK_F11_HighConcurrency_NoDeadlock_Soak(t *testing.T) {
 	t.Parallel()
 
-	codec := coreh3.NewQPACKCodecWithOptions(8192, 5, nil)
+	codec := h3.NewQPACKCodecWithOptions(8192, 5, nil)
 	codec.Encoder().SetStreamSenderDelegate(&stressSenderDelegate{})
 
 	const (
@@ -1377,7 +1377,7 @@ func TestQPACK_F11_H3_E2E_ZeroBlockedStreams_Concurrency(t *testing.T) {
 	server := testutil.NewH3Server(t, handler)
 	defer server.Close()
 
-	settings := &coreh3.Settings{
+	settings := &h3.Settings{
 		MaxFieldSectionSize: 64 * 1024,
 		QpackMaxTableCap:    4096,
 		QpackBlockedStreams: 0,
@@ -1475,7 +1475,7 @@ func TestQPACK_F11_H3_E2E_ConstrainedBlockedStreams_Soak(t *testing.T) {
 	server := testutil.NewH3Server(t, handler)
 	defer server.Close()
 
-	settings := &coreh3.Settings{
+	settings := &h3.Settings{
 		MaxFieldSectionSize: 128 * 1024,
 		QpackMaxTableCap:    4096,
 		QpackBlockedStreams: 5,

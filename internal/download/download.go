@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/iokit"
 	"github.com/lemon4ksan/mach/proto/semantic/contentdisposition"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -150,7 +150,7 @@ func resolveDownloadTarget(resp *http.Response, targetPath, outputFile, outputDi
 
 	var filename string
 	if resp != nil && resp.Header != nil {
-		if cd := resp.Header.Get(header.ContentDisposition); cd != "" {
+		if cd := resp.Header.Get(headkit.ContentDisposition); cd != "" {
 			filename = contentdisposition.ExtractFilename(cd)
 		}
 	}

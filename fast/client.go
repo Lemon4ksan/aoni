@@ -19,6 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/body"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -265,15 +266,11 @@ func (c *Client) resolveURL(path string) (string, error) {
 		return "", ErrTargetURLEmpty
 	}
 
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+	if c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Scheme == "" {
 		return path, nil
 	}
 
-	if c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Scheme != "" {
-		return c.cfg.Defaults.BaseURL.JoinPath(path).String(), nil
-	}
-
-	return path, nil
+	return requestutil.ResolveURLString(c.cfg.Defaults.BaseURL, path)
 }
 
 // Request executes an HTTP request using the specified method, destination path, and modifiers.

@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/async/logkit"
 	"github.com/lemon4ksan/foundation/generic"
-	fproxy "github.com/lemon4ksan/mach/net/proxy"
+	"github.com/lemon4ksan/mach/net/proxy"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
@@ -39,13 +39,13 @@ var (
 // Parse parses a raw proxy string into a structured [*url.URL] (RFC 3986 §3).
 // Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func Parse(proxyStr string) (*url.URL, error) {
-	return fproxy.Parse(proxyStr)
+	return proxy.Parse(proxyStr)
 }
 
 // ProbeProxy actively tests an endpoint to determine if it speaks SOCKS5, HTTP CONNECT, or other protocols.
 // Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func ProbeProxy(ctx context.Context, addr string) (string, error) {
-	return fproxy.ProbeProxy(ctx, addr)
+	return proxy.ProbeProxy(ctx, addr)
 }
 
 // WithClient pairs an [aoni.HTTPDoer] client with its associated exit proxy URL.

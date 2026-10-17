@@ -13,8 +13,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/encoding/json"
 	"github.com/lemon4ksan/foundation/types/secret"
-	auth "github.com/lemon4ksan/mach/proto/semantic/auth"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/semantic/auth"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	"github.com/lemon4ksan/mach/proto/semantic/priority"
 
 	"github.com/lemon4ksan/aoni"
@@ -166,7 +166,7 @@ func WithUserAgent(ua string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.UserAgent, ua)
+		cfg.Defaults.Headers.Set(headkit.UserAgent, ua)
 	}
 }
 
@@ -177,7 +177,7 @@ func WithOrigin(origin string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Origin, origin)
+		cfg.Defaults.Headers.Set(headkit.Origin, origin)
 	}
 }
 
@@ -198,7 +198,7 @@ func WithBearer(token string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Authorization, auth.FormatBearer(token))
+		cfg.Defaults.Headers.Set(headkit.Authorization, auth.FormatBearer(token))
 	}
 }
 
@@ -220,7 +220,7 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Authorization, auth.FormatBasic(username, password))
+		cfg.Defaults.Headers.Set(headkit.Authorization, auth.FormatBasic(username, password))
 	}
 }
 
@@ -279,7 +279,7 @@ func WithEnvBearer(envVarName string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
+		cfg.Defaults.Headers.Set(headkit.Authorization, "Bearer "+val)
 	}
 }
 
@@ -346,7 +346,7 @@ func FromVortexCache(startDirs ...string) aoni.ClientOption {
 
 			if entry.Header != "" {
 				if strings.EqualFold(entry.Header, "authorization") && !strings.HasPrefix(val, "Bearer ") {
-					cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
+					cfg.Defaults.Headers.Set(headkit.Authorization, "Bearer "+val)
 				} else {
 					cfg.Defaults.Headers.Set(entry.Header, val)
 				}
@@ -357,9 +357,9 @@ func FromVortexCache(startDirs ...string) aoni.ClientOption {
 			switch strings.ToUpper(key) {
 			case "AUTH_TOKEN", "BEARER_TOKEN", "API_TOKEN", "ACCESS_TOKEN":
 				if !strings.HasPrefix(val, "Bearer ") {
-					cfg.Defaults.Headers.Set(header.Authorization, "Bearer "+val)
+					cfg.Defaults.Headers.Set(headkit.Authorization, "Bearer "+val)
 				} else {
-					cfg.Defaults.Headers.Set(header.Authorization, val)
+					cfg.Defaults.Headers.Set(headkit.Authorization, val)
 				}
 
 			case "API_KEY", "APIKEY", "X_API_KEY":

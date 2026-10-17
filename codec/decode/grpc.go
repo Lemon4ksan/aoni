@@ -16,7 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/transport"
@@ -170,11 +170,11 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 		keyStr := bytesconv.B2S(keyBytes)
 
 		switch {
-		case bytesconv.EqualFoldASCII(keyStr, header.GRPCStatus):
+		case bytesconv.EqualFoldASCII(keyStr, headkit.GRPCStatus):
 			statusCode = bytesconv.B2S(valBytes)
-		case bytesconv.EqualFoldASCII(keyStr, header.GRPCMessage):
+		case bytesconv.EqualFoldASCII(keyStr, headkit.GRPCMessage):
 			statusMsg = bytesconv.B2S(valBytes)
-		case bytesconv.EqualFoldASCII(keyStr, header.GRPCStatusDetailsBin):
+		case bytesconv.EqualFoldASCII(keyStr, headkit.GRPCStatusDetailsBin):
 			valStr := bytesconv.B2S(valBytes)
 			if decoded, err := base64.RawStdEncoding.DecodeString(valStr); err == nil {
 				statusDetails = decoded

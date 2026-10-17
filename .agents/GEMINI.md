@@ -40,17 +40,15 @@ aoni/
 ├── fast/                              // Ultra-fast client engine built on fasthttp
 ├── cookie/                            // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting, PublicSuffixList interface
 ├── dns/                               // DNS resolvers (DoH, DoQ, DoT, stale cache, bootstrap)
-├── tls/                               // ECH, GREASE, JA4/JA4H computation
+├── tls/                               // ECH (RFC 9460) and GREASE (RFC 8701)
 ├── fragment/                          // TCP payload write chunking (L4 DPI evasion)
 ├── nik/                               // Network Isolation Keys (context DTOs for cache/cookie partitioning)
-├── privacypass/                       // Privacy Pass (RFC 9576/9577/9578)
 ├── proxy/                             // Proxy rotators, PAC engine, sticky sessions, adaptive timeout
 ├── netutil/                           // Multi-NIC binding, io_uring, network probes, compression dictionaries
 ├── codec/                             // Response decoders (JSON, Proto, gRPC-Web, XML) & url.Values encoders
 ├── realtime/                          // WebSockets, SSE & NDJSON streams
 ├── resiliency/                        // Response caching, Retries, Request coalescing, Backoff, Load Balancers
 ├── telemetry/                         // HAR generators, EWMA latency trackers, traffic inspector hook
-├── tunnel/                            // MASQUE CONNECT-UDP/IP tunnels and TUN adapter bindings
 ├── docs/                              // Technical architecture docs (NETWORK_STACK.md, VOODOO.md, COOKBOOK.md)
 ├── examples/                          // Runnable RFC-level usage examples
 └── scripts/                           // Benchmark & fuzzing scripts

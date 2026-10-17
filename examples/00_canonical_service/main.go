@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
@@ -24,7 +24,7 @@ import (
 func main() {
 	// 1. Spin up a test server simulating a REST microservice
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(header.ContentType, header.MIMEApplicationJSON)
+		w.Header().Set(headkit.ContentType, headkit.MIMEApplicationJSON)
 
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/auth/login":

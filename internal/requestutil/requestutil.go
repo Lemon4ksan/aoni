@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 )
 
 var sensitiveHeaderStrings = [...]string{
@@ -170,9 +170,9 @@ func IsStreamingResponse(resp *http.Response) bool {
 		return false
 	}
 
-	contentType := strings.ToLower(resp.Header.Get(header.ContentType))
+	contentType := strings.ToLower(resp.Header.Get(headkit.ContentType))
 	streamingTypes := [...]string{
-		header.MIMETextEventStream,
+		headkit.MIMETextEventStream,
 		"application/stream",
 		"application/x-ndjson",
 		"application/x-stream",
@@ -185,7 +185,7 @@ func IsStreamingResponse(resp *http.Response) bool {
 		}
 	}
 
-	chunked := strings.Contains(strings.ToLower(resp.Header.Get(header.TransferEncoding)), "chunked")
+	chunked := strings.Contains(strings.ToLower(resp.Header.Get(headkit.TransferEncoding)), "chunked")
 
 	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
 }
@@ -296,37 +296,37 @@ func CanonicalHeaderKey(s string) string {
 
 	switch s {
 	case "Content-Type", "content-type", "CONTENT-TYPE":
-		return header.ContentType
+		return headkit.ContentType
 	case "Content-Length", "content-length", "CONTENT-LENGTH":
-		return header.ContentLength
+		return headkit.ContentLength
 	case "Server", "server", "SERVER":
-		return header.Server
+		return headkit.Server
 	case "Date", "date", "DATE":
-		return header.Date
+		return headkit.Date
 	case "Set-Cookie", "set-cookie", "SET-COOKIE":
-		return header.SetCookie
+		return headkit.SetCookie
 	case "Location", "location", "LOCATION":
-		return header.Location
+		return headkit.Location
 	case "Connection", "connection", "CONNECTION":
-		return header.Connection
+		return headkit.Connection
 	case "Cache-Control", "cache-control", "CACHE-CONTROL":
-		return header.CacheControl
+		return headkit.CacheControl
 	case "Accept", "accept", "ACCEPT":
-		return header.Accept
+		return headkit.Accept
 	case "Accept-Encoding", "accept-encoding", "ACCEPT-ENCODING":
-		return header.AcceptEncoding
+		return headkit.AcceptEncoding
 	case "Authorization", "authorization", "AUTHORIZATION":
-		return header.Authorization
+		return headkit.Authorization
 	case "User-Agent", "user-agent", "USER-AGENT":
-		return header.UserAgent
+		return headkit.UserAgent
 	case "Transfer-Encoding", "transfer-encoding", "TRANSFER-ENCODING":
-		return header.TransferEncoding
+		return headkit.TransferEncoding
 	case "Keep-Alive", "keep-alive", "KEEP-ALIVE":
 		return "Keep-Alive"
 	case "ETag", "etag", "ETAG":
-		return header.ETag
+		return headkit.ETag
 	case "Host", "host", "HOST":
-		return header.Host
+		return headkit.Host
 	}
 
 	b := CanonicalHeaderKeyBytes(bytesconv.S2B(s))

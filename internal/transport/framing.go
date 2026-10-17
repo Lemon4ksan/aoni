@@ -5,20 +5,20 @@
 package transport
 
 import (
-	fgrpcweb "github.com/lemon4ksan/mach/proto/grpcweb"
+	"github.com/lemon4ksan/mach/proto/grpcweb"
 )
 
 var (
-	ErrPayloadTooLarge  = fgrpcweb.ErrPayloadTooLarge
-	ErrTruncatedHeader  = fgrpcweb.ErrTruncatedHeader
-	ErrTruncatedPayload = fgrpcweb.ErrTruncatedPayload
+	ErrPayloadTooLarge  = grpcweb.ErrPayloadTooLarge
+	ErrTruncatedHeader  = grpcweb.ErrTruncatedHeader
+	ErrTruncatedPayload = grpcweb.ErrTruncatedPayload
 )
 
 // LengthPrefixedFramer decodes and encodes 5-byte length-prefixed frames:
 // [1 byte flags][4 bytes length (BigEndian)][payload bytes].
-type LengthPrefixedFramer = fgrpcweb.Framer
+type LengthPrefixedFramer = grpcweb.Framer
 
 // NewLengthPrefixedFramer initializes a [LengthPrefixedFramer].
 func NewLengthPrefixedFramer(maxPayloadSize uint32) *LengthPrefixedFramer {
-	return fgrpcweb.NewFramer(maxPayloadSize)
+	return grpcweb.NewFramer(maxPayloadSize)
 }

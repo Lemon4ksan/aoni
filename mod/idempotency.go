@@ -9,7 +9,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/randkit"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -18,7 +18,7 @@ import (
 const HeaderIdempotencyKey = "Idempotency-Key"
 
 // HeaderRequestID is the standard distributed tracing request identifier header.
-const HeaderRequestID = header.XRequestID
+const HeaderRequestID = headkit.XRequestID
 
 // WithIdempotencyKey generates and attaches a unique, time-ordered UUIDv7 into the "Idempotency-Key" header (RFC 9562).
 //

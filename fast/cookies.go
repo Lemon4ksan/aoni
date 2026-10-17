@@ -12,10 +12,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	mach "github.com/lemon4ksan/mach/proto/http"
 	"github.com/lemon4ksan/mach/proto/semantic/auth"
-	uri "github.com/lemon4ksan/mach/proto/semantic/uri"
+	"github.com/lemon4ksan/mach/proto/semantic/uri"
 
 	"github.com/lemon4ksan/aoni/cookie"
 )
@@ -39,7 +39,7 @@ func (c *Client) applyCookies(ctx context.Context, req *mach.Request) {
 		return
 	}
 
-	if existing := req.Header.Peek(header.Cookie); len(existing) > 0 {
+	if existing := req.Header.Peek(headkit.Cookie); len(existing) > 0 {
 		var stackBuf [512]byte
 
 		needed := len(existing) + 2 + len(cookieHeader)
@@ -54,9 +54,9 @@ func (c *Client) applyCookies(ctx context.Context, req *mach.Request) {
 		buf = append(buf, existing...)
 		buf = append(buf, ';', ' ')
 		buf = append(buf, cookieHeader...)
-		req.Header.SetBytesKV(bytesconv.S2B(header.Cookie), buf)
+		req.Header.SetBytesKV(bytesconv.S2B(headkit.Cookie), buf)
 	} else {
-		req.Header.Set(header.Cookie, cookieHeader)
+		req.Header.Set(headkit.Cookie, cookieHeader)
 	}
 }
 
@@ -118,7 +118,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 
 // extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
 func extractUserInfoAndSetAuth(req *mach.Request) {
-	if len(req.Header.Peek(header.Authorization)) > 0 {
+	if len(req.Header.Peek(headkit.Authorization)) > 0 {
 		return
 	}
 
@@ -126,7 +126,7 @@ func extractUserInfoAndSetAuth(req *mach.Request) {
 	if len(uBytes) > 0 {
 		user := bytesconv.B2S(uBytes)
 		pass := bytesconv.B2S(req.URI().Password())
-		req.Header.Set(header.Authorization, auth.FormatBasic(user, pass))
+		req.Header.Set(headkit.Authorization, auth.FormatBasic(user, pass))
 		req.URI().SetUsernameBytes(nil)
 		req.URI().SetPasswordBytes(nil)
 
@@ -142,7 +142,7 @@ func extractUserInfoAndSetAuth(req *mach.Request) {
 	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
 		user := parsed.User.Username()
 		pass, _ := parsed.User.Password()
-		req.Header.Set(header.Authorization, auth.FormatBasic(user, pass))
+		req.Header.Set(headkit.Authorization, auth.FormatBasic(user, pass))
 	}
 
 	req.URI().SetUsername("")
@@ -150,10 +150,10 @@ func extractUserInfoAndSetAuth(req *mach.Request) {
 }
 
 var sensitiveRedirectHeaders = [...]string{
-	header.Authorization,
-	header.ProxyAuthorization,
-	header.ProxyAuthenticate,
-	header.WWWAuthenticate,
+	headkit.Authorization,
+	headkit.ProxyAuthorization,
+	headkit.ProxyAuthenticate,
+	headkit.WWWAuthenticate,
 	"Cookie2",
 	"X-Api-Key",
 	"X-Auth-Token",
@@ -173,7 +173,7 @@ func scrubSensitiveHeaders(req *mach.Request, currentURI, nextURI *uri.URI) {
 	}
 
 	if !isSameDomainOrSubdomain(bytesconv.B2S(currentURI.Host()), bytesconv.B2S(nextURI.Host())) {
-		req.Header.Del(header.Cookie)
+		req.Header.Del(headkit.Cookie)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/pipeline"
@@ -487,7 +487,7 @@ func WithClientUserAgent(ua string) ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set(header.UserAgent, ua)
+		cfg.Defaults.Headers.Set(headkit.UserAgent, ua)
 	}
 }
 

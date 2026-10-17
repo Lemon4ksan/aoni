@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -99,7 +99,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 				Reader: bytes.NewReader(b),
 				buf:    buf,
 			}, int64(len(b)))
-			req.SetHeader(header.ContentType, writer.FormDataContentType())
+			req.SetHeader(headkit.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -143,7 +143,7 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 				if f.Reader != nil || f.Filename != "" {
 					ct := f.ContentType
 					if ct == "" {
-						ct = header.MIMEApplicationOctetStream
+						ct = headkit.MIMEApplicationOctetStream
 					}
 
 					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
@@ -177,7 +177,7 @@ func WithMultipartFields(fields []MultipartField) RequestModifier {
 				Reader: bytes.NewReader(b),
 				buf:    buf,
 			}, int64(len(b)))
-			req.SetHeader(header.ContentType, writer.FormDataContentType())
+			req.SetHeader(headkit.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -198,7 +198,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 			go streamMultipartPayload(ctx, pw, writer, fields, files)
 
 			req.SetBodyStream(pr, -1)
-			req.SetHeader(header.ContentType, writer.FormDataContentType())
+			req.SetHeader(headkit.ContentType, writer.FormDataContentType())
 		},
 	}
 }
@@ -253,23 +253,23 @@ func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
 	}
 
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return header.MIMEApplicationOctetStream, r
+		return headkit.MIMEApplicationOctetStream, r
 	}
 
-	return header.MIMEApplicationOctetStream, r
+	return headkit.MIMEApplicationOctetStream, r
 }
 
 // createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type (RFC 7578 §4.2 & §4.4).
 // Per RFC 7578 §4.2, filename* (RFC 5987/8187) MUST NOT be used in multipart/form-data.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
 	h := make(textproto.MIMEHeader)
-	h.Set(header.ContentDisposition,
+	h.Set(headkit.ContentDisposition,
 		"form-data; name=\""+escapeQuotes(fieldname)+"\"; filename=\""+escapeQuotes(filename)+"\"")
 
 	if contentType != "" {
-		h.Set(header.ContentType, contentType)
+		h.Set(headkit.ContentType, contentType)
 	} else {
-		h.Set(header.ContentType, header.MIMEApplicationOctetStream)
+		h.Set(headkit.ContentType, headkit.MIMEApplicationOctetStream)
 	}
 
 	return w.CreatePart(h)

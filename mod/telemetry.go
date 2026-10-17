@@ -12,7 +12,7 @@ import (
 	"os"
 
 	"github.com/lemon4ksan/foundation/iokit"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -30,7 +30,7 @@ func WithCorrelationID(id string) RequestModifier {
 			cfg.TraceInfo.CorrelationID = activeID
 		}
 
-		req.SetHeader(header.XCorrelationID, activeID)
+		req.SetHeader(headkit.XCorrelationID, activeID)
 	})
 }
 

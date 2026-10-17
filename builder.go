@@ -16,7 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/urlkit"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec"
@@ -495,7 +495,7 @@ func (r *RequestBuilder) SetForceContentType(mime string) *RequestBuilder {
 
 // SetForceJSON forces response parsing as JSON regardless of Content-Type headers.
 func (r *RequestBuilder) SetForceJSON() *RequestBuilder {
-	return r.SetForceContentType(header.MIMEApplicationJSON)
+	return r.SetForceContentType(headkit.MIMEApplicationJSON)
 }
 
 // SetLabel attaches a human-readable metric or route label.

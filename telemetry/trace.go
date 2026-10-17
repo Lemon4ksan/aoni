@@ -25,7 +25,6 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
-	"github.com/lemon4ksan/aoni/tls/ja4"
 )
 
 // TrafficInspector captures and records fine-grained request traces, headers, and JA4 signatures
@@ -80,7 +79,7 @@ type TraceInfo struct {
 	CertChain        *probe.CertChainInfo
 	Probe            *probe.FullReport
 	PeerCertificates []*x509.Certificate
-	JA4              *ja4.Report
+	JA4              any
 
 	DNSStart     time.Time
 	ConnectStart time.Time

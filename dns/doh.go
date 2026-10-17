@@ -17,7 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/randkit"
 	"github.com/lemon4ksan/foundation/net/dns/svcb"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -180,7 +180,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader(header.Accept, DoHMediaType)
+	req.SetHeader(headkit.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -188,12 +188,12 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader(header.ContentType, DoHMediaType)
+		req.SetHeader(headkit.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader(header.Host, r.Host)
+		req.SetHeader(headkit.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)
@@ -226,7 +226,7 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetHeader(header.Accept, DoHMediaType)
+	req.SetHeader(headkit.Accept, DoHMediaType)
 
 	if r.Method == DoHMethodGet {
 		req.SetMethod(http.MethodGet)
@@ -234,12 +234,12 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
-		req.SetHeader(header.ContentType, DoHMediaType)
+		req.SetHeader(headkit.ContentType, DoHMediaType)
 		req.SetBodyBytes(wireQuery)
 	}
 
 	if r.Host != "" {
-		req.SetHeader(header.Host, r.Host)
+		req.SetHeader(headkit.Host, r.Host)
 	}
 
 	resp, err := r.doer.Do(req)

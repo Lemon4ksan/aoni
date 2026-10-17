@@ -53,7 +53,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/tls/ja4"
+	"github.com/lemon4ksan/aoni-browser/fingerprint/ja4"
 	browser "github.com/lemon4ksan/aoni-browser/option"
 )
 

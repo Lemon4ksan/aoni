@@ -27,7 +27,7 @@ import (
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -106,7 +106,7 @@ func (s *Stream) ContentLength() int64 {
 
 // ContentType returns Content-Type response header value.
 func (s *Stream) ContentType() string {
-	return s.resp.Header.Get(header.ContentType)
+	return s.resp.Header.Get(headkit.ContentType)
 }
 
 // StatusCode returns HTTP status code.
@@ -509,12 +509,12 @@ func buildSSERequestModifiers(
 
 	total := baseCount + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithHeader(header.Accept, header.MIMETextEventStream)
-		stackBuf[1] = mod.WithHeader(header.CacheControl, header.ValueNoCache)
+		stackBuf[0] = mod.WithHeader(headkit.Accept, headkit.MIMETextEventStream)
+		stackBuf[1] = mod.WithHeader(headkit.CacheControl, headkit.ValueNoCache)
 
-		stackBuf[2] = mod.WithHeader(header.Connection, header.ValueKeepAlive)
+		stackBuf[2] = mod.WithHeader(headkit.Connection, headkit.ValueKeepAlive)
 		if lastEventID != "" {
-			stackBuf[3] = mod.WithHeader(header.LastEventID, lastEventID)
+			stackBuf[3] = mod.WithHeader(headkit.LastEventID, lastEventID)
 		}
 
 		copy(stackBuf[baseCount:], mods)
@@ -523,12 +523,12 @@ func buildSSERequestModifiers(
 	}
 
 	res := make([]aoni.RequestModifier, total)
-	res[0] = mod.WithHeader(header.Accept, header.MIMETextEventStream)
-	res[1] = mod.WithHeader(header.CacheControl, header.ValueNoCache)
+	res[0] = mod.WithHeader(headkit.Accept, headkit.MIMETextEventStream)
+	res[1] = mod.WithHeader(headkit.CacheControl, headkit.ValueNoCache)
 
-	res[2] = mod.WithHeader(header.Connection, header.ValueKeepAlive)
+	res[2] = mod.WithHeader(headkit.Connection, headkit.ValueKeepAlive)
 	if lastEventID != "" {
-		res[3] = mod.WithHeader(header.LastEventID, lastEventID)
+		res[3] = mod.WithHeader(headkit.LastEventID, lastEventID)
 	}
 
 	copy(res[baseCount:], mods)

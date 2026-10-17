@@ -7,7 +7,7 @@ package fast
 import (
 	"crypto/tls"
 
-	coreh3 "github.com/lemon4ksan/mach/proto/h3"
+	"github.com/lemon4ksan/mach/proto/h3"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -38,7 +38,7 @@ func WithH3() Option {
 }
 
 // WithH3Settings configures HTTP/3 protocol parameters.
-func WithH3Settings(settings *coreh3.Settings) Option {
+func WithH3Settings(settings *h3.Settings) Option {
 	return func(c *aoni.Config) {
 		c.Engine.H3Settings = settings
 	}

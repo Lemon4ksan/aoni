@@ -21,9 +21,10 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/urlkit"
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -839,8 +840,8 @@ func (c *Client) ensureUserAgent() {
 		c.cfg.Defaults.Headers = make(http.Header)
 	}
 
-	if c.cfg.Defaults.Headers.Get(header.UserAgent) == "" {
-		c.cfg.Defaults.Headers.Set(header.UserAgent, DefaultUserAgent)
+	if c.cfg.Defaults.Headers.Get(headkit.UserAgent) == "" {
+		c.cfg.Defaults.Headers.Set(headkit.UserAgent, DefaultUserAgent)
 	}
 }
 
@@ -850,11 +851,7 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return urlkit.Parse(path)
 	}
 
-	if urlkit.IsAbsURL(path) {
-		return urlkit.Parse(path)
-	}
-
-	return c.prepared.BaseURL.JoinPath(path), nil
+	return requestutil.ResolveURL(c.prepared.BaseURL, path)
 }
 
 func (c *Client) applyConfig(cfg Config) {

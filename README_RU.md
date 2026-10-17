@@ -367,7 +367,6 @@ aoni/
 ├── mod/          // Модификаторы запросов (mod.WithVar, mod.WithHeader, mod.WithJSON...)
 ├── fast/         // Высокопроизводительный движок fasthttp (2.12M+ RPS zero-alloc пайплайн)
 ├── middleware/   // Компонуемые перехватчики запросов и ответов (Retry, RateLimit, Recover...)
-├── tunnel/       // L3/L4 туннелирование: SSH Jump Hosts & MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Прокси-изолированные куки, формат Netscape, сортировка по RFC 6265
 ├── netutil/      // Ротатор прокси, DoH/DoT/DoQ DNS резолверы, PAC движок, NIK, Early Hints
 ├── codec/        // Декодеры ответов (JSON, Proto, gRPC-Web, XML) и кодирование параметров
@@ -381,7 +380,7 @@ aoni/
 Архитектура проекта `aoni` следует принципу микроядра: базовый движок навечно зафиксирован на стандартах IETF RFC и W3C без лишней бизнес-логики, а предметные расширения вынесены в специализированные репозитории-сателлиты:
 
 - **[`aoni-browser`](https://github.com/lemon4ksan/aoni-browser)**: The Stealth Shield — pure-Go эмуляция TLS ClientHello (uTLS), генерация и спуфинг отпечатков JA3/JA4/JA4H, TCP/IP p0f стек, CDN-паддинг и полная маскировка под браузеры (Chrome, Firefox, Safari).
-- **[`aoni-contrib`](https://github.com/lemon4ksan/aoni-contrib)**: Расширения экосистемы — адаптеры протоколов и интеграции: OpenTelemetry (`aoni-contrib/otel`), Socket.IO v5 / Engine.IO v4 (`aoni-contrib/socketio`), OAuth2/PKCE/DPoP и GeoIP MMDB.
+- **[`aoni-contrib`](https://github.com/lemon4ksan/aoni-contrib)**: Расширения экосистемы — адаптеры протоколов и интеграции: L3 TUN и MASQUE туннелирование (`aoni-contrib/tunnel`), OpenTelemetry (`aoni-contrib/otel`), Socket.IO v5 / Engine.IO v4 (`aoni-contrib/socketio`), OAuth2/PKCE/DPoP и GeoIP MMDB.
 - **[`vortex`](https://github.com/lemon4ksan/vortex)**: Статический анализатор и генератор кода — AST borrow checker для контроля безопасности памяти арендованных буферов, генератор клиентов по OpenAPI 3.1, AsyncAPI и Protobuf.
 - **[`ao`](https://github.com/lemon4ksan/ao)**: Высокоскоростной форк `curl` на базе `libaoni` (`lib/aoni_bridge.c`), выдающий 9 145+ RPS на 100 параллельных потоках на чистом Си.
 - **[`discordgo-aoni`](https://github.com/lemon4ksan/discordgo-aoni)**: Высокоэффективный форк `discordgo` с сетевым транспортом на базе `aoni` и `aoni/realtime/ws`.

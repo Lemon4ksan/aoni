@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	header "github.com/lemon4ksan/mach/proto/headkit"
+	"github.com/lemon4ksan/mach/proto/headkit"
 )
 
 // Preconnecter defines an interface for clients capable of proactive TCP/TLS preconnecting
@@ -97,7 +97,7 @@ func ParseLinksFromHeaders(headers http.Header) []Link {
 	}
 
 	var allLinks []Link
-	for _, val := range headers[header.Link] {
+	for _, val := range headers[headkit.Link] {
 		links := ParseLinkHeader(val)
 		allLinks = append(allLinks, links...)
 	}
