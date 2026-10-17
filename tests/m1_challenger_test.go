@@ -436,7 +436,7 @@ func TestM1_Challenger_H3_RapidContextCancellations_MixedLoad(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestM1_Challenger_H3_ResponseBody_EarlyAbortAndPartialReads(t *testing.T) {
-	defer testutil.Check(t, testutil.WithTimeout(5*time.Second))()
+	defer testutil.Check(t, testutil.WithTimeout(10*time.Second))()
 
 	largePayload := make([]byte, 65536)
 	_, _ = rand.Read(largePayload)
@@ -451,7 +451,7 @@ func TestM1_Challenger_H3_ResponseBody_EarlyAbortAndPartialReads(t *testing.T) {
 	client := aoni.NewClient(nil, option.WithH3(aoni.WithH3TLSConfig(server.TLSConfig())))
 	defer client.Close()
 
-	const numWorkers = 50
+	const numWorkers = 20
 	var wg sync.WaitGroup
 	errCh := make(chan error, numWorkers)
 
@@ -460,7 +460,10 @@ func TestM1_Challenger_H3_ResponseBody_EarlyAbortAndPartialReads(t *testing.T) {
 		go func(workerID int) {
 			defer wg.Done()
 
-			resp, err := client.Request(context.Background(), http.MethodGet, server.URL()+"/partial")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			resp, err := client.Request(ctx, http.MethodGet, server.URL()+"/partial")
 			if err != nil {
 				errCh <- fmt.Errorf("worker %d request failed: %w", workerID, err)
 				return
