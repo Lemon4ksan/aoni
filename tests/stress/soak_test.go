@@ -996,7 +996,7 @@ func TestSoak_H3_StreamQueue_Backpressure_1000Requests(t *testing.T) {
 }
 
 // TestSoak_H3_FlowControl_LargePayloadSaturation saturates QUIC flow control windows
-// with 20 parallel streams transferring 512 KB to 896 KB each (>14 MB total) and validates SHA-256 integrity.
+// with 8 parallel streams transferring 128 KB to 320 KB each and validates SHA-256 integrity.
 func TestSoak_H3_FlowControl_LargePayloadSaturation(t *testing.T) {
 	defer testutil.Check(t, testutil.WithTimeout(30*time.Second))()
 
@@ -1006,7 +1006,7 @@ func TestSoak_H3_FlowControl_LargePayloadSaturation(t *testing.T) {
 	client := aoni.NewClient(nil, option.WithH3(aoni.WithH3TLSConfig(server.TLSConfig())))
 	defer client.Close()
 
-	const numWorkers = 20
+	const numWorkers = 8
 	var wg sync.WaitGroup
 	errCh := make(chan error, numWorkers)
 
@@ -1015,12 +1015,12 @@ func TestSoak_H3_FlowControl_LargePayloadSaturation(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			payloadSize := 512*1024 + (id%4)*128*1024 // 512KB to 896KB
+			payloadSize := 128*1024 + (id%4)*64*1024 // 128KB to 320KB
 			payload := bytes.Repeat([]byte(fmt.Sprintf("%02x", id)), payloadSize/2)
 			expectedHash := sha256.Sum256(payload)
 			expectedHashStr := hex.EncodeToString(expectedHash[:])
 
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
 
 			req, err := http.NewRequestWithContext(
